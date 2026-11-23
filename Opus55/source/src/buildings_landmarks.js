@@ -111,7 +111,7 @@ export function prepareLots(world) {
 
 // Goods on a stall counter (top at y). (ux,uz) runs along the counter, (fx,fz) points from the stall to the lane.
 function stallGoods(B, R, x, z, y, a, ux, uz, fx, fz) {
-  const kind = Math.floor(R() * 5);
+  const kind = Math.floor(R() * 6);
   const at = (u, f) => [x + ux * u - fx * f, z + uz * u - fz * f];
   if (kind === 0) {
     // hanging carpets on the canopy front, a few rolled ones standing on the counter
@@ -155,6 +155,16 @@ function stallGoods(B, R, x, z, y, a, ux, uz, fx, fz) {
         }
       }
     }
+  } else if (kind === 5) {
+    // two big pots on glowing burners (noodles, hotpot), lids ajar, ladle
+    for (const u of [-0.8, 0.8]) {
+      const [px, pz] = at(u, 0.1);
+      B.prop({ x: px, y0: y, z: pz, hw: 0.36, h: 0.08, kind: 2, prm: 12, mat: MAT.EMIT, col: [1, 0.3, 0.06], param: 4, winW: 2 });
+      B.prop({ x: px, y0: y + 0.08, z: pz, hw: 0.32, h: 0.42, kind: 2, prm: 16, mat: MAT.METAL, col: [0.5, 0.48, 0.45] });
+      B.prop({ x: px + ux * 0.05, y0: y + 0.5, z: pz + uz * 0.05, hw: 0.3, h: 0.06, kind: 2, prm: 16, prof: 1, mat: MAT.METAL, col: [0.6, 0.58, 0.55] });
+      // steam: a faint warm glow column above the pot
+      B.prop({ x: px, y0: y + 0.6, z: pz, hw: 0.18, h: 0.7, kind: 2, prm: 8, prof: 2, taper: 1.6, mat: MAT.EMIT, col: [0.5, 0.45, 0.4], param: 0.35 });
+    }
   } else {
     // bowls and ceramics, plus a lit brass lamp
     for (let k = 0; k < 7; k++) {
@@ -182,11 +192,21 @@ export function genMarket(B, R, world, market) {
       const g = world.heightAt(x, z);
       const a = ang;
       // counter, canopy, goods, lantern
-      B.prop({ x, y0: g - 0.5, z, a, hw: 2.1, hd: 1.0, h: 1.5, mat: MAT.CONCRETE, col: [0.3, 0.22, 0.16] });
+      B.prop({ x, y0: g - 0.5, z, a, hw: 2.1, hd: 1.0, h: 1.5, mat: MAT.FELT, col: [0.32, 0.2, 0.12], param: 0.4, seed: R() * 999 });
       const [cx, cz] = [x - px * side * 0.3, z - pz * side * 0.3];
       B.part({ x: cx, y0: g + 2.35, z: cz, a, hw: 1.9, hd: 1.3, h: 0.7, taper: 0.5, mat: MAT.CONCRETE, col: fabric[Math.floor(R() * fabric.length)], param: 2.2, flags: FLAG.BOTTOM });
       for (const o of [-2.2, 2.2]) B.prop({ x: x + ux * o, y0: g, z: z + uz * o, hw: 0.07, h: 2.6, kind: 2, prm: 8, mat: MAT.METAL, col: [0.2, 0.2, 0.2] });
       stallGoods(B, R, x, z, g + 1.0, a, ux, uz, px * side, pz * side);
+      // counter front (lane side, -p*side): woven drape or painted boards, and a lit price board
+      const fx = x - px * side * 1.03, fz = z - pz * side * 1.03;
+      if (R() < 0.7) B.prop({ x: fx, y0: g + 0.1, z: fz, a, hw: 2.0, hd: 0.02, h: 0.85, mat: R() < 0.5 ? MAT.CARPET : MAT.FELT, col: fabric[Math.floor(R() * fabric.length)], param: 0.4, seed: R() * 999 });
+      else B.prop({ x: fx, y0: g + 0.1, z: fz, a, hw: 2.0, hd: 0.02, h: 0.85, mat: MAT.TILE, col: [0.1, 0.32, 0.36], param: -1, seed: R() * 999 });
+      B.slot(x - px * side * 1.06 + ux * 1.4, g + 1.35, z - pz * side * 1.06 + uz * 1.4, -px * side, -pz * side, 0.9, 0.5, false, DT.STEPPE);
+      // textiles hanging from the canopy front on some stalls
+      if (R() < 0.5) for (let k = 0; k < 4; k++) {
+        const hx = x - px * side * 1.5 + ux * (-1.5 + k), hz = z - pz * side * 1.5 + uz * (-1.5 + k);
+        B.prop({ x: hx, y0: g + 1.6, z: hz, a, hw: 0.3, hd: 0.02, h: 0.75, mat: MAT.FELT, col: fabric[(k + Math.floor(R() * 5)) % fabric.length], param: 0.5, seed: R() * 999 });
+      }
       // hanging lamp on a cord under the canopy
       const lx = x - px * side * 1.2, lz = z - pz * side * 1.2;
       B.prop({ x: lx, y0: g + 1.85, z: lz, hw: 0.24, h: 0.5, kind: 2, prm: 16, prof: 2, mat: MAT.EMIT, col: [1, 0.55, 0.18], param: 6, winW: 2 });
@@ -532,7 +552,7 @@ function stilts(B, R, L, world) {
       const inland = k * 7.5;
       const [bx, bz] = Builder.tw(c.x, c.z, a, 0, inland + 2);
       const bw = 5.2 + R() * 2.2, bd = 4.2 + 0.3 * k;
-      B.part({ x: bx, y0: k === 0 ? y : Math.max(y - 30, -1), z: bz, a, hw: bw, hd: bd, h: k === 0 ? h : h + (y - Math.max(y - 30, -1)), mat: MAT.WOOD, col: wood, floorH: fl, winW: 2.4, baseY: 7, param: 1.1 + R() * 0.4, seed: R() * 999, solid: true });
+      B.part({ x: bx, y0: k === 0 ? y : Math.max(y - 30, -1), z: bz, a, hw: bw, hd: bd, h: k === 0 ? h : h + (y - Math.max(y - 30, -1)), mat: MAT.WOOD, col: wood, floorH: fl, winW: 1.6, baseY: 7, param: 1.1 + R() * 0.4, seed: R() * 999, solid: true });
       y += h;
       // overhanging upturned roof with glowing eaves
       B.part({ x: bx, y0: y - 0.25, z: bz, a, hw: bw + 1.7, hd: bd + 1.7, h: 3.2, prof: 4, taper: 0.2, mat: MAT.ROOFTILE, col: roofC, param: 2.2, flags: FLAG.BOTTOM });

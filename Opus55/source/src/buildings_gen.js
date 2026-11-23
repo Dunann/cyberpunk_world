@@ -126,7 +126,7 @@ function acUnits(B, R, x, z, a, hw, hd, y0, baseY, top, floorH, winW, density) {
       const lz = F.sz + F.dz * (k + 0.5) * cw + F.dz * side + F.nz * 0.32;
       const wx = x + lx * c - lz * s, wz = z + lx * s + lz * c;
       const y = baseY + fl * floorH + 0.1 * floorH;
-      if (B.prop({ x: wx, y0: y, z: wz, a: ang, hw: 0.42, hd: 0.3, h: 0.55, mat: MAT.CONCRETE, col: [0.5, 0.5, 0.47], flags: FLAG.BOTTOM, seed: R() * 999 }) < 0) return;
+      if (B.prop({ x: wx, y0: y, z: wz, a: ang, hw: 0.42, hd: 0.3, h: 0.55, mat: MAT.AC, col: [0.55, 0.55, 0.52], flags: FLAG.BOTTOM, seed: R() * 999 }) < 0) return;
     }
   }
 }
@@ -177,6 +177,7 @@ function crown(B, R, o) {
       waterTank(B, R, tx, tz, top);
     }
     if (!capped && R() < 0.4) { const [mx, mz] = Builder.tw(x, z, a, hw * 0.5, -hd * 0.5); mast(B, R, mx, mz, top, 8 + R() * 10, 0.25); }
+    roofDress(B, R, x, z, a, hw, hd, top, kind, prm, o);
     return top + 6;
   }
   if (type === 'lit') {
@@ -245,10 +246,81 @@ function crown(B, R, o) {
   }
   if (type === 'billboard') {
     const w = Math.min(Math.max(hw, hd) * 1.6, 22);
+    roofDress(B, R, x, z, a, hw, hd, top, kind, prm, o);
     billboard(B, R, x, z, top, a + (R() < 0.5 ? 0 : Math.PI / 2), w, w * (0.3 + R() * 0.2), style);
     return top + w * 0.5;
   }
+  if (type === 'setback') {
+    // one or two smaller office storeys set back from the edge, plant on the top one
+    let y = top, s = 0.72;
+    const n = 1 + (R() < 0.5 ? 1 : 0);
+    for (let t = 0; t < n; t++) {
+      const h = 7 + R() * 5;
+      B.part({ x, y0: y, z, a, hw: hw * s, hd: hd * s, h, kind, prm, mat: MAT.OFFICE, col: [0.2, 0.2, 0.22], floorH: 3.6, winW: 3, baseY: y, param: 0.3, seed: R() * 999 });
+      roofDress(B, R, x, z, a, hw * s, hd * s, y, kind, prm, o, true);
+      y += h; s *= 0.7;
+    }
+    roofDress(B, R, x, z, a, hw * s / 0.7, hd * s / 0.7, y, kind, prm, o);
+    return y + 3;
+  }
+  if (type === 'antennas') {
+    // telecom cluster: a few masts of different heights on a plant room, each with warning lights
+    B.part({ x, y0: top, z, a, hw: hw * 0.3, hd: hd * 0.3, h: 3.5, mat: MAT.CONCRETE, col: [0.22, 0.22, 0.24] });
+    const n = 3 + Math.floor(R() * 3);
+    let hi = top;
+    for (let i = 0; i < n; i++) {
+      const [mx, mz] = Builder.tw(x, z, a, (R() - 0.5) * hw * 1.3, (R() - 0.5) * hd * 1.3);
+      const h = (capped ? 4 : 8) + R() * (capped ? 4 : 18);
+      mast(B, R, mx, mz, top, h, 0.15 + R() * 0.2);
+      hi = Math.max(hi, top + h);
+    }
+    roofDress(B, R, x, z, a, hw, hd, top, kind, prm, o, true);
+    return hi;
+  }
+  if (type === 'garden') {
+    // roof garden: planting bed, small trees, a pergola strung with warm lights
+    const gw = hw * 0.8, gd = hd * 0.8;
+    B.part({ x, y0: top, z, a, hw: gw, hd: gd, h: 0.6, kind, prm, mat: MAT.CONCRETE, col: [0.05, 0.09, 0.045], flags: FLAG.NOWIN });
+    const n = 3 + Math.floor(R() * 4);
+    for (let i = 0; i < n; i++) {
+      const [tx, tz] = Builder.tw(x, z, a, (R() - 0.5) * gw * 1.6, (R() - 0.5) * gd * 1.6);
+      const r = 1.0 + R() * 1.2;
+      B.prop({ x: tx, y0: top + 0.6, z: tz, hw: 0.12, h: 1.2, kind: 2, prm: 6, mat: MAT.CONCRETE, col: [0.12, 0.08, 0.05] });
+      B.prop({ x: tx, y0: top + 1.4, z: tz, hw: r, hd: r, h: r * 1.6, kind: 2, prm: 8, prof: 2, mat: MAT.CONCRETE, col: [0.06, 0.16, 0.07], seed: R() * 999 });
+    }
+    const [px, pz] = Builder.tw(x, z, a, gw * 0.4, -gd * 0.4);
+    B.prop({ x: px, y0: top + 2.6, z: pz, a, hw: Math.min(4, gw * 0.4), hd: Math.min(3, gd * 0.4), h: 0.12, mat: MAT.EMIT, col: [1, 0.7, 0.35], param: 1.2, flags: FLAG.BOTTOM });
+    if (top > 55) roofDress(B, R, x, z, a, hw, hd, top, kind, prm, o, true);
+    return top + 4;
+  }
   return top;
+}
+
+// Roof clutter shared by flat roof types: AC plant (a grid of units), sometimes a neon edge, and
+// aircraft-warning lights at two corners of tall roofs. noNeon: skip the edge neon (e.g. lower setbacks).
+function roofDress(B, R, x, z, a, hw, hd, top, kind, prm, o, noNeon = false) {
+  if (B.q === 0) return;
+  // AC plant: one or two rows of units (one part each; the shader draws a fan per 1.2 m)
+  const rows = hd > 9 ? 2 : 1;
+  const len = Math.min(hw * 1.1, 6 + R() * 6);
+  const ox = (R() - 0.5) * (hw - len / 2) * 0.8;
+  for (let j = 0; j < rows; j++) {
+    const [ux, uz] = Builder.tw(x, z, a, ox, (j - (rows - 1) / 2) * 2.6 + (R() - 0.5) * hd * 0.4);
+    B.prop({ x: ux, y0: top, z: uz, a, hw: len / 2, hd: 0.6, h: 1.1, mat: MAT.AC, col: [0.42, 0.43, 0.44], seed: R() * 999 });
+  }
+  if (!noNeon && kind !== 2 && R() < 0.22) {
+    const col = pick(R, PAL.neon);
+    for (const [lx, lz, ex, ez] of [[0, hd, hw, 0.06], [0, -hd, hw, 0.06], [hw, 0, 0.06, hd], [-hw, 0, 0.06, hd]]) {
+      const [px, pz] = Builder.tw(x, z, a, lx, lz);
+      B.prop({ x: px, y0: top + 0.9, z: pz, a, hw: ex, hd: ez, h: 0.14, mat: MAT.EMIT, col, param: 3, flags: FLAG.BOTTOM });
+    }
+  }
+  if (top - B.world.heightAt(x, z) > 50) {
+    for (const [sx, sz] of [[1, 1], [-1, -1]]) {
+      const [ax, az] = Builder.tw(x, z, a, sx * hw * 0.9, sz * hd * 0.9);
+      aviation(B, ax, top, az, R() * 999);
+    }
+  }
 }
 
 // Choose podium and sign slots for a lot. Returns podium top.
@@ -322,7 +394,7 @@ function shopfrontFaces(B, R, L, cx, cz, hw, hd, seed, top, hill) {
       }
       if (R() < 0.35 && top - gb > 6) {
         const u = (R() - 0.5) * bw * 0.6;
-        B.prop({ x: mx + tx * u + nx * 0.32, y0: gb + 4.72, z: mz + tz * u + nz * 0.32, a: ang, hw: 0.42, hd: 0.3, h: 0.55, mat: MAT.CONCRETE, col: [0.5, 0.5, 0.47], flags: FLAG.BOTTOM, seed: R() * 999 });
+        B.prop({ x: mx + tx * u + nx * 0.32, y0: gb + 4.72, z: mz + tz * u + nz * 0.32, a: ang, hw: 0.42, hd: 0.3, h: 0.55, mat: MAT.AC, col: [0.55, 0.55, 0.52], flags: FLAG.BOTTOM, seed: R() * 999 });
       }
     }
     // stepped pavement and kerb handrail on sloping hillside streets
@@ -330,14 +402,20 @@ function shopfrontFaces(B, R, L, cx, cz, hw, hd, seed, top, hill) {
     if (hill && slope > 0.09) {
       const ns = Math.min(60, Math.max(2, Math.floor(F.len / Math.min(3.0, Math.max(1.5, 0.3 / slope)))));
       const rl = F.len / ns;
+      const gs = [];
+      for (let k = 0; k <= ns; k++) gs.push(gOut(k * rl, 1.4));
+      const topOf = (k) => Math.max(gs[k], gs[Math.min(k + 1, ns)]) + 0.04;
       for (let k = 0; k < ns; k++) {
-        const ga = gOut(k * rl, 1.4), gb2 = gOut((k + 1) * rl, 1.4);
-        const yt = Math.max(ga, gb2) + 0.04, yb = Math.min(ga, gb2) - 0.6;
+        const yt = topOf(k), yb = Math.min(gs[k], gs[k + 1]) - 0.6;
         const tm = (k + 0.5) * rl;
         const sx = x0 + tx * tm, sz = z0 + tz * tm;
         if (B.prop({ x: sx + nx * 1.45, y0: yb, z: sz + nz * 1.45, a: ang, hw: rl / 2 + 0.01, hd: 1.35, h: yt - yb, mat: MAT.CONCRETE, col: [0.3, 0.29, 0.28], seed: R() * 999 }) < 0) return;
-        B.prop({ x: sx + nx * 2.95, y0: yt + 0.95, z: sz + nz * 2.95, a: ang, hw: rl / 2 + 0.03, hd: 0.035, h: 0.05, mat: MAT.METAL, col: [0.55, 0.56, 0.58] });
-        if (k % 3 === 2) B.prop({ x: sx + tx * (rl / 2 - 0.05) + nx * 2.95, y0: yt, z: sz + tz * (rl / 2 - 0.05) + nz * 2.95, hw: 0.035, h: 1.0, kind: 2, prm: 6, mat: MAT.METAL, col: [0.3, 0.3, 0.32] });
+        // handrail: one bar over each pair of steps, a post every fourth step
+        if (k % 2 === 0) {
+          const k2 = Math.min(k + 1, ns - 1), tr = (k + (k2 - k + 1) / 2) * rl;
+          B.prop({ x: x0 + tx * tr + nx * 2.95, y0: Math.max(yt, topOf(k2)) + 0.95, z: z0 + tz * tr + nz * 2.95, a: ang, hw: (k2 - k + 1) * rl / 2 + 0.03, hd: 0.035, h: 0.05, mat: MAT.METAL, col: [0.55, 0.56, 0.58] });
+        }
+        if (k % 4 === 3) B.prop({ x: sx + tx * (rl / 2 - 0.05) + nx * 2.95, y0: yt, z: sz + tz * (rl / 2 - 0.05) + nz * 2.95, hw: 0.035, h: 1.0, kind: 2, prm: 6, mat: MAT.METAL, col: [0.3, 0.3, 0.32] });
       }
     }
   }
@@ -573,8 +651,9 @@ function tower(B, R, o) {
   return { top: y, hw, hd, kind, prm };
 }
 
-const CROWNS_RES = ['machine', 'machine', 'machine', 'lit', 'pagoda', 'antenna', 'billboard'];
-const CROWNS_CBD = ['lit', 'lit', 'spire', 'helipad', 'antenna', 'spire', 'machine'];
+// roof types; the tiered lit crown is kept to about one roof in eight
+const CROWNS_RES = ['machine', 'machine', 'setback', 'garden', 'antennas', 'billboard', 'pagoda', 'lit'];
+const CROWNS_CBD = ['lit', 'spire', 'helipad', 'antenna', 'setback', 'machine', 'antennas', 'garden', 'billboard'];
 
 // ------------------------------------------------------------------ districts
 
