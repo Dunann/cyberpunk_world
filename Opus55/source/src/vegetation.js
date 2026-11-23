@@ -10,7 +10,7 @@
 
 import { buildTreeMeshes, SPECIES, LODS } from './vegMeshes.js';
 import { THEIGHT_WGSL, STREET_WGSL } from './terrainShade.js';
-import { LANDMARKS, BRIDGES, ROUTES, CABLEWAY, MONORAIL_STATION, DISTRICTS } from './world.js';
+import { LANDMARKS, BRIDGES, ROUTES, CABLEWAY, MONORAIL_STATION, DISTRICTS, POSES } from './world.js';
 import { TERRAIN, INFO } from './common.js';
 import { rng } from './math.js';
 
@@ -35,6 +35,7 @@ struct VegU { ringA: vec4f, ringB: vec4f, p: vec4f, lod: vec4f };
 @group(1) @binding(7) var<uniform> VU: VegU;
 @group(1) @binding(8) var lsamp: sampler;
 ${THEIGHT_WGSL}
+${STREET_WGSL}
 
 const CAP = ${CAP}u;
 
@@ -71,6 +72,10 @@ fn place(p: vec2f, h4: vec4f, far: bool) {
     let info = worldInfo(p);
     if (info.x < 6.0) { return; }
     if (roadMask(p) > 0.02) { return; }
+    let di = i32(info.y + 0.5);
+    if (di >= 0 && di < i32(W.count.x) && info.z > 0.16) {
+      if (W.d[di].b.y > 0.0) { let rd = roadLayout(p, di); if (abs(rd.across) < rd.hw + 3.5) { return; } }
+    }
   }
   let d = distance(vec3f(p.x, h, p.y), F.camPos.xyz);
   // species
@@ -190,7 +195,9 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   let s = T.a.w;
   let r = rot2(T.b.x);
   let lxz = r * pos.xz;
-  let local = vec3f(lxz.x, pos.y, lxz.y) * s;
+  // silhouette variety: some crowns taller and narrower, some broader
+  let sq = 0.85 + 0.3 * fract(T.b.y * 3.7);
+  let local = vec3f(lxz.x / sq, pos.y * sq, lxz.y / sq) * s;
   let sp = T.b.z;
   let amp = select(select(0.3, 0.8, sp == 2.0), 0.55, sp == 3.0) * sway * s;
   let ph = T.b.y * 40.0 + T.a.x * 0.02;
@@ -216,16 +223,18 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   return o;
 }
 
-// Alpha-tested leaf cards (separate pipeline so the opaque parts keep full early-z).
+// Leaf-cluster cards: a soft lumpy disc, solid inside with a dithered fringe that TAA resolves into a soft,
+// anti-aliased edge (no holes, no ragged cut-outs). Separate pipeline so the opaque parts keep full early-z.
 @fragment fn fs(i: VOut, @builtin(front_facing) ff: bool) -> GOut {
   let dUx = dpdx(i.uv); let dUy = dpdy(i.uv);
   let hsh = i.info.y;
-  let k = 0.3;
+  let k = 0.22;
   let q = i.uv * k + vec2f(hsh * 0.37 + i.lp.x * 0.05, hsh * 0.71 + i.lp.z * 0.05);
   let N = textureSampleGrad(tNoise, sRep, q, dUx * k, dUy * k);
-  let m = N.g * 1.3 + N.b * 0.45 - length(i.uv) * 0.9;
-  if (m < 0.42) { discard; }
-  return shadeTree(i, ff, vec4f(N.rgb, saturate((m - 0.42) * 4.0)), vec2f(0.0), vec2f(0.0));
+  let r = length(i.uv) * (0.92 + 0.5 * (N.g - 0.5));
+  let a = 1.0 - smoothstep(0.5, 1.0, r);
+  if (a < ign(i.pos.xy, F.params.y)) { discard; }
+  return shadeTree(i, ff, vec4f(N.rgb, N.g), vec2f(0.0), vec2f(0.0));
 }
 @fragment fn fsOpaque(i: VOut, @builtin(front_facing) ff: bool) -> GOut {
   let dLx = dpdx(i.lp.xz) * 0.12; let dLy = dpdy(i.lp.xz) * 0.12;
@@ -234,11 +243,12 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
 fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
   let sp = i.info.x; let hsh = i.info.y; let part = i.info.z;
   var n = normalize(i.n);
-  var albedo: vec3f; var rough = 0.7; var mat = 1.0; var ao = 1.0;
+  let v = normalize(F.camPos.xyz - i.wp);
+  var albedo: vec3f; var rough = 0.7; var mat = 1.0; var ao = 1.0; var emis = vec3f(0.0);
   if (part < 0.5) {
     if (!ff) { n = -n; }
     // bark / bamboo culm
-    albedo = select(vec3f(0.05, 0.04, 0.032), vec3f(0.075, 0.08, 0.035), sp == 2.0);
+    albedo = select(vec3f(0.06, 0.048, 0.038), vec3f(0.08, 0.085, 0.038), sp == 2.0);
     let ring = sin(i.wp.y * select(9.0, 2.2, sp == 2.0)) * 0.5 + 0.5;
     albedo *= 0.75 + 0.35 * ring;
     rough = select(0.8, 0.4, sp == 2.0);
@@ -248,7 +258,7 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
     var leaf = 0.5;
     if (part > 1.5) {
       leaf = card.a;
-      n = normalize(n + vec3f(card.r - 0.5, 0.0, card.b - 0.5) * 0.9);
+      n = normalize(n + vec3f(card.r - 0.5, 0.0, card.b - 0.5) * 0.7);
     } else {
       if (!ff) { n = -n; }
       let q = i.lp.xz * 0.12 + i.lp.y * 0.05 + hsh;
@@ -256,16 +266,27 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
       n = normalize(n + vec3f(N.r - 0.5, N.g - 0.5, N.b - 0.5) * 1.2);
       leaf = N.g;
     }
-    let base = array<vec3f, 4>(vec3f(0.055, 0.088, 0.034), vec3f(0.032, 0.058, 0.040), vec3f(0.075, 0.105, 0.036), vec3f(0.080, 0.105, 0.040));
-    albedo = base[u32(sp)];
-    albedo *= mix(vec3f(0.85, 1.0, 0.9), vec3f(1.2, 1.1, 0.78), fract(hsh * 13.7));
-    albedo *= 0.7 + 0.6 * leaf;
+    // per-tree colour: several greens, some yellow-green and blue-green, a few reddish new-leaf camphors
+    let hv = fract(hsh * 7.13);
+    var c = vec3f(0.045, 0.078, 0.032);
+    if (hv > 0.4) { c = vec3f(0.058, 0.084, 0.033); }
+    if (hv > 0.65) { c = vec3f(0.036, 0.068, 0.048); }
+    if (hv > 0.85) { c = vec3f(0.055, 0.066, 0.038); }
+    if (hv > 0.97) { c = vec3f(0.07, 0.055, 0.04); }
+    if (sp == 1.0) { c = vec3f(0.028, 0.055, 0.045); }
+    if (sp == 2.0) { c = vec3f(0.075, 0.105, 0.036); }
+    if (sp == 3.0) { c = vec3f(0.085, 0.11, 0.045); }
+    albedo = c * (0.8 + 0.45 * fract(hsh * 23.1)) * (0.75 + 0.55 * leaf);
     // self-shadowing: darker toward the inside and the bottom of the crown
     let h = (i.wp.y - i.info.w) / max(select(13.0, 14.0, sp == 1.0), 1.0);
-    ao = saturate(0.3 + 0.8 * saturate(h - 0.25)) * mix(0.55, 1.0, saturate(n.y * 0.5 + 0.5)) * select(0.7 + 0.3 * leaf, 0.6, part < 1.5);
+    let top = saturate(n.y * 0.5 + 0.5);
+    ao = saturate(0.35 + 0.75 * saturate(h - 0.25)) * mix(0.6, 1.0, top) * select(0.75 + 0.25 * leaf, 0.65, part < 1.5);
     rough = 0.72;
+    // soft sky fill on the upper crown and a cool rim where the crown turns away from the viewer
+    emis = albedo * vec3f(0.5, 0.62, 0.9) * (0.12 + 0.35 * top) * ao;
+    emis += vec3f(0.045, 0.06, 0.09) * pow(1.0 - saturate(dot(n, v)), 3.0) * (0.35 + 0.65 * top) * select(1.0, 0.0, part < 1.5);
   }
-  return gbuf(albedo, rough, n, 0.0, vec3f(0.0), ao, i.mv, mat, select(0.3, 0.6, mat == 0.0));
+  return gbuf(albedo, rough, n, 0.0, emis, ao, i.mv, mat, select(0.3, 0.6, mat == 0.0));
 }
 `;
 
@@ -291,7 +312,12 @@ function buildMask(world) {
     stampRect((ax + bx) / 2, (az + bz) / 2, L / 2, r, Math.atan2(bz - az, bx - ax), 0);
   };
   for (const L of world.lots) stampRect(L.x, L.z, L.w / 2, L.d / 2, L.angle, 2);
-  for (const L of LANDMARKS) if (L.r > 0) { stampCircle(L.x, L.z, L.r + 10); stampRect(L.x, L.z, L.r + 10, L.r + 10, 0, 0); }
+  for (const L of LANDMARKS) if (L.r > 0) { stampCircle(L.x, L.z, L.r + 25); stampRect(L.x, L.z, L.r + 22, L.r + 22, 0, 0); }
+  // keep the hero sightlines of the viewpoints clear (camera -> 85% of the way to its target)
+  for (const p of POSES) {
+    const [x, , z] = p.pos, [tx, , tz] = p.target;
+    stampLine(x, z, x + (tx - x) * 0.85, z + (tz - z) * 0.85, 9);
+  }
   for (const b of BRIDGES) stampLine(b.ax, b.az, b.bx, b.bz, b.width * 0.5 + 10);
   for (const r of ROUTES) for (let i = 1; i < r.dense.length; i++) stampLine(r.dense[i - 1].x, r.dense[i - 1].z, r.dense[i].x, r.dense[i].z, 9);
   stampLine(CABLEWAY.ax, CABLEWAY.az, CABLEWAY.bx, CABLEWAY.bz, 12);
@@ -374,7 +400,11 @@ export default {
     d.queue.writeTexture({ texture: this.maskTex }, mask, { bytesPerRow: MASK_RES }, [MASK_RES, MASK_RES]);
 
     // fixed trees: street avenues + garden
-    const fixed = await this._streetTrees(ctx);
+    // street trees also respect the exclusion mask (landmark plazas, viewpoint sightlines)
+    const fixed = (await this._streetTrees(ctx)).filter((t) => {
+      const i = Math.floor((t[0] - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES), j = Math.floor((t[2] - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES);
+      return !(i >= 0 && j >= 0 && i < MASK_RES && j < MASK_RES && mask[j * MASK_RES + i]);
+    });
     for (const g of world.shared.gardenTrees || []) fixed.push(g);
     this.nFixed = fixed.length;
     const fd = new Float32Array(Math.max(fixed.length, 1) * 8);

@@ -15,7 +15,17 @@ const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] 
 export const V3 = { sub, add, mul, cross, dot, norm };
 
 export class GardenMesh {
-  constructor() { this.v = []; this.i = []; this.mat = { col: [0.5, 0.5, 0.5], pat: 0, em: 0 }; }
+  constructor() { this.v = []; this.i = []; this.mat = { col: [0.5, 0.5, 0.5], pat: 0, em: 0 }; this.pieces = []; this._p = null; }
+  // pieces: contiguous index ranges with a bounding sphere, culled per frame by distance and view cone
+  begin() { this.end(); this._p = { first: this.i.length, v0: this.count }; }
+  end(maxDist = 1e9) {
+    const p = this._p; if (!p) return; this._p = null;
+    const count = this.i.length - p.first; if (!count) return;
+    let a = [1e9, 1e9, 1e9], b = [-1e9, -1e9, -1e9];
+    for (let k = p.v0; k < this.count; k++) for (let c = 0; c < 3; c++) { const x = this.v[k * STRIDE + c]; if (x < a[c]) a[c] = x; if (x > b[c]) b[c] = x; }
+    const c = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+    this.pieces.push({ first: p.first, count, c, r: Math.hypot(b[0] - c[0], b[1] - c[1], b[2] - c[2]), maxDist });
+  }
   get count() { return this.v.length / STRIDE; }
   set(col, pat = 0, em = 0) { this.mat = { col, pat, em }; return this; }
   vtx(p, n, uv) { const m = this.mat; this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], m.col[0], m.col[1], m.col[2], m.pat, m.em, uv[0], uv[1]); return this.count - 1; }

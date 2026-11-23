@@ -64,6 +64,14 @@ fn landBase(p: vec2f) -> f32 {
   // ranges beyond the playable area keep rising, so every ridge has a higher one behind it
   let farW = smoothstep(6500.0, 15000.0, r);
   h += farW * (450.0 + landRidged(wp * 0.00022 + 5.0, 6) * 1900.0 * (0.6 + 0.6 * massif)) * (1.0 - 0.6 * valley * (1.0 - smoothstep(9000.0, 15000.0, r)));
+  // cliff-top lookout crag above the south valley (viewpoint 9): flat top, sheer drop toward the valley
+  {
+    let dc = p - vec2f(700.0, 4560.0);
+    let along = dot(dc, vec2f(0.188, 0.9822));
+    let dd = length(dc) + max(along - 40.0, 0.0) * 7.0 + fbm2(p * 0.025, 3) * 14.0 * smoothstep(40.0, 90.0, length(dc));
+    let crag = 1.0 - smoothstep(48.0, 380.0, dd);
+    h = max(h, mix(h, 322.0, crag * crag * (3.0 - 2.0 * crag)));
+  }
   return h;
 }
 
