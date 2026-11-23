@@ -14,6 +14,7 @@
 
 import { WGSL_LIB, WGSL_FRAME } from './common.js';
 import { shader } from './gpu.js';
+import { FOG_AMBIENT_WGSL } from './fog.js';
 
 const NEAR_N = 7000, FAR_N = 15000, SPLASH_N = 1600;
 const NEAR_B = 16, FAR_B = 46;      // box sizes (m)
@@ -24,13 +25,14 @@ struct RainU {
   a: vec4f,        // x intensity (1 = default rain), y time, z exposure time (s), w splash radius
   vel: vec4f,      // xyz camera velocity, w camera ground height
   boxes: vec4f,    // x near box, y far box, z near count, w far count
-  wind: vec4f,     // xz wind velocity (m/s), y occluder count, w frame
+  wind: vec4f,     // xz wind velocity (m/s), y occluder count, w fog city-glow gain
   occA: array<vec4f, ${MAX_OCC}>,   // cx, cz, cos, sin
   occB: array<vec4f, ${MAX_OCC}>,   // hx, hz, bottom y, top y
 };
 @group(1) @binding(0) var<uniform> R: RainU;
 @group(1) @binding(1) var depthTex: texture_depth_2d;
 @group(1) @binding(2) var liTex: texture_3d<f32>;
+@group(1) @binding(3) var glowTex: texture_2d<f32>;
 
 struct VOut {
   @builtin(position) pos: vec4f,
@@ -57,8 +59,17 @@ fn lightAt(p: vec3f) -> vec3f {
   let c = F.viewProjNJ * vec4f(p, 1.0);
   let uv = clamp(c.xy / c.w * vec2f(0.5, -0.5) + 0.5, vec2f(0.0), vec2f(1.0));
   let w = clamp(fogSlice(length(p - F.camPos.xyz)), 0.0, 1.0);
-  return textureSampleLevel(liTex, sampClamp, vec3f(uv, w), 0.0).rgb;
+  let total = textureSampleLevel(liTex, sampClamp, vec3f(uv, w), 0.0).rgb;
+  // keep only the nearby point lights: remove the ambient haze light (sky, cloud deck, city glow, moon), so
+  // drops are not tinted by the general city glow and backlit areas do not make the rain look heavier
+  let g = textureSampleLevel(glowTex, sampClamp, (p.xz + 6144.0) / 12288.0, 0.0).rgb;
+  let hA = max(p.y - max(terrainHeight(p.xz), 0.0), 0.0);
+  let amb = fogAmbientLi(p, normalize(p - F.camPos.xyz), hA, g, R.wind.w);
+  let pt = max(total - amb, vec3f(0.0));
+  return pt / (1.0 + luma(pt) * 0.6);
 }
+// Neutral base so drops read the same (light rain) everywhere, also where no light is near.
+const RAIN_BASE = vec3f(0.017, 0.019, 0.025);
 
 fn cull() -> VOut { var o: VOut; o.pos = vec4f(0.0, 0.0, -2.0, 1.0); return o; }
 
@@ -114,7 +125,7 @@ const FOCAL_K = 0.5; // focal length in pixels = res.y * FOCAL_K / tan(fov/2)
   o.pos = vec4f((spx / res * 2.0 - 1.0) * w, z * w, w);
   // lighting: incoming light around the drop (point lights, glow, sky, moon) + a little sky reflection
   let L = lightAt(p);
-  o.col = (L * 0.55 + skyAmbient(vec3f(0.0, 1.0, 0.0)) * 0.25) * R.a.x;
+  o.col = (L * 0.6 + RAIN_BASE) * R.a.x;
   o.q = vec2f(c.x, c.y);
   o.misc = vec4f(alpha, ch.w, 0.0, 0.0);
   return o;
@@ -168,7 +179,7 @@ const FOCAL_K = 0.5; // focal length in pixels = res.y * FOCAL_K / tan(fov/2)
   var o: VOut;
   o.pos = cp;
   let L = lightAt(p + vec3f(0.0, 0.3, 0.0));
-  o.col = (L * select(0.9, 0.6, water) + skyAmbient(vec3f(0.0, 1.0, 0.0)) * 0.6) * R.a.x;
+  o.col = (L * select(0.9, 0.6, water) + RAIN_BASE * 1.6) * R.a.x;
   o.q = c;
   o.misc = vec4f(alpha, cp.w, kind, a01);
   return o;
@@ -209,8 +220,9 @@ export default {
       { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth' } },
       { binding: 2, visibility: GPUShaderStage.VERTEX, texture: { sampleType: 'float', viewDimension: '3d' } },
+      { binding: 3, visibility: GPUShaderStage.VERTEX, texture: { sampleType: 'float' } },
     ] });
-    const mod = shader(d, WGSL_LIB + WGSL_FRAME + RAIN_WGSL, 'rain');
+    const mod = shader(d, WGSL_LIB + WGSL_FRAME + FOG_AMBIENT_WGSL + RAIN_WGSL, 'rain');
     const pl = d.createPipelineLayout({ bindGroupLayouts: [r.frameLayout, this.layout] });
     const add = { color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } };
     const mk = (vs) => d.createRenderPipeline({
@@ -234,6 +246,7 @@ export default {
       { binding: 0, resource: { buffer: this.ubuf } },
       { binding: 1, resource: ctx.views.depth },
       { binding: 2, resource: li.views[k] },
+      { binding: 3, resource: li.glowView },
     ] }));
   },
 
@@ -272,7 +285,7 @@ export default {
     const nearN = Math.round(NEAR_N * (q === 0 ? 0.5 : 1) * Math.min(k, 1));
     const farN = Math.round(FAR_N * (q === 2 ? 1 : q === 1 ? 0.6 : 0.3) * Math.min(k, 1));
     u[8] = NEAR_B; u[9] = FAR_B; u[10] = nearN; u[11] = farN;
-    u[12] = ctx.env.windX * 2.2; u[14] = ctx.env.windZ * 2.2; u[15] = 0;
+    u[12] = ctx.env.windX * 2.2; u[14] = ctx.env.windZ * 2.2; u[15] = ctx.fogLi.tune.glow;
     u[13] = this._occluders(ctx);
     ctx.device.queue.writeBuffer(this.ubuf, 0, u);
 
