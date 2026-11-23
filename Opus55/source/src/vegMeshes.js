@@ -129,8 +129,8 @@ function broadleaf(lod) {
   const M = new MeshBuilder(), R = rng(11 + lod);
   const H = 13; const sw = (y) => Math.max(0, y / H) ** 1.5;
   const cc = [0, 9.0, 0], cr = [4.6, 3.4, 4.6];
-  if (lod === 2) {
-    M.blob(cc, cr[0] * 0.92, cr[1] * 0.9, cr[2] * 0.92, 0, R, 1, sw, 0.22);
+  if (lod >= 2) {   // 2: mid-distance (rounder), 3: far ring (cheapest)
+    M.blob(cc, cr[0] * 0.92, cr[1] * 0.9, cr[2] * 0.92, 0, R, 1, sw, 0.24);
     return M;
   }
   M.tube([0, -0.5, 0], [0, 7.5, 0], 0.34, 0.2, lod ? 4 : 6, 0, 0, sw(7.5));
@@ -138,11 +138,11 @@ function broadleaf(lod) {
     M.tube([0, 4.6, 0], [2.4, 8.4, 0.7], 0.15, 0.07, 4, 0, sw(4.6), sw(8.4));
     M.tube([0, 5.2, 0], [-2.0, 8.8, -1.4], 0.14, 0.07, 4, 0, sw(5.2), sw(8.8));
     M.tube([0, 5.8, 0], [0.4, 9.5, 2.2], 0.13, 0.06, 4, 0, sw(5.8), sw(9.5));
-    M.blob(cc, cr[0] * 0.6, cr[1] * 0.6, cr[2] * 0.6, 1, R, 1, sw, 0.18);
-    M.crown(cc, cr, 26, 1.85, R, sw);
+    M.blob(cc, cr[0] * 0.8, cr[1] * 0.78, cr[2] * 0.8, 1, R, 1, sw, 0.18);
+    M.crown(cc, cr, 22, 2.5, R, sw);
   } else {
-    M.blob(cc, cr[0] * 0.62, cr[1] * 0.62, cr[2] * 0.62, 0, R, 1, sw, 0.15);
-    M.crown(cc, cr, 5, 3.2, R, sw);
+    M.blob(cc, cr[0] * 0.82, cr[1] * 0.8, cr[2] * 0.82, 1, R, 1, sw, 0.15);
+    M.crown(cc, cr, 6, 3.4, R, sw);
   }
   return M;
 }
@@ -164,7 +164,7 @@ function pine(lod) {
 function bamboo(lod) {
   const M = new MeshBuilder(), R = rng(31 + lod);
   const H = 10; const sw = (y) => Math.max(0, y / H) ** 1.2;
-  if (lod === 2) {
+  if (lod >= 2) {
     M.blob([0, 6.5, 0], 2.2, 3.8, 2.2, 0, R, 1, sw, 0.2);
     return M;
   }
@@ -210,7 +210,7 @@ export function buildTreeMeshes() {
   const makers = [broadleaf, pine, bamboo, willow];
   const V = [], I = [], draws = [];
   for (let s = 0; s < SPECIES; s++) for (let l = 0; l < LODS; l++) {
-    const M = makers[s](Math.min(l, 2)).finish();
+    const M = makers[s](s === 0 || s === 2 ? l : Math.min(l, 2)).finish();
     const base = V.length / STRIDE;
     // [opaque first index, opaque count, card first index, card count]
     draws.push([I.length, M.i.length, I.length + M.i.length, M.i2.length]);
