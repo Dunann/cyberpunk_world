@@ -237,6 +237,33 @@ export default {
       lights.push([x, 1.6, z, 7, 4, 2.4, 1.0]);
     }
 
+    // ---------------- mid-lake pavilion on a stone platform, reached by boat
+    {
+      const [x, z] = lakeToWorld([352, -120]);
+      M.set(C.stone, PAT.STONE);
+      M.box([x, -2.5, z], 7.5, 7.5, 3.15, 0.25);
+      col(x, -0.9, z, 7.5, 1.6, 7.5, 0.25);
+      M.set(C.stone, PAT.PLAIN);
+      for (const [u, v] of [[-7.3, -7.3], [7.3, -7.3], [7.3, 7.3], [-7.3, 7.3]]) {
+        const c = Math.cos(0.25), s = Math.sin(0.25);
+        M.box([x + u * c - v * s, 0.65, z + u * s + v * c], 0.18, 0.18, 1.0, 0.25);
+        lantern([x + u * c - v * s, 2.0, z + u * s + v * c], 0.9, (u > 0) === (v > 0));
+      }
+      this._pavilion(M, [x, 0.65, z], 6, 3.0, 0.15, col, lantern);
+    }
+    // floating river lanterns drifting on the lake
+    for (let k = 0; k < 90; k++) {
+      const lx = 120 + R() * 520, lz = -320 + R() * 640;
+      const [x, z] = lakeToWorld([lx, lz]);
+      if (H(x, z) > -1.0) continue;
+      const s = 0.8 + R() * 0.4;
+      M.set([1.0, 0.55 + R() * 0.2, 0.25], PAT.LANTERN, 5.5);
+      M.box([x, 0.02, z], 0.2 * s, 0.2 * s, 0.32 * s, R() * 3);
+      M.set(C.dwood, PAT.PLAIN);
+      M.box([x, 0.0, z], 0.26 * s, 0.26 * s, 0.05, R() * 3);
+      if (k % 15 === 0) lights.push([x, 0.6, z, 6, 2.5, 1.3, 0.5]);
+    }
+
     // ---------------- pagoda
     const PG = LANDMARKS.find((l) => l.id === 'pagoda');
     this._pagoda(M, PG, H, col, lantern, lights);
@@ -360,7 +387,7 @@ export default {
     }
     // stepped colliders along the hump + parapets
     const ang = Math.atan2(a.tz, a.tx);
-    const NS = 16;
+    const NS = 26;   // step rise stays below the controller's 0.65 m step height
     for (let k = 0; k < NS; k++) {
       const u = -L / 2 + (k + 0.5) * L / NS;
       const y = yT(u);
@@ -424,7 +451,7 @@ export default {
     for (let i = 0; i < tiers; i++) {
       const r = 8.4 - i * 0.75, h = i === 0 ? 7.2 : 5.6;
       // body: gold-washed walls with glowing doors on every face
-      M.set(C.gold, PAT.PAGODA, 3.2 - i * 0.25);
+      M.set(C.gold, PAT.PAGODA, 5.0 - i * 0.4);
       M.prism([cx, y, cz], r, 8, 0, h, rot, false, r * 0.97);
       M.set(C.wood, PAT.WOOD);
       for (let k = 0; k < 8; k++) {
@@ -461,7 +488,7 @@ export default {
     // floodlights at the podium
     for (let k = 0; k < 4; k++) {
       const a = rot + (k / 4) * Math.PI * 2 + 0.3;
-      lights.push([cx + Math.cos(a) * 14, yb + 3.5, cz + Math.sin(a) * 14, 34, 40, 22, 8]);
+      lights.push([cx + Math.cos(a) * 14, yb + 3.5, cz + Math.sin(a) * 14, 38, 60, 33, 12]);
     }
   },
 

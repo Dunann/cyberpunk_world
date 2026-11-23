@@ -184,7 +184,7 @@ function willow(lod) {
   const H = 10; const sw = (y) => Math.max(0, y / H) ** 1.3;
   const cc = [0.2, 7.6, 0];
   if (lod === 2) {
-    M.blob([0, 6.2, 0], 3.8, 3.4, 3.8, 0, R, 1, sw, 0.2);
+    M.blob([0, 6.2, 0], 3.8, 3.4, 3.8, 1, R, 1, sw, 0.2);
     return M;
   }
   M.tube([0, -0.5, 0], [0.4, 5, 0.2], 0.42, 0.3, lod ? 4 : 6, 0, 0, sw(5));

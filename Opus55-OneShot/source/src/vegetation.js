@@ -152,7 +152,8 @@ fn cullFixed(@builtin(global_invocation_id) id: vec3u) {
   let s = t.a.w;
   if (!inFrustum(t.a.xyz + vec3f(0.0, 6.0 * s, 0.0), 9.0 * s)) { return; }
   t.b.w = 1.0;
-  emit(t, u32(t.b.z) * ${LODS}u + lodOf(d));
+  // fixed trees (streets, garden) are few: keep the leafy LOD 1 much farther out
+  emit(t, u32(t.b.z) * ${LODS}u + select(select(2u, 1u, d < 420.0), 0u, d < VU.lod.x));
 }
 
 @compute @workgroup_size(${LISTS})
@@ -359,7 +360,7 @@ export default {
     M.draws.forEach(([of, oc, cf, cc], k) => { this.argsInit.set([oc, 0, of, 0, 0], k * 5); this.argsInit.set([cc, 0, cf, 0, 0], (LISTS + k) * 5); });
     this.argsBuf = d.createBuffer({ size: this.argsInit.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
     // debug: instance counts per list (dev tools)
-    window.__vegCounts = async () => {
+    if (typeof __DEV__ !== 'undefined' && __DEV__) window.__vegCounts = async () => {
       const rb = d.createBuffer({ size: this.argsInit.byteLength, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
       const e = d.createCommandEncoder(); e.copyBufferToBuffer(this.argsBuf, 0, rb, 0, this.argsInit.byteLength); d.queue.submit([e.finish()]);
       await rb.mapAsync(GPUMapMode.READ); const a = new Uint32Array(rb.getMappedRange().slice(0)); rb.destroy();
