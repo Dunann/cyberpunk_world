@@ -153,7 +153,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wg: ve
   if (NdotL > 0.0) {
     let h = normalize(v + l);
     let NdotH = max(dot(n, h), 0.0);
-    let a = rough * rough; let a2 = a * a;
+    // In rain the moon sits behind cloud: its highlight is broad and soft, never a sharp mirror glint.
+    let mRough = max(rough, mix(0.08, 0.55, saturate(F.params.x * 2.0)));
+    let a = mRough * mRough; let a2 = a * a;
     let dd = NdotH * NdotH * (a2 - 1.0) + 1.0;
     let D = a2 / (PI * dd * dd);
     let k = (rough + 1.0) * (rough + 1.0) / 8.0;
