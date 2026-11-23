@@ -5,6 +5,7 @@
 //   0 torso   1 head/neck skin   2/3 left/right leg   4/5 left/right upper arm   23/24 left/right forearm + hand
 //   10 hips   8 phone (right hand)   6 canopy   7 pole   9 canopy rim (LED strip)
 //   15 short hair   25 long hair   16 hood   17 beanie   18 steppe hat   19 long coat skirt   20 poncho   21 deel robe
+//   26 stool (seated people; not in the far level of detail)
 // The shader hides the parts an agent does not wear by collapsing their vertices.
 
 import { MeshBuilder, norm } from './trafficGeom.js';
@@ -140,7 +141,7 @@ export function personMesh(lod) {
     mb.loft([[0.77, 0.02, 0.03, x, 0.005], [0.84, 0.026, 0.04, x, 0.005], [0.895, 0.03, 0.035, x], [0.905, 0.046, 0.048, x], [ARM_EY + 0.02, 0.043, 0.046, x]], nl, fore, false, true);
   }
   // stool for seated people (part 26, shown only for them): round seat on a tapered base, slightly behind the hips
-  mb.loft([[0.0, 0.15, 0.15, 0, -0.08], [0.34, 0.11, 0.11, 0, -0.08], [0.36, 0.17, 0.17, 0, -0.08], [0.44, 0.17, 0.17, 0, -0.08]], Math.max(n, 6), 26, true);
+  if (lod < 2) mb.loft([[0.0, 0.15, 0.15, 0, -0.08], [0.34, 0.11, 0.11, 0, -0.08], [0.36, 0.17, 0.17, 0, -0.08], [0.44, 0.17, 0.17, 0, -0.08]], 6, 26, true);
   // phone in the right hand
   mb.box([-ARM_SX, 0.8, 0.045], X, Y, Z, 0.032, 0.068, 0.007, 8);
 

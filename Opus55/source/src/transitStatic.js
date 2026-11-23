@@ -787,11 +787,12 @@ function buildMarketPlaza(mb, world) {
   const len = Math.hypot(T[0] - C.x, T[2] - C.z);
   const ux = (T[0] - C.x) / len, uz = (T[2] - C.z) / len, px = -uz, pz = ux;
   const P = (a, c) => [C.x + ux * a + px * c, C.z + uz * a + pz * c];
-  const A0 = -14, A1 = 182, HW = 10, step = 2;
+  // paving starts at the entrance bollards (the street in front of them keeps its markings)
+  const A0 = 9.5, A1 = 182, HW = 10, step = 2;
   const R = rng(4242);
   // paving: a terrain-following grid 5 cm above the ground; uv in plaza meters
   const hs = [];
-  for (let a = A0; a <= A1; a += step) {
+  for (let a = A0; a <= A1 + 0.01; a += step) {
     const row = [];
     for (let c = -HW; c <= HW; c += step) { const [x, z] = P(a, c); row.push(world.waterDist(x, z) < 6 ? null : [x, world.heightAt(x, z) + 0.05, z]); }
     hs.push(row);

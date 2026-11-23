@@ -501,7 +501,7 @@ function buildAgents(world, transit, q) {
     const lane = Math.atan2(uz, ux), cross = Math.atan2(pz, px);
     // queues in front of some stalls: a short line reaching into the lane, everyone facing the counter
     for (let t = 14; t < 175; t += 5.5) for (const side of [-1, 1]) {
-      if (R() > 0.45 * dens + 0.1) continue;
+      if (R() > 0.3 * dens + 0.05) continue;
       const n = 2 + ((R() * 3) | 0), ta = t + (R() - 0.5) * 1.5;
       for (let k = 0; k < n; k++) {
         const [x, z] = at(ta + (R() - 0.5) * 0.4, side * (3.7 - 0.75 * k));
@@ -511,7 +511,7 @@ function buildAgents(world, transit, q) {
       }
     }
     // small groups chatting in the lane: two or three people facing each other
-    for (let k = 0; k < 26 * dens; k++) {
+    for (let k = 0; k < 18 * dens; k++) {
       const t = 12 + R() * 160, o = (R() - 0.5) * 5;
       const n = 2 + (R() < 0.4 ? 1 : 0);
       for (let j = 0; j < n; j++) {
@@ -534,7 +534,7 @@ function buildAgents(world, transit, q) {
       }
     }
     // browsing: pacing a few meters along the lane or across to a stall
-    for (let k = 0; k < 150 * dens; k++) {
+    for (let k = 0; k < 100 * dens; k++) {
       const t = 10 + R() * 165, o = (R() - 0.5) * 7;
       const [x, z] = at(t, o);
       if (!ok(x, z)) continue;
@@ -542,7 +542,7 @@ function buildAgents(world, transit, q) {
       push(x, z, across ? px : ux, across ? pz : uz, 3 + R() * 7, -2000, R(), 0.5 + R() * 0.6, 1, M);
     }
     // walking through the whole market in both directions
-    for (let k = 0; k < 70 * dens; k++) {
+    for (let k = 0; k < 45 * dens; k++) {
       const v = (0.9 + R() * 0.6) * (R() < 0.5 ? 1 : -1);
       const [x, z] = at(8, 0);
       push(x, z, ux, uz, 172, (R() - 0.5) * 6, R() * 172, v, 0, M);
