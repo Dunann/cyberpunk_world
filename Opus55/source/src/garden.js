@@ -12,7 +12,7 @@ import { GardenMesh, PAT, STRIDE, V3 } from './gardenMesh.js';
 import { CAUSEWAYS, ISLANDS, BRIDGE_GAP, CAUSEWAY_TOP, lakeToWorld } from './terrainLand.js';
 import { LANDMARKS } from './world.js';
 import { rng } from './math.js';
-import { lookoutTower, lakesideVignette, cragLookout, hillsideLife } from './gardenViews.js';
+import { lookoutTower, lakesideVignette, cragLookout, riverbankLife, hillsideLife } from './gardenViews.js';
 
 const C = {
   plaster: [0.58, 0.56, 0.52], tile: [0.03, 0.032, 0.036], wood: [0.17, 0.035, 0.022], dwood: [0.06, 0.035, 0.025],
@@ -56,12 +56,14 @@ fn blk(u: vec2f, size: vec2f) -> vec2f {
     albedo *= 0.82 + 0.25 * N.r;
     albedo *= mix(0.55, 1.0, smoothstep(0.0, 1.2, uv.y));
     rough = 0.85; wet = 0.5;
-  } else if (pat == 2.0) {   // grey roof tiles: ribs along the slope
+  } else if (pat == 2.0) {   // grey roof tiles: rolls of tiles down the slope, broken into overlapping courses
     let r = fract(uv.x * 3.2);
     let rib = smoothstep(0.0, 0.25, r) * smoothstep(1.0, 0.7, r);
-    albedo *= 0.6 + 0.6 * rib;
+    let cs = fract(uv.y * 3.0 + floor(uv.x * 3.2) * 0.37);
+    let course = smoothstep(0.0, 0.12, cs) * (0.75 + 0.25 * cs);
+    albedo *= (0.55 + 0.6 * rib) * (0.55 + 0.45 * course) * (0.85 + 0.3 * hash21(floor(vec2f(uv.x * 3.2, uv.y * 3.0))));
     n = normalize(n + vec3f(cos(r * 6.28) * 0.25, 0.0, sin(r * 6.28) * 0.25));
-    rough = 0.35; wet = 1.0;
+    rough = 0.5; wet = 0.8;
   } else if (pat == 3.0) {   // lacquered wood
     albedo *= 0.85 + 0.2 * sin(uv.y * 30.0 + N.g * 6.0);
     rough = 0.3; wet = 0.6;
@@ -274,10 +276,11 @@ export default {
     // ---------------- viewpoint set pieces (poses 1, 5, 9)
     const env = { M, H, Hf: (x, z) => T.heightAt(x, z), col, lantern, lights, trees, reserve, R,
       pavilion: (c, sides, r, plat) => this._pavilion(M, c, sides, r, plat, col, lantern),
-      rock: (c, r, sq) => M.rock(c, r, R, sq) };
+      rock: (c, r, sq, sub) => M.rock(c, r, R, sq, sub), pads: [] };
     M.begin(); lookoutTower(env);
     M.begin(); lakesideVignette(env);
     M.begin(); this.valleyGlows = cragLookout(env);
+    this.bankLife = riverbankLife(env, world);
     this.hamlets = hillsideLife(env, world);
     M.begin();
 
@@ -321,6 +324,7 @@ export default {
         padData.push(x, z, 0.35 + R() * 0.55, R() * 6.2 + flower * 10);
       }
     }
+    for (const p of env.pads) padData.push(...p);   // pads placed by the viewpoint set pieces
     this.padCount = padData.length / 4;
 
     M.end();

@@ -34,6 +34,27 @@ fn tHeight(xz: vec2f) -> f32 {
 `;
 
 // Street layout + street lamp placement rules, shared by the terrain shader and the lamp validation pass.
+// Moonlit mist lying in the valley south of the city (seen from the cliff-top viewpoint, pose 9).
+// valleyMist() returns the mist cover of a surface point; shaders replace that much of the surface with
+// mistColor() (albedo scaled down, emissive mixed toward the mist), so terrain and trees share one layer.
+export const MIST_WGSL = /* wgsl */ `
+const MIST_O = vec2f(700.0, 4560.0);
+const MIST_D = vec2f(0.188, 0.9822);
+fn valleyMist(p: vec3f, dist: f32, nse: f32) -> f32 {
+  let q = p.xz - MIST_O;
+  let s = dot(q, MIST_D);
+  if (s < -300.0 || dist < 200.0) { return 0.0; }
+  let c = abs(dot(q, vec2f(MIST_D.y, -MIST_D.x)));
+  // the valley floor climbs about 75 m per km; the mist top follows it, with soft billows
+  let top = 120.0 + 0.08 * max(s, 0.0) + (nse - 0.5) * 70.0;
+  let m = 1.0 - smoothstep(top - 110.0, top, p.y);
+  return m * smoothstep(-300.0, 500.0, s) * smoothstep(200.0, 900.0, dist) * (1.0 - smoothstep(4000.0, 6500.0, c)) * 0.88;
+}
+fn mistColor(dir: vec3f) -> vec3f {
+  return skyHorizon(normalize(vec3f(dir.x, 0.02, dir.z))) * 1.35 + SKY_MOON_COL * F.moon.w * 0.01;
+}
+`;
+
 export const STREET_WGSL = /* wgsl */ `
 struct Road { across: f32, along: f32, axis: f32, hw: f32, cross: f32, blk: f32, line: f32 };
 
@@ -105,6 +126,7 @@ export function terrainDrawWGSL({ N, K, LEAF, MORPH0, simple }) {
 @group(1) @binding(10) var<uniform> TU: vec4f;   // x = real street-lamp light range (m)
 ${THEIGHT_WGSL}
 ${STREET_WGSL}
+${MIST_WGSL}
 
 const GRID_N = ${N}.0;
 const LOD_K = ${K};
@@ -265,7 +287,22 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     rough = mix(rough, mix(0.5, 0.8, smoothstep(300.0, 1500.0, dist)), rockW);
     wet = mix(wet, mix(0.8, 0.35, smoothstep(300.0, 1500.0, dist)), rockW);
   }
-  if (terr > 0.3) {
+  // lake gardens: lawns and a stone-edged shore instead of field terraces
+  let gardenK = 1.0 - smoothstep(1050.0, 1350.0, length((p.xz - vec2f(-1990.0, 2330.0)) * vec2f(1.0, 1.2)));
+  // far rock faces: dark ledges and gullies at a scale that survives distance, so steep mountain sides read
+  // as cliffs rather than smooth pale blobs
+  let rockF = smoothstep(0.22, 0.45, slope) * (1.0 - 0.7 * forest) * smoothstep(0.25, 1.0, px);
+  // bare high ground far away stays dark (it read as pale snow under the moon)
+  albedo *= mix(1.0, 0.5, smoothstep(380.0, 900.0, p.y) * (1.0 - forest) * smoothstep(400.0, 1200.0, dist));
+  if (rockF > 0.01) {
+    let fl = fract(p.y / 17.0 + (A.r - 0.5) * 3.0);
+    let ledge = mix(0.55, 1.2, smoothstep(0.78, 0.95, fl));
+    let across = normalize(vec2f(-n.z, n.x) + vec2f(1e-4, 0.0));
+    let gully = abs(sin(dot(p.xz, across) * 0.075 + A.g * 5.0));
+    albedo = mix(albedo, vec3f(0.042, 0.043, 0.047) * ledge * (0.55 + 0.45 * gully), rockF);
+    rough = mix(rough, 0.9, rockF);
+  }
+  if (terr * (1.0 - gardenK) > 0.3) {
     // terraces: flat beds (some flooded rice paddies that mirror the sky) and grassy risers
     let st = p.y / 2.6;
     let fl = fract(st);
@@ -290,8 +327,32 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   // shore & river beds are wet
   let info = worldInfo(p.xz);
   if (wN > 0.0) {
-    wet = mix(wet, 1.0, 1.0 - smoothstep(0.0, 6.0, info.x));
-    if (p.y < 0.2) { rough = 0.4; wet = 1.0; mat = 3.0; }
+    wet = mix(wet, 1.0, (1.0 - smoothstep(0.0, 6.0, info.x)) * (1.0 - gardenK));
+    if (p.y < 0.2 && gardenK < 0.5) { rough = 0.4; wet = 1.0; mat = 3.0; }
+  }
+  if (gardenK > 0.0 && wN > 0.0 && info.w < 0.5) {
+    // dark, matte lawn; a few small puddles just above the waterline; a dressed-stone kerb along the water
+    let lawn = vec3f(0.018, 0.03, 0.014) * (0.8 + 0.4 * N1.g) * (0.85 + 0.3 * N2.r);
+    let flatG = smoothstep(0.85, 0.97, n.y) * (1.0 - forest);
+    albedo = mix(albedo, lawn, gardenK * flatG);
+    rough = mix(rough, 0.9, gardenK * flatG);
+    wet = mix(wet, 0.25, gardenK * flatG);
+    let near = 1.0 - smoothstep(3.0, 9.0, info.x);
+    let pud = smoothstep(0.66, 0.72, N1.g * 0.6 + N2.b * 0.55) * near * step(0.15, p.y) * gardenK;
+    albedo = mix(albedo, vec3f(0.01, 0.012, 0.012), pud);
+    rough = mix(rough, 0.04, pud); wet = mix(wet, 1.0, pud);
+    n = normalize(mix(n, vec3f(0.0, 1.0, 0.0), pud));
+    let kerb = (1.0 - smoothstep(1.2, 2.0, info.x)) * step(-0.25, p.y) * gardenK;
+    if (kerb > 0.0) {
+      let bq = vec2f(dot(p.xz, vec2f(0.7071, 0.7071)) * 1.4, p.y * 3.0 + dot(p.xz, vec2f(-0.7071, 0.7071)) * 1.4);
+      let fb = fract(bq);
+      let joint = 1.0 - smoothstep(0.0, 0.07, min(min(fb.x, 1.0 - fb.x), min(fb.y, 1.0 - fb.y)));
+      let stone = vec3f(0.085, 0.082, 0.077) * (0.8 + 0.4 * hash21(floor(bq))) * (1.0 - 0.55 * joint);
+      albedo = mix(albedo, stone, kerb);
+      rough = mix(rough, 0.75, kerb); wet = mix(wet, 0.35, kerb);
+      n = normalize(mix(n, nPre, kerb));
+      mat = 3.0;
+    }
   }
 
   // ---- West Lake causeways and islands (land raised inside the lake)
@@ -410,11 +471,26 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   rough = mix(rough, 0.92, farMatte);
 
   // ---- moonlit crests: convex ridges facing the moon catch a soft silver edge at distance
-  let crest = smoothstep(0.52, 0.62, Nt.b) * saturate(dot(n, F.moon.xyz) * 1.5) * smoothstep(800.0, 3500.0, dist) * (1.0 - wN * urbanAll);
-  emis += vec3f(0.55, 0.62, 0.85) * F.moon.w * crest * 0.12;
+  let crest = smoothstep(0.6, 0.7, Nt.b) * saturate(dot(n, F.moon.xyz) * 1.5) * smoothstep(800.0, 3500.0, dist) * (1.0 - wN * urbanAll);
+  emis += vec3f(0.55, 0.62, 0.85) * F.moon.w * crest * 0.045;
+  // silver skyline: crests seen at grazing angles catch the moonlit sky behind them
+  let skyl = pow(1.0 - saturate(dot(nPre, v)), 5.0) * smoothstep(0.35, 0.7, nPre.y) * smoothstep(500.0, 2500.0, dist) * (1.0 - urbanAll);
+  emis += SKY_MOON_COL * F.moon.w * skyl * 0.07;
 
-  // ---- aerial perspective for the far ranges: fade toward the horizon haze
-  let hz = 1.0 - exp(-max(dist - 2000.0, 0.0) / 11000.0);
+  // far natural slopes are dark masses (lit only by the faint moon), so the ranges read as layered silhouettes
+  // against the haze instead of pale, mottled blobs; crests keep a moonlit edge (below)
+  albedo *= mix(1.0, 0.38, smoothstep(700.0, 2600.0, dist) * (1.0 - urbanAll));
+  // ---- valley mist (pose 9)
+  let mist = valleyMist(p, dist, N1.r * 0.3 + A.g * 0.7);
+  if (mist > 0.0) {
+    albedo *= 1.0 - mist;
+    emis = emis * (1.0 - mist) + mistColor(-v) * mist;
+    wet *= 1.0 - mist;
+  }
+
+  // ---- aerial perspective for the far ranges: fade toward the horizon haze; thicker low down, so each
+  // range stands out as a layer against the haze in the valley behind it
+  let hz = min((1.0 - exp(-max(dist - 2000.0, 0.0) / 11000.0)) * mix(1.5, 0.7, smoothstep(200.0, 1800.0, p.y)), 0.96);
   if (hz > 0.0) {
     let dir = -v;
     let sky = skyHorizon(normalize(vec3f(dir.x, max(dir.y, 0.0) * 0.5 + 0.02, dir.z)));

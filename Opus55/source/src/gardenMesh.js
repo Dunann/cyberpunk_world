@@ -118,29 +118,48 @@ export class GardenMesh {
     }
     return R[0];   // eave ring points (for hanging lanterns)
   }
-  // icosahedral blob (rockery stone), displaced by a callback
-  rock(c, r, R, sq = 1) {
+  // Taihu rockery stone: a tall eroded mass with smooth folds, deep pits (pushed in and darkened) and a
+  // few ridges, smooth-shaded so it reads as worn limestone rather than a faceted crystal.
+  rock(c, r, R, sq = 1, subdiv = 2) {
     const t = (1 + Math.sqrt(5)) / 2;
     let pos = [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]].map(norm);
     let faces = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
       [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
-    const mid = new Map();
-    const m = (a, b) => { const k = a < b ? a * 1e4 + b : b * 1e4 + a; if (!mid.has(k)) { pos.push(norm(add(pos[a], pos[b]))); mid.set(k, pos.length - 1); } return mid.get(k); };
-    const nf = [];
-    for (const [a, b, d] of faces) { const ab = m(a, b), bd = m(b, d), da = m(d, a); nf.push([a, ab, da], [b, bd, ab], [d, da, bd], [ab, bd, da]); }
-    faces = nf;
-    const ph = [R() * 9, R() * 9, R() * 9];
-    const P = pos.map((p) => {
-      // Taihu stone: eroded, holey, tall
-      const n = 1 + 0.35 * Math.sin(p[0] * 4 + ph[0]) * Math.sin(p[1] * 5 + ph[1]) + 0.25 * Math.sin(p[2] * 6 + p[0] * 3 + ph[2]);
-      return [c[0] + p[0] * r * n * 0.8, c[1] + (p[1] + 0.6) * r * n * sq, c[2] + p[2] * r * n * 0.8];
-    });
-    for (const [a, b, d] of faces) {
-      const n = norm(cross(sub(P[b], P[a]), sub(P[d], P[a])));
-      const out = norm(sub(P[a], c));
-      const nn = dot(n, out) < 0 ? mul(n, -1) : n;
-      const va = this.vtx(P[a], nn, [P[a][0], P[a][1]]), vb = this.vtx(P[b], nn, [P[b][0], P[b][1]]), vd = this.vtx(P[d], nn, [P[d][0], P[d][1]]);
-      this.tri(va, vb, vd, nn);
+    for (let s = 0; s < subdiv; s++) {
+      const mid = new Map();
+      const m = (a, b) => { const k = a < b ? a * 1e5 + b : b * 1e5 + a; if (!mid.has(k)) { pos.push(norm(add(pos[a], pos[b]))); mid.set(k, pos.length - 1); } return mid.get(k); };
+      const nf = [];
+      for (const [a, b, d] of faces) { const ab = m(a, b), bd = m(b, d), da = m(d, a); nf.push([a, ab, da], [b, bd, ab], [d, da, bd], [ab, bd, da]); }
+      faces = nf;
     }
+    const ph = [R() * 9, R() * 9, R() * 9, R() * 9, R() * 9, R() * 9];
+    const pit = [];
+    const P = pos.map((p) => {
+      // folds (low frequency), worn ridges (|sin|), pits where a mid-frequency pattern peaks
+      let n = 1 + 0.3 * Math.sin(p[0] * 3 + ph[0]) * Math.sin(p[1] * 3.5 + ph[1]) + 0.18 * Math.sin(p[2] * 4 + p[0] * 2 + ph[2]);
+      n -= 0.12 * Math.abs(Math.sin(p[1] * 7 + p[0] * 3 + ph[3]));
+      const h = Math.sin(p[0] * 8.5 + ph[3]) * Math.sin(p[1] * 7.5 + ph[4]) * Math.sin(p[2] * 8.5 + ph[5]);
+      const k = Math.max(0, (h - 0.25) / 0.75);
+      n -= 0.5 * k;
+      pit.push(k);
+      const w = 0.72 + 0.12 * Math.sin(p[1] * 2.5 + ph[2]);   // waist: narrower in places
+      return [c[0] + p[0] * r * n * w, c[1] + (p[1] + 0.75) * r * n * sq, c[2] + p[2] * r * n * w];
+    });
+    // smooth vertex normals
+    const N = P.map(() => [0, 0, 0]);
+    for (const [a, b, d] of faces) {
+      const fn = cross(sub(P[b], P[a]), sub(P[d], P[a]));
+      const out = sub(P[a], c);
+      const s = dot(fn, out) < 0 ? -1 : 1;
+      for (const v of [a, b, d]) { N[v][0] += fn[0] * s; N[v][1] += fn[1] * s; N[v][2] += fn[2] * s; }
+    }
+    const base = this.mat.col, idx = [];
+    for (let i = 0; i < P.length; i++) {
+      const g = 1 - 0.75 * Math.min(1, pit[i] * 1.6);
+      this.mat = { ...this.mat, col: [base[0] * g, base[1] * g, base[2] * g] };
+      idx.push(this.vtx(P[i], norm(N[i]), [P[i][0] + P[i][2], P[i][1]]));
+    }
+    this.mat = { ...this.mat, col: base };
+    for (const [a, b, d] of faces) this.tri(idx[a], idx[b], idx[d], norm(add(add(N[a], N[b]), N[d])));
   }
 }
