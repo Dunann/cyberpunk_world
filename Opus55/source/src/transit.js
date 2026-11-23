@@ -320,7 +320,7 @@ export class Transit {
     this.cabTravel = 92; this.cabDwell = 18;
     this.cabCycle = 2 * (this.cabTravel + this.cabDwell);
     // at t = 70 (pose 10) cabin 0 is over the river a quarter of the way out, in the middle of that view
-    this.cabOffset = this.cabDwell + this.cabTravel * 0.43 - 70; // cabin 0 mid-river at t = 70 (pose 10)
+    this.cabOffset = this.cabDwell + this.cabTravel * 0.56 - 70; // cabin 0 mid-river at t = 70 (pose 10)
 
     // dynamic lights: train headlights, cabin interiors
     this.lightBase = ctx.lights.reserve(this.trains.length + 2);

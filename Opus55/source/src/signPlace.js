@@ -82,6 +82,7 @@ export function placeSigns(world, atlas, quality) {
   };
 
   const useSlots = world.signSlots && world.signSlots.length > 0;
+  const denseSlots = useSlots && world.signSlots.length > 20000; // buildings provide the street-level signs
   let screenPts = [];
   for (const lot of world.lots) {
     const t = lot.type;
@@ -119,7 +120,7 @@ export function placeSigns(world, atlas, quality) {
       }
       if (useSlots) {
         if (t === DT.STEPPE || (t === DT.HILLSIDE && R() < 0.1)) lanternRow(ex, ez, nx, nz, tx, tz, L, 0);
-        if (world.signSlots.length > 20000 || (t !== DT.HILLSIDE && t !== DT.URBAN)) continue; // dense slot pass from the buildings module
+        if (t !== DT.HILLSIDE && t !== DT.URBAN) continue;
       }
       if (t === DT.HILLSIDE || t === DT.URBAN) {
         const hill = t === DT.HILLSIDE;
@@ -127,13 +128,13 @@ export function placeSigns(world, atlas, quality) {
         for (let s = -L / 2 + 1 + R() * 2; s < L / 2 - 0.5; s += bladeStep * (0.7 + R() * 0.6)) {
           const wx = ex + tx * s, wz = ez + tz * s;
           const g = world.heightAt(wx, wz);
-          const latin = R() < 0.08;
+          const latin = !denseSlots && R() < 0.08;
           if (latin) {
             fascia(wx, wz, g, nx, nz, pick(LATIN_WORDS), KIND.FASCIA, PALETTE_STREET, 0.7, 1.2, 6 + R() * 6, 6);
             continue;
           }
           // Hong Kong style layers: small blades low, big projecting boxes mid-height, tall blades high up
-          blade(wx, wz, g, nx, nz, R() < 0.12 ? BIG_WORDS : SHOP_WORDS, PALETTE_STREET, hill ? 0.9 : 1.0, hill ? 1.5 : 1.8, 3.6, 5.5, false);
+          if (!denseSlots) blade(wx, wz, g, nx, nz, R() < 0.12 ? BIG_WORDS : SHOP_WORDS, PALETTE_STREET, hill ? 0.9 : 1.0, hill ? 1.5 : 1.8, 3.6, 5.5, false);
           const mid = R();
           if (mid < (hill ? 0.45 : 0.3)) blade(wx + tx * 0.4, wz + tz * 0.4, g, nx, nz, SHOP_WORDS, PALETTE_STREET, 2.2, 3.8, 7.5, 11, false, true);
           else if (mid < (hill ? 0.75 : 0.5)) blade(wx + tx * 0.4, wz + tz * 0.4, g, nx, nz, R() < 0.3 ? BIG_WORDS : SHOP_WORDS, PALETTE_STREET, 1.6, 2.6, 7.5, 10, false);
