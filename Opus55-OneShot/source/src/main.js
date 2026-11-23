@@ -50,7 +50,7 @@ async function main() {
     frozen: params.has('freeze'),
     taaEnabled: true,
     env: {
-      moonDir: normalize([0.38, 0.42, -0.82]), moonIntensity: 0.22,
+      moonDir: normalize([0.38, 0.42, -0.82]), moonIntensity: 0.42,
       rain: params.has('rain') ? +params.get('rain') : 0.55,
       wetness: 0.8, fogDensity: 0.00045, fogFalloff: 0.0045, fogBase: 0,
       exposure: 1.6, windX: 0.6, windZ: 0.25,
