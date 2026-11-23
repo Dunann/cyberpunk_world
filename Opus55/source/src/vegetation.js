@@ -9,7 +9,7 @@
 //  - The vegetation gbuffer hook also draws the terrain ground right after the trees (see terrain.js).
 
 import { buildTreeMeshes, SPECIES, LODS } from './vegMeshes.js';
-import { THEIGHT_WGSL, STREET_WGSL } from './terrainShade.js';
+import { THEIGHT_WGSL, STREET_WGSL, MIST_WGSL } from './terrainShade.js';
 import { LANDMARKS, BRIDGES, ROUTES, CABLEWAY, MONORAIL_STATION, DISTRICTS, POSES } from './world.js';
 import { TERRAIN, INFO } from './common.js';
 import { rng } from './math.js';
@@ -171,6 +171,7 @@ fn clampArgs(@builtin(local_invocation_index) i: u32) {
 
 const TREE_DRAW_WGSL = /* wgsl */ `
 ${VEG_COMMON}
+${MIST_WGSL}
 @group(1) @binding(0) var<storage, read> trees: array<Tree>;
 @group(1) @binding(1) var tNoise: texture_2d<f32>;
 @group(1) @binding(2) var sRep: sampler;
@@ -190,7 +191,7 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   return (w * (0.6 + 0.4 * sin(t * 1.1 + ph)) * g + vec2f(sin(t * 2.3 + ph * 1.7), cos(t * 1.9 + ph * 1.3)) * 0.25) * amp;
 }
 
-@vertex fn vs(@location(0) pos: vec3f, @location(1) nrm: vec3f, @location(2) uv: vec2f, @location(3) part: f32, @location(4) sway: f32, @builtin(instance_index) ii: u32) -> VOut {
+@vertex fn vs(@location(0) pos: vec3f, @location(1) nrm: vec3f, @location(2) uv: vec2f, @location(3) part: f32, @location(4) sway: f32, @location(5) size: f32, @builtin(instance_index) ii: u32) -> VOut {
   let T = trees[ii];
   let s = T.a.w;
   let r = rot2(T.b.x);
@@ -204,13 +205,25 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   let t = time();
   let o0 = swayOff(t, ph, amp);
   let o1 = swayOff(t - F.camFwd.w, ph, amp);
-  // leaf flutter on cards
-  let fl = select(0.0, 0.06, part > 1.5) * sway;
-  let f0 = sin(t * 7.0 + ph + pos.y * 2.0) * fl;
-  let f1 = sin((t - F.camFwd.w) * 7.0 + ph + pos.y * 2.0) * fl;
-  let base = T.a.xyz + local;
-  let wp = base + vec3f(o0.x + f0, -0.1 * dot(o0, o0), o0.y);
-  let pwp = base + vec3f(o1.x + f1, -0.1 * dot(o1, o1), o1.y);
+  // leaf flutter on cards; willow strands swing slowly, each with its own phase
+  let strand = part > 2.5;
+  let sph = ph + select(pos.y * 2.0, pos.x * 1.3 + pos.z * 1.7, strand);
+  let fr = select(7.0, 1.7, strand);
+  let fl = select(select(0.0, 0.06, part > 1.5), 0.1, strand) * sway * s;
+  let f0 = vec2f(sin(t * fr + sph), cos(t * fr * 0.8 + sph * 1.3) * select(0.0, 0.6, strand)) * fl;
+  let f1 = vec2f(sin((t - F.camFwd.w) * fr + sph), cos((t - F.camFwd.w) * fr * 0.8 + sph * 1.3) * select(0.0, 0.6, strand)) * fl;
+  var base = T.a.xyz + local;
+  // cards face the camera; strands are widened across the view direction
+  if (size > 0.0) {
+    if (strand) {
+      let side = normalize(cross(vec3f(0.0, 1.0, 0.0), base - F.camPos.xyz + vec3f(1e-3, 0.0, 0.0)));
+      base += side * uv.x * size * s;
+    } else {
+      base += (F.camRight.xyz * uv.x + F.camUp.xyz * uv.y) * size * s;
+    }
+  }
+  let wp = base + vec3f(o0.x + f0.x, -0.1 * dot(o0, o0), o0.y + f0.y);
+  let pwp = base + vec3f(o1.x + f1.x, -0.1 * dot(o1, o1), o1.y + f1.y);
   var o: VOut;
   o.wp = wp;
   let nxz = r * nrm.xz;
@@ -245,6 +258,7 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
   var n = normalize(i.n);
   let v = normalize(F.camPos.xyz - i.wp);
   var albedo: vec3f; var rough = 0.7; var mat = 1.0; var ao = 1.0; var emis = vec3f(0.0);
+  let dist = length(F.camPos.xyz - i.wp);
   if (part < 0.5) {
     if (!ff) { n = -n; }
     // bark / bamboo culm
@@ -256,9 +270,12 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
     ao = 0.75;
   } else {
     var leaf = 0.5;
-    if (part > 1.5) {
+    if (part > 2.5) {
+      // willow strand: leaves along the strand as a fine light/dark rhythm
+      leaf = 0.55 + 0.35 * sin(i.uv.y * 55.0 + hsh * 20.0 + i.lp.x * 3.0);
+    } else if (part > 1.5) {
       leaf = card.a;
-      n = normalize(n + vec3f(card.r - 0.5, 0.0, card.b - 0.5) * 0.7);
+      n = normalize(n + vec3f(card.r - 0.5, 0.0, card.b - 0.5) * 0.35);
     } else {
       if (!ff) { n = -n; }
       let q = i.lp.xz * 0.12 + i.lp.y * 0.05 + hsh;
@@ -267,26 +284,37 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
       leaf = N.g;
     }
     // per-tree colour: several greens, some yellow-green and blue-green, a few reddish new-leaf camphors
+    // per-tree colour: a few close greens (no odd reds or teals); the variety fades out with distance so far
+    // slopes read as calm dark masses
     let hv = fract(hsh * 7.13);
-    var c = vec3f(0.045, 0.078, 0.032);
-    if (hv > 0.4) { c = vec3f(0.058, 0.084, 0.033); }
-    if (hv > 0.65) { c = vec3f(0.036, 0.068, 0.048); }
-    if (hv > 0.85) { c = vec3f(0.055, 0.066, 0.038); }
-    if (hv > 0.97) { c = vec3f(0.07, 0.055, 0.04); }
-    if (sp == 1.0) { c = vec3f(0.028, 0.055, 0.045); }
-    if (sp == 2.0) { c = vec3f(0.075, 0.105, 0.036); }
-    if (sp == 3.0) { c = vec3f(0.085, 0.11, 0.045); }
-    albedo = c * (0.8 + 0.45 * fract(hsh * 23.1)) * (0.75 + 0.55 * leaf);
+    let base = vec3f(0.045, 0.075, 0.032);
+    var c = base;
+    if (hv > 0.4) { c = vec3f(0.055, 0.08, 0.032); }
+    if (hv > 0.7) { c = vec3f(0.04, 0.068, 0.038); }
+    if (hv > 0.88) { c = vec3f(0.055, 0.068, 0.036); }
+    if (sp == 1.0) { c = vec3f(0.026, 0.045, 0.03); }
+    if (sp == 2.0) { c = vec3f(0.07, 0.1, 0.036); }
+    if (sp == 3.0) { c = vec3f(0.075, 0.1, 0.04); }
+    let farK = smoothstep(250.0, 1200.0, dist);
+    c = mix(c, select(base, vec3f(0.026, 0.045, 0.03), sp == 1.0) * 0.85, farK);
+    albedo = c * mix(0.8 + 0.4 * fract(hsh * 23.1), 1.0, farK) * (0.75 + 0.5 * leaf);
     // self-shadowing: darker toward the inside and the bottom of the crown
     let h = (i.wp.y - i.info.w) / max(select(13.0, 14.0, sp == 1.0), 1.0);
     let top = saturate(n.y * 0.5 + 0.5);
     ao = saturate(0.35 + 0.75 * saturate(h - 0.25)) * mix(0.6, 1.0, top) * select(0.75 + 0.25 * leaf, 0.65, part < 1.5);
-    rough = 0.72;
-    // soft sky fill on the upper crown and a cool rim where the crown turns away from the viewer
-    emis = albedo * vec3f(0.5, 0.62, 0.9) * (0.12 + 0.35 * top) * ao;
-    emis += vec3f(0.045, 0.06, 0.09) * pow(1.0 - saturate(dot(n, v)), 3.0) * (0.35 + 0.65 * top) * select(1.0, 0.0, part < 1.5);
+    // matte foliage: no sheen, no rim; a soft sky fill on the upper crown that fades with distance
+    rough = 0.92;
+    emis = albedo * vec3f(0.5, 0.62, 0.9) * (0.08 + 0.24 * top) * ao * mix(1.0, 0.35, farK);
   }
-  return gbuf(albedo, rough, n, 0.0, emis, ao, i.mv, mat, select(0.3, 0.6, mat == 0.0));
+  var wet = select(0.0, 0.5, mat == 0.0);
+  // moonlit mist lying in the valley hollows south of the city
+  let mist = valleyMist(i.wp, dist, 0.5);
+  if (mist > 0.0) {
+    albedo *= 1.0 - mist;
+    emis = emis * (1.0 - mist) + mistColor(normalize(i.wp - F.camPos.xyz)) * mist;
+    wet *= 1.0 - mist;
+  }
+  return gbuf(albedo, rough, n, 0.0, emis, ao, i.mv, mat, wet);
 }
 `;
 
@@ -317,6 +345,10 @@ function buildMask(world) {
   for (const p of POSES) {
     const [x, , z] = p.pos, [tx, , tz] = p.target;
     stampLine(x, z, x + (tx - x) * 0.85, z + (tz - z) * 0.85, 9);
+    // a widening wedge in front of the camera, so no crown hangs into the frame from above
+    const l = Math.hypot(tx - x, tz - z), fx = (tx - x) / l, fz = (tz - z) / l;
+    if (p.rel && p.pos[1] < 6) for (let d = 6; d <= 60; d += 6) stampCircle(x + fx * d, z + fz * d, 6 + d * 0.75);
+    for (const [lx, lz] of p.look || []) stampLine(x, z, x + (lx - x) * 0.9, z + (lz - z) * 0.9, 14);
   }
   for (const b of BRIDGES) stampLine(b.ax, b.az, b.bx, b.bz, b.width * 0.5 + 10);
   for (const r of ROUTES) for (let i = 1; i < r.dense.length; i++) stampLine(r.dense[i - 1].x, r.dense[i - 1].z, r.dense[i].x, r.dense[i].z, 9);
@@ -454,7 +486,8 @@ export default {
     }
     const vb = [{ arrayStride: M.stride, attributes: [
       { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32x3' },
-      { shaderLocation: 2, offset: 24, format: 'float32x2' }, { shaderLocation: 3, offset: 32, format: 'float32' }, { shaderLocation: 4, offset: 36, format: 'float32' }] }];
+      { shaderLocation: 2, offset: 24, format: 'float32x2' }, { shaderLocation: 3, offset: 32, format: 'float32' }, { shaderLocation: 4, offset: 36, format: 'float32' },
+      { shaderLocation: 5, offset: 40, format: 'float32' }] }];
     this.pipe = r.gbufferPipeline({ label: 'tree-cards', code: TREE_DRAW_WGSL, groups: [this.dLayout], buffers: vb, cull: 'none' });
     this.pipeOpaque = r.gbufferPipeline({ label: 'trees', code: TREE_DRAW_WGSL, fs: 'fsOpaque', groups: [this.dLayout], buffers: vb, cull: 'none' });
     this.cDesc = { timestampWrites: undefined };

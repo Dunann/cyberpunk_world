@@ -1,12 +1,15 @@
 // Procedural tree meshes for the vegetation module.
-// Vertex layout: pos.xyz, normal.xyz, uv.xy, part, sway  (10 floats)
-//   part: 0 trunk / culm, 1 opaque foliage core, 2 alpha-tested leaf-cluster card (normal = crown normal)
+// Vertex layout: pos.xyz, normal.xyz, uv.xy, part, sway, size  (11 floats)
+//   part: 0 trunk / culm, 1 opaque foliage core, 2 alpha-tested leaf-cluster card (normal = crown normal),
+//         3 opaque willow strand
 //   sway: 0 at the base .. 1 at the top (wind bend weight)
+//   size: cards: half size (pos is the card centre; the card is turned to face the camera in the vertex shader)
+//         strands: half width (pos is on the strand's centre line; widened across the view direction)
 // Species: 0 broadleaf (camphor-like), 1 pine, 2 bamboo clump, 3 weeping willow. LODs: 0 full, 1 low, 2 far.
 
 import { rng } from './math.js';
 
-const STRIDE = 10;
+const STRIDE = 11;
 
 function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
 function norm(a) { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
@@ -14,7 +17,7 @@ function norm(a) { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, 
 class MeshBuilder {
   constructor() { this.v = []; this.i = []; this.i2 = []; }
   get count() { return this.v.length / STRIDE; }
-  vert(p, n, uv, part, sway) { this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], uv[0], uv[1], part, sway); return this.count - 1; }
+  vert(p, n, uv, part, sway, size = 0) { this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], uv[0], uv[1], part, sway, size); return this.count - 1; }
   tri(a, b, c) { this.i.push(a, b, c); }
   // tapered cylinder from p0 (radius r0) to p1 (radius r1)
   tube(p0, p1, r0, r1, seg, part, sw0, sw1) {
@@ -56,15 +59,11 @@ class MeshBuilder {
     const mid = this.vert([c[0], c[1] - droop * 0.3, c[2]], [0, -1, 0], [0, 0], part, swayAt(c[1]));
     for (let k = 0; k < seg; k++) this.tri(mid, base + 1 + k, base + 2 + k);
   }
-  // leaf-cluster card: quad at p with half size s, facing direction f; normal = crown normal cn
-  card(p, s, f, cn, swayAt, sx = 1, sy = 1) {
-    const t = Math.abs(f[1]) < 0.95 ? [0, 1, 0] : [1, 0, 0];
-    const u = norm(cross(f, t)), v = cross(f, u);
+  // leaf-cluster card: camera-facing quad centred at p with half size s; normal = crown normal cn.
+  // (Fixed card orientations showed up as pale streaks when seen edge-on.)
+  card(p, s, f, cn, swayAt) {
     const b = this.count;
-    for (const [a, c] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-      const q = [p[0] + (u[0] * a * sx + v[0] * c * sy) * s, p[1] + (u[1] * a * sx + v[1] * c * sy) * s, p[2] + (u[2] * a * sx + v[2] * c * sy) * s];
-      this.vert(q, cn, [a, c], 2, swayAt(q[1]));
-    }
+    for (const [a, c] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) this.vert(p, cn, [a, c], 2, swayAt(p[1] + c * s * 0.5), s);
     this.i2.push(b, b + 1, b + 2, b, b + 2, b + 3);
   }
   // crown of leaf cards scattered in an ellipsoid (center c, radii r)
@@ -81,19 +80,21 @@ class MeshBuilder {
       this.card(p, size * (0.8 + 0.4 * R()), f, cn, swayAt);
     }
   }
-  // hanging strand of willow leaves (card strip with leaf mask)
-  strand(p, len, wdt, swayAt) {
-    const segs = 3; const base = this.count;
+  // hanging willow strand: a thin opaque ribbon along a drooping centre line, widened across the view
+  // direction in the vertex shader (crisp at any angle, no alpha). uv.y runs 0..1 from the top to the tip.
+  strand(p, len, wdt, swayAt, segs = 5) {
+    const base = this.count;
     const out = norm([p[0], 0, p[2]]);
-    const tx = -out[2] * wdt, tz = out[0] * wdt;
+    const cn = norm([out[0], 0.3, out[2]]);
     for (let k = 0; k <= segs; k++) {
       const t = k / segs, y = p[1] - len * t;
-      const q = [p[0] + out[0] * 0.6 * t * t, y, p[2] + out[2] * 0.6 * t * t];
-      const cn = norm([out[0], 0.3, out[2]]);
-      this.vert([q[0] - tx, q[1], q[2] - tz], cn, [-1, t * 1.8 - 0.9], 2, swayAt(y) + t * 0.9);
-      this.vert([q[0] + tx, q[1], q[2] + tz], cn, [1, t * 1.8 - 0.9], 2, swayAt(y) + t * 0.9);
+      // arches out from the crown, then hangs straight down
+      const q = [p[0] + out[0] * 0.7 * Math.sin(Math.min(t * 3, 1) * 1.57), y, p[2] + out[2] * 0.7 * Math.sin(Math.min(t * 3, 1) * 1.57)];
+      const w = wdt * (1 - 0.55 * t);
+      this.vert(q, cn, [-1, t], 3, swayAt(y) + t * 0.9, w);
+      this.vert(q, cn, [1, t], 3, swayAt(y) + t * 0.9, w);
     }
-    for (let k = 0; k < segs; k++) { const a = base + k * 2; this.i2.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    for (let k = 0; k < segs; k++) { const a = base + k * 2; this.i.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
   }
   finish() {
     const V = this.v, I = this.i;
@@ -192,12 +193,13 @@ function willow(lod) {
     M.tube([0.4, 4.6, 0.2], [2.4, 7.5, 0.8], 0.18, 0.08, 4, 0, sw(4.6), sw(7.5));
     M.tube([0.4, 4.8, 0.2], [-1.6, 7.8, -1.2], 0.18, 0.08, 4, 0, sw(4.8), sw(7.8));
   }
-  M.blob(cc, 2.0, 1.6, 2.0, 0, R, 1, sw, 0.25);
-  M.crown(cc, [2.9, 2.0, 2.9], lod ? 5 : 16, 1.3, R, sw);
-  const n = lod ? 14 : 64;
+  // crown: a dome with a clear outline, then a curtain of thin hanging strands
+  M.blob([0.2, 7.9, 0], 2.9, 1.5, 2.9, lod ? 1 : 2, R, 1, sw, 0.18);
+  M.crown(cc, [2.9, 1.6, 2.9], lod ? 5 : 12, 1.1, R, sw);
+  const n = lod ? 46 : 150;
   for (let k = 0; k < n; k++) {
-    const a = (k / n) * Math.PI * 2 + R() * 0.3, r = 1.4 + R() * 2.0;
-    M.strand([Math.cos(a) * r, 8.2 - r * 0.35 + R() * 0.6, Math.sin(a) * r], 4.8 + R() * 2.6, lod ? 0.4 : 0.2, sw);
+    const a = (k / n) * Math.PI * 2 * 3.0 + R() * 0.4, r = 1.0 + Math.sqrt(R()) * 2.2;
+    M.strand([Math.cos(a) * r, 8.4 - r * 0.45 + R() * 0.4, Math.sin(a) * r], 3.8 + R() * 3.2 + (r - 1) * 0.6, lod ? 0.075 : 0.04, sw, lod ? 3 : 6);
   }
   return M;
 }

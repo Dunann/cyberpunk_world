@@ -47,7 +47,10 @@ fn skyHorizon(dir: vec3f) -> vec3f {
   // atmospheric in-scatter of the city light toward the horizon: the glow a few km away along the view
   // a glow gradient on the horizon toward the city, visible from the gardens and the mountains too
   let far = max(skyCityGlow(F.camPos.xz + h * 2000.0), skyCityGlow(F.camPos.xz + h * 5500.0));
-  return SKY_HORIZON + far * 1.15 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6;
+  // out in the southern mountains a faint moonlit haze sits on the horizon, so the far ridgelines stand
+  // out as darker layers against it (zero anywhere in the city or the gardens)
+  let mtn = smoothstep(3600.0, 4600.0, F.camPos.z);
+  return SKY_HORIZON + far * 1.15 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6 + SKY_MOON_COL * F.moon.w * 0.011 * mtn;
 }
 
 fn skyAmbient(dir: vec3f) -> vec3f {

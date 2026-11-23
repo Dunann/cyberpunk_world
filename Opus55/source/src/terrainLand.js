@@ -64,6 +64,17 @@ fn landBase(p: vec2f) -> f32 {
   // ranges beyond the playable area keep rising, so every ridge has a higher one behind it
   let farW = smoothstep(6500.0, 15000.0, r);
   h += farW * (450.0 + landRidged(wp * 0.00022 + 5.0, 6) * 1900.0 * (0.6 + 0.6 * massif)) * (1.0 - 0.6 * valley * (1.0 - smoothstep(9000.0, 15000.0, r)));
+  // a spur ridge closing the south valley ~2.3 km beyond the crag, with a saddle in the middle: from the
+  // viewpoint the valley ends in a layered ridgeline instead of opening onto the haze at the world edge
+  {
+    let dc = p - vec2f(700.0, 4560.0);
+    let al = dot(dc, vec2f(0.188, 0.9822));
+    let ac = dot(dc, vec2f(0.9822, -0.188));
+    let cr = 2300.0 + 220.0 * sin(ac * 0.0019 + 1.0) + fbm2(p * 0.0009, 3) * 160.0;
+    let k = exp(-pow((al - cr) / 340.0, 2.0)) * valley;
+    let crest = 600.0 + landRidged(p * 0.0012, 4) * 240.0 - 120.0 * exp(-pow((ac - 150.0) / 450.0, 2.0));
+    h = max(h, mix(h, crest, k));
+  }
   // cliff-top lookout crag above the south valley (viewpoint 9): flat top, sheer drop toward the valley
   {
     let dc = p - vec2f(700.0, 4560.0);
