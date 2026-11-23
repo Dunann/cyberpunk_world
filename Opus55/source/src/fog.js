@@ -28,7 +28,7 @@ const HALO_R = 0.6;                                        // fog halo radius re
 const HZ = FOG.D / 2;                                      // depth resolution of the evaluated medium
 const CX = 8, CY = 8, CZ = 8;                              // cluster size in froxels (CZ in output slices)
 const NCX = Math.ceil(FOG.W / CX), NCY = Math.ceil(FOG.H / CY), NCZ = Math.ceil(FOG.D / CZ);
-const CL_STRIDE = 64, CL_MAX = 63;
+const CL_STRIDE = 96, CL_MAX = 95;
 const NOISE_N = 64;
 
 // Light arriving at a point in the haze from everything except the point lights: night sky and moonlit
@@ -37,10 +37,13 @@ const NOISE_N = 64;
 // Shared with rain.js, which subtracts it from the radiance volume to keep only the nearby point lights.
 export const FOG_AMBIENT_WGSL = /* wgsl */ `
 fn fogAmbientLi(p: vec3f, dir: vec3f, hA: f32, g: vec3f, glowGain: f32) -> vec3f {
-  var Li = vec3f(0.009, 0.011, 0.02) + skyCityGlow(p.xz) * vec3f(0.26, 0.32, 0.5);
-  var gl = g * glowGain * (exp(-hA / 90.0) * 0.75 + exp(-hA / 600.0) * 0.25);
-  gl /= 1.0 + max(gl.r, max(gl.g, gl.b)) * 4.0; // soft knee: very dense districts must not wash out the haze
-  gl = mix(vec3f(luma(gl)), gl, 0.45) * vec3f(0.78, 0.8, 1.25);
+  // deep blue-violet over the city, lighter moonlit haze toward the nature areas
+  let nat = skyNature();
+  var Li = vec3f(0.009, 0.011, 0.02) * mix(vec3f(0.45, 0.4, 0.7), vec3f(1.0), nat) + skyCityGlow(p.xz) * vec3f(0.14, 0.16, 0.32);
+  // street glow stays low and local (it must not light up the sky behind a lamp-lit market)
+  var gl = g * glowGain * (exp(-hA / 55.0) * 0.88 + exp(-hA / 350.0) * 0.12);
+  gl /= 1.0 + max(gl.r, max(gl.g, gl.b)) * 5.0; // soft knee: very dense districts must not wash out the haze
+  gl = mix(vec3f(luma(gl)), gl, 0.6) * vec3f(0.8, 0.78, 1.2);
   let c = dot(dir, F.moon.xyz);
   let hg = 1.5625 - 1.5 * c;
   Li += vec3f(0.62, 0.70, 1.0) * F.moon.w * (0.0042 * 0.4375 / (hg * sqrt(hg)) + 0.014);
@@ -292,10 +295,12 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wg: ve
       workgroupBarrier();
       let base = ((s / ${CZ / 2}u) * NCY * NCX + tileXY) * CL_STRIDE;
       cnt = min(clusters[base], CL_MAX);
-      if (li < cnt) {
-        let L = lights[clusters[base + 1u + li]];
-        wl[li * 2u] = vec4f(L.posR.xyz, L.posR.w * HALO_R);
-        wl[li * 2u + 1u] = vec4f(L.color.rgb * neonFlicker(L.color.w, t), 0.0);
+      for (var j = li; j < cnt; j += 64u) {
+        let L = lights[clusters[base + 1u + j]];
+        // fade out toward the near-light range so lights never pop in or out with camera distance
+        let fade = 1.0 - smoothstep(FU.misc.x * 0.7, FU.misc.x, length(L.posR.xyz - cam));
+        wl[j * 2u] = vec4f(L.posR.xyz, L.posR.w * HALO_R);
+        wl[j * 2u + 1u] = vec4f(L.color.rgb * (neonFlicker(L.color.w, t) * fade), 0.0);
       }
       workgroupBarrier();
     }
@@ -396,7 +401,7 @@ function makeNoise(N) {
 export default {
   name: 'fog',
   // Artistic controls (adjustable live from the console: __ctx.modules.find(m => m.name === 'fog').tune)
-  tune: { halo: 1.0, glow: 0.0045, mist: 0.0009, edge: 0.0016 },
+  tune: { halo: 1.0, glow: 0.0028, mist: 0.0009, edge: 0.0016 },
 
   init(ctx) {
     const d = ctx.device, r = ctx.renderer;
@@ -519,7 +524,9 @@ export default {
     const u = this.u, c = ctx.cam, tn = this.tune;
     const reset = !this.hasHistory || ctx.renderer.resetHistory;
     const k = (this.frame % 16) + 1;
-    u[0] = this.last[0]; u[1] = this.last[1]; u[2] = this.last[2]; u[3] = reset ? 1 : 0.1;
+    // The history is reprojected in world space, so it stays valid after a camera cut (reprojection rejects
+    // what was not in view). Only the very first frame starts from scratch; after a cut it converges faster.
+    u[0] = this.last[0]; u[1] = this.last[1]; u[2] = this.last[2]; u[3] = !this.hasHistory ? 1 : reset ? 0.2 : 0.1;
     u[4] = halton(k, 2) - 0.5; u[5] = halton(k, 3) - 0.5; u[6] = halton(k, 5) - 0.5; u[7] = ctx.lights.count;
     u[8] = tn.halo; u[9] = tn.glow; u[10] = tn.mist; u[11] = tn.edge;
     u[12] = NEAR_R;

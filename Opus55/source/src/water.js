@@ -198,26 +198,30 @@ fn ndcOf(dir: vec3f) -> vec2f {
   }
   if (rw < 0.01) {
     let s = textureSampleLevel(reflTex, sampClamp, uv, 0.0);
-    refl = select(skyAmbient(R), s.rgb, s.a > 1.9);
+    refl = select(skyAmbient(R) * mix(1.0, 0.6, saturate(F.params.x)), s.rgb, s.a > 1.9);
   } else {
     refl /= rw;
   }
 
   // moon glitter
   let hm = normalize(v + F.moon.xyz);
-  let a = 0.08 + sqrt(sigma2) * 0.8;
+  let a = 0.12 + sqrt(sigma2) * 1.0;
   let a2 = a * a;
   let nh = max(dot(n, hm), 0.0);
   let dd = nh * nh * (a2 - 1.0) + 1.0;
   let D = a2 / (PI * dd * dd);
-  let moonSpec = vec3f(0.55, 0.65, 0.95) * F.moon.w * D * 0.06 * saturate(dot(n, F.moon.xyz));
+  let moonSpec = vec3f(0.55, 0.65, 0.95) * F.moon.w * D * 0.06 * saturate(dot(n, F.moon.xyz)) * (1.0 - 0.85 * saturate(F.params.x * 1.5));
 
   let NdotV = saturate(dot(n, v));
-  let fres = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
+  // in rain the rough, rain-pocked surface near the camera never reaches the full grazing mirror: without this cap
+  // the overcast sky reflects off back-tilted wave facets as broad white patches
+  let fresCap = mix(1.0, 0.4, saturate(F.params.x) * (1.0 - smoothstep(60.0, 260.0, dist)));
+  let fres = min(0.02 + 0.98 * pow(1.0 - NdotV, 5.0), fresCap);
   var col = mix(under, refl, fres) + moonSpec;
 
   // ---- foam: shoreline (shallow) + wakes, advected with the current
-  let shore = (1.0 - smoothstep(0.0, 1.6, vdepth)) * smoothstep(0.02, 0.25, vdepth);
+  // shore foam only on the flowing rivers; the lake and canal are still water
+  let shore = (1.0 - smoothstep(0.0, 1.6, vdepth)) * smoothstep(0.02, 0.25, vdepth) * smoothstep(0.2, 0.6, river);
   foam = max(foam, shore * 0.9) * (1.0 - smoothstep(300.0, 900.0, dist));
   if (foam > 0.01) {
     let fp = p.xz - flow * t * 0.6;

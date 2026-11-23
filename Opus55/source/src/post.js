@@ -146,7 +146,10 @@ fn rc(c: vec3f) -> vec3f { return c / (1.0 + c); }
   // ---- bloom (wide, soft) and rain layer
   let bloom = textureSampleLevel(bloomTex, smp, uv, 0.0).rgb * P.a.w;
   hdr = mix(hdr, bloom, P.a.x) + bloom * (P.a.x * 0.35);
-  if (P.a.z > 0.5) { hdr += textureSampleLevel(rainTex, smp, uv, 0.0).rgb; }
+  if (P.a.z > 0.5) {
+    let rl = textureSampleLevel(rainTex, smp, uv, 0.0);
+    hdr = hdr * (1.0 - min(rl.a, 1.0) * 0.4) + rl.rgb;
+  }
 
   // ---- exposure and vignette (before the tonemap so highlights survive)
   hdr *= F.misc.y;
