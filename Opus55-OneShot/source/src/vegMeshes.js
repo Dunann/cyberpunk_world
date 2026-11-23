@@ -103,9 +103,7 @@ class MeshBuilder {
       const n = [V[a + 3] + V[b + 3] + V[c + 3], V[a + 4] + V[b + 4] + V[c + 4], V[a + 5] + V[b + 5] + V[c + 5]];
       if (cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2] < 0) { const s = I[t + 1]; I[t + 1] = I[t + 2]; I[t + 2] = s; }
     }
-    for (const x of this.i2) I.push(x);
-    this.i2 = [];
-    return this;
+    return this;   // opaque triangles in this.i, alpha-tested cards in this.i2
   }
 }
 
@@ -132,8 +130,7 @@ function broadleaf(lod) {
   const H = 13; const sw = (y) => Math.max(0, y / H) ** 1.5;
   const cc = [0, 9.0, 0], cr = [4.6, 3.4, 4.6];
   if (lod === 2) {
-    M.blob(cc, cr[0] * 0.62, cr[1] * 0.62, cr[2] * 0.62, 0, R, 1, sw, 0.1);
-    M.crown(cc, cr, 7, 2.6, R, sw);
+    M.blob(cc, cr[0] * 0.92, cr[1] * 0.9, cr[2] * 0.92, 0, R, 1, sw, 0.22);
     return M;
   }
   M.tube([0, -0.5, 0], [0, 7.5, 0], 0.34, 0.2, lod ? 4 : 6, 0, 0, sw(7.5));
@@ -142,10 +139,10 @@ function broadleaf(lod) {
     M.tube([0, 5.2, 0], [-2.0, 8.8, -1.4], 0.14, 0.07, 4, 0, sw(5.2), sw(8.8));
     M.tube([0, 5.8, 0], [0.4, 9.5, 2.2], 0.13, 0.06, 4, 0, sw(5.8), sw(9.5));
     M.blob(cc, cr[0] * 0.6, cr[1] * 0.6, cr[2] * 0.6, 1, R, 1, sw, 0.18);
-    M.crown(cc, cr, 44, 1.5, R, sw);
+    M.crown(cc, cr, 26, 1.85, R, sw);
   } else {
     M.blob(cc, cr[0] * 0.62, cr[1] * 0.62, cr[2] * 0.62, 0, R, 1, sw, 0.15);
-    M.crown(cc, cr, 16, 2.2, R, sw);
+    M.crown(cc, cr, 5, 3.2, R, sw);
   }
   return M;
 }
@@ -168,8 +165,7 @@ function bamboo(lod) {
   const M = new MeshBuilder(), R = rng(31 + lod);
   const H = 10; const sw = (y) => Math.max(0, y / H) ** 1.2;
   if (lod === 2) {
-    M.blob([0, 6.5, 0], 1.6, 3.4, 1.6, 0, R, 1, sw, 0.1);
-    M.crown([0, 6.5, 0], [2.4, 4.0, 2.4], 6, 2.2, R, sw);
+    M.blob([0, 6.5, 0], 2.2, 3.8, 2.2, 0, R, 1, sw, 0.2);
     return M;
   }
   const n = lod ? 6 : 14;
@@ -178,7 +174,7 @@ function bamboo(lod) {
     const h = 7 + R() * 4, lean = 0.25 + R() * 0.6;
     const top = [x + Math.cos(a) * lean * 1.5, h, z + Math.sin(a) * lean * 1.5];
     M.tube([x, -0.3, z], top, 0.065, 0.035, lod ? 3 : 4, 0, 0, sw(h));
-    M.crown([top[0] * 0.8, h - 2.2, top[2] * 0.8], [1.3, 2.4, 1.3], lod ? 4 : 9, 0.9, R, sw);
+    M.crown([top[0] * 0.8, h - 2.2, top[2] * 0.8], [1.3, 2.4, 1.3], lod ? 3 : 9, lod ? 1.1 : 0.9, R, sw);
   }
   return M;
 }
@@ -188,8 +184,7 @@ function willow(lod) {
   const H = 10; const sw = (y) => Math.max(0, y / H) ** 1.3;
   const cc = [0.2, 7.6, 0];
   if (lod === 2) {
-    M.blob([0, 6.2, 0], 3.0, 2.8, 3.0, 0, R, 1, sw, 0.1);
-    M.crown([0, 6.2, 0], [4.2, 3.6, 4.2], 7, 2.6, R, sw);
+    M.blob([0, 6.2, 0], 3.8, 3.4, 3.8, 0, R, 1, sw, 0.2);
     return M;
   }
   M.tube([0, -0.5, 0], [0.4, 5, 0.2], 0.42, 0.3, lod ? 4 : 6, 0, 0, sw(5));
@@ -197,29 +192,31 @@ function willow(lod) {
     M.tube([0.4, 4.6, 0.2], [2.4, 7.5, 0.8], 0.18, 0.08, 4, 0, sw(4.6), sw(7.5));
     M.tube([0.4, 4.8, 0.2], [-1.6, 7.8, -1.2], 0.18, 0.08, 4, 0, sw(4.8), sw(7.8));
   }
-  M.blob(cc, 2.4, 1.3, 2.4, 0, R, 1, sw, 0.25);
-  M.crown(cc, [3.4, 1.6, 3.4], lod ? 8 : 20, 1.4, R, sw);
-  const n = lod ? 16 : 48;
+  M.blob(cc, 2.0, 1.6, 2.0, 0, R, 1, sw, 0.25);
+  M.crown(cc, [2.9, 2.0, 2.9], lod ? 5 : 16, 1.3, R, sw);
+  const n = lod ? 10 : 44;
   for (let k = 0; k < n; k++) {
-    const a = (k / n) * Math.PI * 2 + R() * 0.3, r = 2.2 + R() * 1.6;
-    M.strand([Math.cos(a) * r, 7.2 + R() * 0.9, Math.sin(a) * r], 4.2 + R() * 2.4, lod ? 0.55 : 0.32, sw);
+    const a = (k / n) * Math.PI * 2 + R() * 0.3, r = 1.4 + R() * 2.0;
+    M.strand([Math.cos(a) * r, 8.2 - r * 0.35 + R() * 0.6, Math.sin(a) * r], 4.8 + R() * 2.6, lod ? 0.55 : 0.34, sw);
   }
   return M;
 }
 
 export const SPECIES = 4;
-export const LODS = 3;
+export const LODS = 4;   // 3 = far-ring clumps (same mesh as LOD 2, separate list so it draws last)
 
-// Builds all meshes into one vertex/index buffer. Returns { verts, idx, draws: [[firstIndex, indexCount] x 12], stride }.
+// Builds all meshes into one vertex/index buffer. Returns { verts, idx, draws: [[opaqueFirst, opaqueCount, cardFirst, cardCount] per list], stride }.
 export function buildTreeMeshes() {
   const makers = [broadleaf, pine, bamboo, willow];
   const V = [], I = [], draws = [];
   for (let s = 0; s < SPECIES; s++) for (let l = 0; l < LODS; l++) {
-    const M = makers[s](l).finish();
+    const M = makers[s](Math.min(l, 2)).finish();
     const base = V.length / STRIDE;
-    draws.push([I.length, M.i.length]);
+    // [opaque first index, opaque count, card first index, card count]
+    draws.push([I.length, M.i.length, I.length + M.i.length, M.i2.length]);
     for (const x of M.v) V.push(x);
     for (const x of M.i) I.push(x + base);
+    for (const x of M.i2) I.push(x + base);
   }
   return { verts: new Float32Array(V), idx: new Uint32Array(I), draws, stride: STRIDE * 4 };
 }

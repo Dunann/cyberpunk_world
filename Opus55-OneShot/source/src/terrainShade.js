@@ -228,13 +228,16 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   var wet = 0.35;
   let px = max(length(dX), length(dY));     // pixel footprint in meters
   let slope = 1.0 - n.y;
-  let N1 = nz(p.xz, 1.0 / 40.0, dX, dY);    // 5 m .. 0.6 m features
-  let N2 = nz(p.xz, 1.0 / 6.0, dX, dY);     // 0.75 m .. 0.1 m features
+  // detail noise only where it is resolvable (mip average 0.5 beyond)
+  var N1 = vec4f(0.5); var N2 = vec4f(0.5);
+  if (px < 6.0) { N1 = nz(p.xz, 1.0 / 40.0, dX, dY); }    // 5 m .. 0.6 m features
+  if (px < 0.9) { N2 = nz(p.xz, 1.0 / 6.0, dX, dY); }     // 0.75 m .. 0.1 m features
 
   // ---- natural detail
   if (forest > 0.05) {
     // tree crowns (baked dome texture, mip-filtered so it fades into the canopy colour far away)
-    let C = textureSampleGrad(tCanopy, sRep, p.xz / 104.0, dX / 104.0, dY / 104.0);
+    var C = vec4f(0.5, 0.5, 0.42, 0.5);   // mip average of the crown texture
+    if (px < 10.0) { C = textureSampleGrad(tCanopy, sRep, p.xz / 104.0, dX / 104.0, dY / 104.0); }
     let cf = forest * (1.0 - smoothstep(4.0, 12.0, px));
     let dn = (C.rg * 2.0 - 1.0) * 1.6 * cf;
     n = normalize(n + vec3f(dn.x, 0.0, dn.y));
@@ -256,8 +259,8 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     n = normalize(n + vec3f(nn.x, 0.0, nn.y) * 0.4 * f * rockW - vec3f(0.0, (lg - 0.5) * 0.35 * f * rockW, 0.0));
     albedo *= 1.0 + (hash21(vec2f(floor(band), 3.0)) - 0.5) * 0.5 * f * rockW;
     albedo = mix(albedo, vec3f(0.035, 0.05, 0.025), smoothstep(0.55, 0.7, N1.g) * rockW * 0.7); // moss
-    rough = mix(rough, 0.5, rockW);
-    wet = mix(wet, 0.85, rockW);
+    rough = mix(rough, mix(0.5, 0.8, smoothstep(300.0, 1500.0, dist)), rockW);
+    wet = mix(wet, mix(0.8, 0.35, smoothstep(300.0, 1500.0, dist)), rockW);
   }
   if (terr > 0.3) {
     // terraces: flat beds (some flooded rice paddies that mirror the sky) and grassy risers

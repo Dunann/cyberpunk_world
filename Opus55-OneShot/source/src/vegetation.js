@@ -25,7 +25,7 @@ struct Tree { a: vec4f, b: vec4f };   // a: x, y, z, scale   b: rotation, hash, 
 const SCATTER_WGSL = /* wgsl */ `
 ${VEG_COMMON}
 struct VegU { ringA: vec4f, ringB: vec4f, p: vec4f, lod: vec4f };
-@group(1) @binding(0) var<storage, read_write> args: array<atomic<u32>, ${LISTS * 5}>;
+@group(1) @binding(0) var<storage, read_write> args: array<atomic<u32>, ${LISTS * 10}>;
 @group(1) @binding(1) var<storage, read_write> outT: array<Tree>;
 @group(1) @binding(2) var<storage, read> fixedT: array<Tree>;
 @group(1) @binding(3) var nearN: texture_2d<f32>;
@@ -60,7 +60,8 @@ fn place(p: vec2f, h4: vec4f, far: bool) {
   var N: vec4f;
   if (wN > 0.5) { N = textureSampleLevel(nearN, lsamp, (p - T_ORIGIN) / T_SIZE, 0.0); }
   else { N = textureSampleLevel(farN, lsamp, (p - FAR_ORIGIN) / FAR_SIZE, 0.0); }
-  let forest = N.a;
+  // clumpy stands with small clearings, so the canopy does not read as a regular grid
+  let forest = N.a * (0.45 + 0.75 * vnoise2(p * 0.03 + 3.7));
   if (h4.z > forest * VU.p.z) { return; }
   let h = tHeight(p);
   if (h < 1.6) { return; }
@@ -73,12 +74,12 @@ fn place(p: vec2f, h4: vec4f, far: bool) {
   }
   let d = distance(vec3f(p.x, h, p.y), F.camPos.xyz);
   // species
-  let bam = smoothstep(0.66, 0.74, vnoise2(p * 0.006 + 5.0)) * (1.0 - smoothstep(110.0, 180.0, h));
+  let bam = smoothstep(0.72, 0.8, vnoise2(p * 0.006 + 5.0)) * (1.0 - smoothstep(110.0, 180.0, h));
   let pin = smoothstep(260.0, 520.0, h + (vnoise2(p * 0.003) - 0.5) * 420.0);
   var sp = 0u;
   if (h4.w < pin) { sp = 1u; }
   if (h4.w > 1.0 - bam) { sp = 2u; }
-  var s = mix(0.75, 1.3, fract(h4.z * 7.31 + h4.w * 3.7));
+  var s = mix(0.7, 1.5, fract(h4.z * 7.31 + h4.w * 3.7));
   if (sp == 2u) { s = mix(0.8, 1.15, h4.x); }
   // ring fades (scale-in / scale-out so transitions never pop)
   var fade = 1.0;
@@ -86,9 +87,13 @@ fn place(p: vec2f, h4: vec4f, far: bool) {
   if (far) {
     fade = smoothstep(VU.p.x - 140.0, VU.p.x, d) * (1.0 - smoothstep(VU.p.y - 350.0, VU.p.y, d));
     s *= 1.65;
-    lod = 2u;
+    lod = 3u;
   } else {
     fade = 1.0 - smoothstep(VU.p.x - 140.0, VU.p.x, d);
+    // density LOD: thin out distant trees and grow the survivors so canopy coverage stays the same
+    let keep = clamp(pow(210.0 / d, 2.0), 0.2, 1.0);
+    if (fract(h4.x * 13.7 + h4.y * 5.3) > keep) { return; }
+    s *= min(inverseSqrt(keep), 1.75);
   }
   s *= fade;
   if (s < 0.05) { return; }
@@ -97,28 +102,44 @@ fn place(p: vec2f, h4: vec4f, far: bool) {
   var t: Tree;
   t.a = vec4f(p.x, h - 0.3, p.y, s);
   t.b = vec4f(h4.x * TAU, h4.y, f32(sp), fade);
-  emit(t, sp * 3u + lod);
+  emit(t, sp * ${LODS}u + lod);
 }
 
-@compute @workgroup_size(8, 8)
+// Square spiral around the camera cell: thread order = near to far, so the appended instances are roughly
+// sorted front-to-back and early-z rejects hidden trees (tree cost is dominated by overdraw).
+fn spiral(i: u32) -> vec2i {
+  if (i == 0u) { return vec2i(0); }
+  var k = i32(ceil((sqrt(f32(i) + 1.0) - 1.0) * 0.5));
+  if ((2 * k + 1) * (2 * k + 1) <= i32(i)) { k += 1; }
+  if ((2 * k - 1) * (2 * k - 1) > i32(i)) { k -= 1; }
+  let j = i32(i) - (2 * k - 1) * (2 * k - 1);
+  let side = j / (2 * k);
+  let o = j % (2 * k);
+  if (side == 0) { return vec2i(k, -k + 1 + o); }
+  if (side == 1) { return vec2i(k - 1 - o, k); }
+  if (side == 2) { return vec2i(-k, k - 1 - o); }
+  return vec2i(-k + 1 + o, -k);
+}
+
+@compute @workgroup_size(64)
 fn scatterNear(@builtin(global_invocation_id) id: vec3u) {
-  let n = u32(VU.ringA.w);
-  if (id.x >= n || id.y >= n) { return; }
-  let cell = VU.ringA.xy + vec2f(id.xy) * VU.ringA.z;
-  let c = cell / VU.ringA.z;
+  let K = u32(VU.ringA.w);
+  if (id.x >= (2u * K + 1u) * (2u * K + 1u)) { return; }
+  let c = VU.ringA.xy + vec2f(spiral(id.x));
+  let cell = c * VU.ringA.z;
   let h = vec4f(hash22(c), hash22(c + 71.3));
   place(cell + (0.1 + 0.8 * h.xy) * VU.ringA.z, h, false);
 }
 
-@compute @workgroup_size(8, 8)
+@compute @workgroup_size(64)
 fn scatterFar(@builtin(global_invocation_id) id: vec3u) {
-  let n = u32(VU.ringB.w);
-  if (id.x >= n || id.y >= n) { return; }
-  let cell = VU.ringB.xy + vec2f(id.xy) * VU.ringB.z;
+  let K = u32(VU.ringB.w);
+  if (id.x >= (2u * K + 1u) * (2u * K + 1u)) { return; }
+  let c = VU.ringB.xy + vec2f(spiral(id.x));
+  let cell = c * VU.ringB.z;
   let mid = cell + VU.ringB.z * 0.5 - F.camPos.xz;
   if (dot(mid, mid) < (VU.p.x - 200.0) * (VU.p.x - 200.0)) { return; }
-  let c = cell / VU.ringB.z + 9000.0;
-  let h = vec4f(hash22(c), hash22(c + 71.3));
+  let h = vec4f(hash22(c + 9000.0), hash22(c + 9071.3));
   place(cell + (0.1 + 0.8 * h.xy) * VU.ringB.z, h, true);
 }
 
@@ -131,13 +152,14 @@ fn cullFixed(@builtin(global_invocation_id) id: vec3u) {
   let s = t.a.w;
   if (!inFrustum(t.a.xyz + vec3f(0.0, 6.0 * s, 0.0), 9.0 * s)) { return; }
   t.b.w = 1.0;
-  emit(t, u32(t.b.z) * 3u + lodOf(d));
+  emit(t, u32(t.b.z) * ${LODS}u + lodOf(d));
 }
 
 @compute @workgroup_size(${LISTS})
 fn clampArgs(@builtin(local_invocation_index) i: u32) {
-  let c = atomicLoad(&args[i * 5u + 1u]);
-  atomicStore(&args[i * 5u + 1u], min(c, CAP));
+  let c = min(atomicLoad(&args[i * 5u + 1u]), CAP);
+  atomicStore(&args[i * 5u + 1u], c);
+  atomicStore(&args[(i + ${LISTS}u) * 5u + 1u], c);   // card draw of the same list
 }
 `;
 
@@ -193,9 +215,22 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   return o;
 }
 
+// Alpha-tested leaf cards (separate pipeline so the opaque parts keep full early-z).
 @fragment fn fs(i: VOut, @builtin(front_facing) ff: bool) -> GOut {
   let dUx = dpdx(i.uv); let dUy = dpdy(i.uv);
+  let hsh = i.info.y;
+  let k = 0.3;
+  let q = i.uv * k + vec2f(hsh * 0.37 + i.lp.x * 0.05, hsh * 0.71 + i.lp.z * 0.05);
+  let N = textureSampleGrad(tNoise, sRep, q, dUx * k, dUy * k);
+  let m = N.g * 1.3 + N.b * 0.45 - length(i.uv) * 0.9;
+  if (m < 0.42) { discard; }
+  return shadeTree(i, ff, vec4f(N.rgb, saturate((m - 0.42) * 4.0)), vec2f(0.0), vec2f(0.0));
+}
+@fragment fn fsOpaque(i: VOut, @builtin(front_facing) ff: bool) -> GOut {
   let dLx = dpdx(i.lp.xz) * 0.12; let dLy = dpdy(i.lp.xz) * 0.12;
+  return shadeTree(i, ff, vec4f(0.0), dLx, dLy);
+}
+fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
   let sp = i.info.x; let hsh = i.info.y; let part = i.info.z;
   var n = normalize(i.n);
   var albedo: vec3f; var rough = 0.7; var mat = 1.0; var ao = 1.0;
@@ -211,15 +246,8 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   } else {
     var leaf = 0.5;
     if (part > 1.5) {
-      // leaf-cluster card: noise mask, clipped toward the card edge
-      let k = 0.3;
-      let q = i.uv * k + vec2f(hsh * 0.37 + i.lp.x * 0.05, hsh * 0.71 + i.lp.z * 0.05);
-      let N = textureSampleGrad(tNoise, sRep, q, dUx * k, dUy * k);
-      let r = length(i.uv);
-      let m = N.g * 1.3 + N.b * 0.45 - r * 0.9;
-      if (m < 0.42) { discard; }
-      leaf = saturate((m - 0.42) * 4.0);
-      n = normalize(n + vec3f(N.r - 0.5, 0.0, N.b - 0.5) * 1.4);
+      leaf = card.a;
+      n = normalize(n + vec3f(card.r - 0.5, 0.0, card.b - 0.5) * 0.9);
     } else {
       if (!ff) { n = -n; }
       let q = i.lp.xz * 0.12 + i.lp.y * 0.05 + hsh;
@@ -227,16 +255,16 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
       n = normalize(n + vec3f(N.r - 0.5, N.g - 0.5, N.b - 0.5) * 1.2);
       leaf = N.g;
     }
-    let base = array<vec3f, 4>(vec3f(0.040, 0.066, 0.026), vec3f(0.024, 0.044, 0.030), vec3f(0.060, 0.085, 0.028), vec3f(0.065, 0.085, 0.032));
+    let base = array<vec3f, 4>(vec3f(0.055, 0.088, 0.034), vec3f(0.032, 0.058, 0.040), vec3f(0.075, 0.105, 0.036), vec3f(0.080, 0.105, 0.040));
     albedo = base[u32(sp)];
     albedo *= mix(vec3f(0.85, 1.0, 0.9), vec3f(1.2, 1.1, 0.78), fract(hsh * 13.7));
     albedo *= 0.7 + 0.6 * leaf;
     // self-shadowing: darker toward the inside and the bottom of the crown
     let h = (i.wp.y - i.info.w) / max(select(13.0, 14.0, sp == 1.0), 1.0);
     ao = saturate(0.3 + 0.8 * saturate(h - 0.25)) * mix(0.55, 1.0, saturate(n.y * 0.5 + 0.5)) * select(0.7 + 0.3 * leaf, 0.6, part < 1.5);
-    rough = 0.55;
+    rough = 0.72;
   }
-  return gbuf(albedo, rough, n, 0.0, vec3f(0.0), ao, i.mv, mat, 0.65);
+  return gbuf(albedo, rough, n, 0.0, vec3f(0.0), ao, i.mv, mat, select(0.3, 0.6, mat == 0.0));
 }
 `;
 
@@ -313,11 +341,11 @@ export default {
     if (!T) throw new Error('vegetation needs the terrain module');
     const q = ctx.quality.level;
     this.density = q >= 2 ? 1.0 : q === 1 ? 0.75 : 0.5;
-    this.RA = q >= 2 ? 720 : 520;
-    this.RB = q >= 2 ? 2500 : 1800;
-    this.cellA = 5.2; this.cellB = 13;
-    this.nA = Math.ceil(this.RA * 2 / this.cellA) + 1;
-    this.nB = Math.ceil(this.RB * 2 / this.cellB) + 1;
+    this.RA = q >= 2 ? 650 : 480;
+    this.RB = q >= 2 ? 2100 : 1600;
+    this.cellA = 6.2; this.cellB = 20;
+    this.KA = Math.ceil(this.RA / this.cellA) + 1;
+    this.KB = Math.ceil(this.RB / this.cellB) + 1;
 
     // meshes
     const M = buildTreeMeshes();
@@ -325,9 +353,18 @@ export default {
     d.queue.writeBuffer(this.vbuf, 0, M.verts);
     this.ibuf = d.createBuffer({ size: M.idx.byteLength, usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.ibuf, 0, M.idx);
-    this.argsInit = new Uint32Array(LISTS * 5);
-    M.draws.forEach(([first, count], k) => { this.argsInit.set([count, 0, first, 0, 0], k * 5); });
-    this.argsBuf = d.createBuffer({ size: this.argsInit.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST });
+    // args: LISTS opaque draws, then LISTS card draws (same instance counts, written by clampArgs)
+    this.argsInit = new Uint32Array(LISTS * 10);
+    this.hasCards = M.draws.map((dr) => dr[3] > 0);
+    M.draws.forEach(([of, oc, cf, cc], k) => { this.argsInit.set([oc, 0, of, 0, 0], k * 5); this.argsInit.set([cc, 0, cf, 0, 0], (LISTS + k) * 5); });
+    this.argsBuf = d.createBuffer({ size: this.argsInit.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    // debug: instance counts per list (dev tools)
+    window.__vegCounts = async () => {
+      const rb = d.createBuffer({ size: this.argsInit.byteLength, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+      const e = d.createCommandEncoder(); e.copyBufferToBuffer(this.argsBuf, 0, rb, 0, this.argsInit.byteLength); d.queue.submit([e.finish()]);
+      await rb.mapAsync(GPUMapMode.READ); const a = new Uint32Array(rb.getMappedRange().slice(0)); rb.destroy();
+      const out = []; for (let k = 0; k < LISTS; k++) out.push(a[k * 5 + 1]); return out;
+    };
     this.instBuf = d.createBuffer({ size: LISTS * CAP * 32, usage: GPUBufferUsage.STORAGE });
 
     // exclusion mask
@@ -387,7 +424,8 @@ export default {
     const vb = [{ arrayStride: M.stride, attributes: [
       { shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32x3' },
       { shaderLocation: 2, offset: 24, format: 'float32x2' }, { shaderLocation: 3, offset: 32, format: 'float32' }, { shaderLocation: 4, offset: 36, format: 'float32' }] }];
-    this.pipe = r.gbufferPipeline({ label: 'trees', code: TREE_DRAW_WGSL, groups: [this.dLayout], buffers: vb, cull: 'none' });
+    this.pipe = r.gbufferPipeline({ label: 'tree-cards', code: TREE_DRAW_WGSL, groups: [this.dLayout], buffers: vb, cull: 'none' });
+    this.pipeOpaque = r.gbufferPipeline({ label: 'trees', code: TREE_DRAW_WGSL, fs: 'fsOpaque', groups: [this.dLayout], buffers: vb, cull: 'none' });
     this.cDesc = { timestampWrites: undefined };
     ctx.terrainLateHost = this;
   },
@@ -441,37 +479,47 @@ export default {
 
   compute(ctx, enc) {
     const c = ctx.cam, v = this.vu;
-    const a0x = Math.floor((c.x - this.RA) / this.cellA) * this.cellA, a0z = Math.floor((c.z - this.RA) / this.cellA) * this.cellA;
-    const b0x = Math.floor((c.x - this.RB) / this.cellB) * this.cellB, b0z = Math.floor((c.z - this.RB) / this.cellB) * this.cellB;
-    v[0] = a0x; v[1] = a0z; v[2] = this.cellA; v[3] = this.nA;
-    v[4] = b0x; v[5] = b0z; v[6] = this.cellB; v[7] = this.nB;
+    v[0] = Math.floor(c.x / this.cellA); v[1] = Math.floor(c.z / this.cellA); v[2] = this.cellA; v[3] = this.KA;
+    v[4] = Math.floor(c.x / this.cellB); v[5] = Math.floor(c.z / this.cellB); v[6] = this.cellB; v[7] = this.KB;
     v[8] = this.RA; v[9] = this.RB; v[10] = this.density; v[11] = this.nFixed;
-    v[12] = 70; v[13] = 260; v[14] = 1600; v[15] = 0;
+    v[12] = 42; v[13] = 130; v[14] = 1600; v[15] = 0;
     ctx.device.queue.writeBuffer(this.vuBuf, 0, v);
     ctx.device.queue.writeBuffer(this.argsBuf, 0, this.argsInit);
     this.cDesc.timestampWrites = ctx.prof.ts('vegetation');
     const p = enc.beginComputePass(this.cDesc);
     p.setBindGroup(0, ctx.renderer.frameGroup);
     p.setBindGroup(1, this.cGroup);
-    p.setPipeline(this.pNear); p.dispatchWorkgroups(Math.ceil(this.nA / 8), Math.ceil(this.nA / 8));
-    p.setPipeline(this.pFar); p.dispatchWorkgroups(Math.ceil(this.nB / 8), Math.ceil(this.nB / 8));
+    p.setPipeline(this.pNear); p.dispatchWorkgroups(Math.ceil((2 * this.KA + 1) ** 2 / 64));
+    p.setPipeline(this.pFar); p.dispatchWorkgroups(Math.ceil((2 * this.KB + 1) ** 2 / 64));
     if (this.nFixed) { p.setPipeline(this.pFixed); p.dispatchWorkgroups(Math.ceil(this.nFixed / 64)); }
     p.setPipeline(this.pClamp); p.dispatchWorkgroups(1);
     p.end();
   },
 
   drawTrees(ctx, pass) {
-    pass.setPipeline(this.pipe);
     pass.setVertexBuffer(0, this.vbuf);
     pass.setIndexBuffer(this.ibuf, 'uint32');
-    for (let k = 0; k < LISTS; k++) {
+    const lm = ctx.treeLodMask === undefined ? 15 : ctx.treeLodMask;   // dev: which LODs to draw
+    // opaque trunks and crown cores, near LODs first so early-z rejects the far trees hidden behind them
+    pass.setPipeline(this.pipeOpaque);
+    for (let l = 0; l < LODS; l++) for (let sp = 0; sp < SPECIES; sp++) {
+      if (!(lm & (1 << l))) continue;
+      const k = sp * LODS + l;
       pass.setBindGroup(1, this.dGroups[k]);
       pass.drawIndexedIndirect(this.argsBuf, k * 20);
+    }
+    // alpha-tested leaf cards last (they are tested against everything opaque already drawn)
+    pass.setPipeline(this.pipe);
+    for (let l = 0; l < LODS; l++) for (let sp = 0; sp < SPECIES; sp++) {
+      const k = sp * LODS + l;
+      if (!(lm & (1 << l)) || !this.hasCards[k]) continue;
+      pass.setBindGroup(1, this.dGroups[k]);
+      pass.drawIndexedIndirect(this.argsBuf, (LISTS + k) * 20);
     }
   },
 
   gbuffer(ctx, pass) {
-    this.drawTrees(ctx, pass);
+    if (!ctx.hideA) this.drawTrees(ctx, pass);
     if (ctx.terrainDrawGround) ctx.terrainDrawGround(ctx, pass);
   },
 };

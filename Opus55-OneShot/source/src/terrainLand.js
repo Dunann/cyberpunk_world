@@ -19,7 +19,7 @@ fn landRidged(p0: vec2f, oct: i32) -> f32 {
   var p = p0; var a = 0.5; var s = 0.0; var w = 1.0;
   for (var i = 0; i < oct; i++) {
     let g = gnoise2(p);
-    var n = 1.0 - sqrt(g * g + 0.004);
+    var n = 1.0 - sqrt(g * g + 0.012);
     n = n * n * w;
     w = clamp(n * 1.8, 0.0, 1.0);
     s += a * n; p = rot2(0.55) * p * 2.07 + vec2f(3.1, 7.7); a *= 0.48;
@@ -54,13 +54,16 @@ fn landBase(p: vec2f) -> f32 {
   // forested foothills where the basin floor meets the ranges
   let foot = smoothstep(3500.0, 4600.0, r);
   h += foot * (fbm2(wp * 0.0016 + 2.0, 4) * 70.0 + 45.0);
+  // a long valley opening south from the basin, so the ranges behind show as receding layers
+  let vd = lineDist(p, vec2f(650.0, 4300.0), vec2f(2700.0, 15000.0));
+  let valley = exp(-pow(vd / 1100.0, 2.0)) * smoothstep(3600.0, 5200.0, p.y);
   // near ranges: moderate, layered ridgelines
-  let ring = smoothstep(4000.0, 7200.0, r);
-  let rg = landRidged(wp * 0.00055, 6);
+  let ring = smoothstep(4000.0, 7200.0, r) * (1.0 - 0.78 * valley);
+  let rg = landRidged(wp * 0.00055, 5);
   h += ring * (120.0 + (rg * 1000.0 + 80.0) * (0.45 + 0.75 * massif) + fbm2(p * 0.004, 3) * 22.0);
   // ranges beyond the playable area keep rising, so every ridge has a higher one behind it
   let farW = smoothstep(6500.0, 15000.0, r);
-  h += farW * (450.0 + landRidged(wp * 0.00022 + 5.0, 6) * 1900.0 * (0.6 + 0.6 * massif));
+  h += farW * (450.0 + landRidged(wp * 0.00022 + 5.0, 6) * 1900.0 * (0.6 + 0.6 * massif)) * (1.0 - 0.6 * valley * (1.0 - smoothstep(9000.0, 15000.0, r)));
   return h;
 }
 
@@ -85,15 +88,15 @@ fn landHeight(p: vec2f) -> f32 {
 // the Su Causeway (north-south, with arch-bridge gaps), the Bai Causeway (from the east shore to an island)
 // and two islands. Coordinates are lake-local (x along the lake's long axis, z across), converted to world.
 const LK = { cx: -2000, cz: 2350, a: 0.25 };
-const toW = ([x, z]) => [LK.cx + x * Math.cos(LK.a) - z * Math.sin(LK.a), LK.cz + x * Math.sin(LK.a) + z * Math.cos(LK.a)];
+export const lakeToWorld = ([x, z]) => [LK.cx + x * Math.cos(LK.a) - z * Math.sin(LK.a), LK.cz + x * Math.sin(LK.a) + z * Math.cos(LK.a)];
 export const CAUSEWAY_TOP = 1.3;
 export const CAUSEWAYS = [
-  { name: 'Su Causeway', half: 5.5, pts: [[-300, -640], [-290, -330], [-268, -40], [-272, 250], [-300, 640]].map(toW), bridges: [0.2, 0.4, 0.6, 0.8] },
-  { name: 'Bai Causeway', half: 5.5, pts: [[820, -280], [610, -322], [428, -346], [250, -352], [150, -352]].map(toW), bridges: [0.62] },
+  { name: 'Su Causeway', half: 5.5, pts: [[-300, -640], [-290, -330], [-268, -40], [-272, 250], [-300, 640]].map(lakeToWorld), bridges: [0.2, 0.4, 0.6, 0.8] },
+  { name: 'Bai Causeway', half: 5.5, pts: [[820, -280], [610, -322], [428, -346], [250, -352], [150, -352]].map(lakeToWorld), bridges: [0.62] },
 ];
 export const ISLANDS = [
-  { name: 'Solitary Hill', x: toW([70, -350])[0], z: toW([70, -350])[1], r: 95, h: 14 },
-  { name: 'Three Pools', x: toW([-30, 170])[0], z: toW([-30, 170])[1], r: 55, h: 2.2 },
+  { name: 'Solitary Hill', x: lakeToWorld([70, -350])[0], z: lakeToWorld([70, -350])[1], r: 95, h: 14 },
+  { name: 'Three Pools', x: lakeToWorld([-30, 170])[0], z: lakeToWorld([-30, 170])[1], r: 55, h: 2.2 },
 ];
 export const BRIDGE_GAP = 7.0; // half length of the water channel under each causeway bridge (m)
 

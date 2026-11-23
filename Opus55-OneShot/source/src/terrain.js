@@ -28,7 +28,7 @@ export default {
     const d = ctx.device, world = ctx.world;
     const q = ctx.quality.level;
     this.N = q >= 2 ? 32 : q === 1 ? 24 : 16;
-    this.K = 6.0 * ctx.quality.drawDistance + (q >= 2 ? 0.5 : 0);
+    this.K = 5.75 * ctx.quality.drawDistance;
     if (this.K < 5.5) this.K = 5.5;
 
     const gen = await generateTerrain(ctx);
@@ -236,6 +236,7 @@ export default {
   },
 
   gbuffer(ctx, pass) {
+    if (ctx.hideA > 1) return;
     this.lamps.draw(ctx, pass);
     const early = ctx.terrainEarly;
     for (let i = 0; i < early.length; i++) early[i].drawEarly(ctx, pass);
@@ -243,7 +244,7 @@ export default {
   },
 
   drawGround(ctx, pass) {
-    if (!this.count) return;
+    if (!this.count || ctx.hideA > 1) return;
     pass.setPipeline(this.pipe);
     pass.setBindGroup(1, this.group);
     pass.setVertexBuffer(0, this.vbuf);
