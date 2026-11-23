@@ -146,57 +146,98 @@ export function genMarket(B, R, world, market) {
 
 // ------------------------------------------------------------------ CBD landmarks
 
+// Spiral Garden Tower: three-lobed plan twisting a third of a turn (spiralling notch and taper), split by
+// glowing sky gardens every ~90 m, topped by three leaning blade fins around a floating halo.
 function twist(B, R, L, g) {
-  const x = L.x, z = L.z, H = 560;
-  B.part({ x, y0: g - 4, z, hw: 62, hd: 62, h: 28, kind: 3, prm: 3.14, mat: MAT.GLASS, col: [0.3, 0.5, 0.6], floorH: 6, winW: 2, baseY: g, param: 0.6, flags: FLAG.EDGE, solid: true });
-  B.part({ x, y0: g + 24, z, a: 0.3, hw: 40, hd: 40, h: H, kind: 3, prm: 3.14, taper: 0.58, twist: 2.0, mat: MAT.GLASS, col: [0.35, 0.55, 0.68], floorH: 4.4, winW: 1.6, baseY: g, param: 0.22, flags: FLAG.LED | FLAG.EDGE, seed: 38, solid: true });
-  // spiral of lit floor rings every 15 floors (sky lobbies)
-  for (let i = 1; i < 9; i++) {
-    const t = i / 9;
-    const s = 1 - 0.42 * t;
-    B.part({ x, y0: g + 24 + H * t - 1, z, a: 0.3 + 2.0 * t, hw: 40 * s + 0.35, hd: 40 * s + 0.35, h: 1.2, kind: 3, prm: 3.14, mat: MAT.EMIT, col: [0.5, 0.85, 1], param: 3, flags: FLAG.BOTTOM | FLAG.NOTOP });
+  const x = L.x, z = L.z, H = 540, R0 = 40, T = 2.0, a0 = 0.3, TAPER = 0.42;
+  const prm = 3.14;
+  B.part({ x, y0: g - 4, z, hw: 62, hd: 62, h: 28, kind: 3, prm, mat: MAT.GLASS, col: [0.3, 0.5, 0.6], floorH: 6, winW: 2, baseY: g, param: 0.6, flags: FLAG.EDGE, seed: 38, solid: true });
+  const y0 = g + 24;
+  const sc = (f) => 1 - TAPER * f;
+  const fr = [0, 0.17, 0.34, 0.5, 0.66, 0.82, 1];
+  const gardenH = 8;
+  for (let i = 0; i < fr.length - 1; i++) {
+    const f0 = fr[i], f1 = fr[i + 1];
+    const ys = y0 + f0 * H + (i > 0 ? gardenH : 0), ye = y0 + f1 * H;
+    const fs = (ys - y0) / H, fe = (ye - y0) / H;
+    B.part({ x, y0: ys, z, a: a0 + T * fs, hw: R0 * sc(fs), hd: R0 * sc(fs), h: ye - ys, kind: 3, prm, taper: sc(fe) / sc(fs), twist: T * (fe - fs),
+      mat: MAT.GLASS, col: [0.32, 0.52, 0.66], floorH: 4.4, winW: 1.6, baseY: g, param: 0.22, flags: FLAG.LED | FLAG.EDGE, seed: 38, solid: i < 2 });
+    if (i > 0) {
+      // sky garden: recessed glowing green core with a lit balustrade on the terrace edge
+      const fg = (y0 + f0 * H - y0) / H;
+      const r = R0 * sc(fg);
+      B.part({ x, y0: y0 + f0 * H, z, a: a0 + T * fg, hw: r * 0.8, hd: r * 0.8, h: gardenH, kind: 3, prm, mat: MAT.GLASS, col: [0.25, 0.75, 0.4], floorH: gardenH, winW: 3, baseY: y0 + f0 * H, param: 1.0, seed: 77 + i });
+      B.part({ x, y0: y0 + f0 * H, z, a: a0 + T * fg, hw: r + 0.3, hd: r + 0.3, h: 1.1, kind: 3, prm, mat: MAT.EMIT, col: [0.45, 1, 0.6], param: 2.5, flags: FLAG.BOTTOM | FLAG.NOTOP });
+      // garden trees on the terrace ring
+      for (let k = 0; k < 9; k++) {
+        const t = k / 9 * TAU + a0 + T * fg;
+        const rr = r * 0.9;
+        B.prop({ x: x + Math.cos(t) * rr, y0: y0 + f0 * H, z: z + Math.sin(t) * rr, hw: 1.6, hd: 1.6, h: 4.5, kind: 2, prm: 8, taper: 0.1, mat: MAT.EMIT, col: [0.1, 0.45, 0.2], param: 0.6 });
+      }
+    }
   }
-  const top = g + 24 + H;
-  const s = 0.58;
-  B.part({ x, y0: top, z, a: 2.3, hw: 40 * s, hd: 40 * s, h: 32, kind: 3, prm: 3.14, taper: 0.7, mat: MAT.CROWN, col: [0.55, 0.85, 1], param: 3.5, flags: FLAG.NOTOP });
-  B.part({ x, y0: top + 32, z, hw: 5, hd: 5, h: 36, kind: 2, prm: 8, taper: 0.05, mat: MAT.METAL, col: [0.75, 0.78, 0.8] });
-  av(B, x, top + 68, z, 1);
-  B.tops.push({ x, y: top + 32, z, cbd: true });
-  B.led.push({ x, z, y0: g + 24, y1: top, r: 40 });
+  const top = y0 + H;
+  const aTop = a0 + T, rTop = R0 * sc(1);
+  // crown: three blade fins rising from the lobe tips, leaning outward, around a floating halo and a light needle
+  for (let k = 0; k < 3; k++) {
+    const t = aTop + k * TAU / 3;
+    const bx = x + Math.cos(t) * rTop * 0.95, bz = z + Math.sin(t) * rTop * 0.95;
+    B.part({ x: bx, y0: top - 2, z: bz, a: t - Math.PI / 2, hw: 1.4, hd: 5, h: 78, taper: 0.15, lx: Math.cos(t) * 7, lz: Math.sin(t) * 7, mat: MAT.CROWN, col: [0.5, 0.9, 1], param: 3.2 });
+  }
+  B.part({ x, y0: top, z, a: aTop, hw: rTop * 0.82, hd: rTop * 0.82, h: 6, kind: 3, prm, mat: MAT.EMIT, col: [0.5, 0.9, 1], param: 2.2 });
+  B.part({ x, y0: top + 46, z, hw: rTop * 0.75, hd: rTop * 0.75, h: 2.2, kind: 2, prm: 48, mat: MAT.EMIT, col: [0.6, 0.95, 1], param: 5, flags: FLAG.BOTTOM | FLAG.NOTOP });
+  B.part({ x, y0: top + 6, z, hw: 2.4, hd: 2.4, h: 92, kind: 2, prm: 8, taper: 0.05, mat: MAT.CROWN, col: [0.7, 0.95, 1], param: 4 });
+  av(B, x, top + 98, z, 1);
+  B.tops.push({ x, y: top + 8, z, cbd: true, lm: true });
+  B.led.push({ x, z, y0, y1: top, r: R0 });
   B.light(x + 70, g + 3, z, 40, [0.5, 0.8, 1], 120, 3);
   B.light(x - 70, g + 3, z, 40, [0.5, 0.8, 1], 120, 3);
 }
 
+// Hexa Twins: two unequal faceted towers on a six-pointed star plan; each tier rotates 15 degrees so the facets
+// step and spiral. A rhombus-shaped truss skybridge (crossed struts above and below a lit deck) links them.
 function twin(B, R, L, g) {
-  const sep = 58, a = 0.35;
+  const sep = 80, a = 0.35;
   const ca = Math.cos(a), sa = Math.sin(a);
-  const tiers = [[0, 250, 23], [250, 310, 20.5], [310, 350, 17.5], [350, 375, 14.5], [375, 393, 11.5]];
-  for (const sgn of [-1, 1]) {
+  const glass = [0.66, 0.58, 0.44];
+  const heights = [420, 355];
+  const fr = [0, 0.45, 0.68, 0.83, 0.93, 1];
+  const scl = [1, 0.88, 0.76, 0.64, 0.52];
+  const tipR = 30;
+  const tips = [];
+  [-1, 1].forEach((sgn, ti) => {
     const x = L.x + ca * sep / 2 * sgn, z = L.z + sa * sep / 2 * sgn;
-    for (const [y0, y1, r] of tiers) {
-      const yb = y0 === 0 ? g - 4 : g + y0;
-      const h = g + y1 - yb;
-      const common = { x, y0: yb, z, h, mat: MAT.GLASS, col: [0.62, 0.66, 0.72], floorH: 4.0, winW: 1.4, baseY: g, param: 0.4, flags: FLAG.EDGE, seed: 0.5 + sgn * 0.2, solid: true };
-      B.part({ ...common, a, hw: r, hd: r });
-      B.part({ ...common, a: a + Math.PI / 4, hw: r, hd: r, solid: false });
-      B.part({ ...common, hw: r * 1.04, hd: r * 1.04, kind: 2, prm: 48, solid: false, flags: 0 });
-      // steel band at each setback
-      B.part({ x, y0: g + y1 - 1.2, z, hw: r * 1.16, hd: r * 1.16, h: 1.4, kind: 2, prm: 48, mat: MAT.EMIT, col: [0.85, 0.9, 1], param: 2.5, flags: FLAG.BOTTOM | FLAG.NOTOP });
+    const Ht = heights[ti];
+    for (let k = 0; k < fr.length - 1; k++) {
+      const yb = k === 0 ? g - 4 : g + fr[k] * Ht, ye = g + fr[k + 1] * Ht;
+      const ap = tipR / 2 * scl[k];
+      const rot = a + k * Math.PI / 12 + (ti ? Math.PI / 6 : 0);
+      const common = { x, y0: yb, z, h: ye - yb, kind: 2, prm: 3, hw: ap, hd: ap, mat: MAT.GLASS, col: glass, floorH: 4.0, winW: 1.4, baseY: g, param: 0.35, flags: FLAG.EDGE, seed: 8.8, solid: false };
+      B.part({ ...common, a: rot, solid: true });
+      B.part({ ...common, a: rot + Math.PI / 3 });
+      // lit ledge at each setback
+      if (k > 0) B.part({ x, y0: yb - 0.8, z, a: rot, hw: ap * 1.25, hd: ap * 1.25, h: 1.2, kind: 2, prm: 6, mat: MAT.EMIT, col: [1, 0.8, 0.45], param: 3, flags: FLAG.BOTTOM });
     }
-    B.part({ x, y0: g + 393, z, hw: 10, hd: 10, h: 18, kind: 2, prm: 16, taper: 0.55, mat: MAT.CROWN, col: [0.8, 0.9, 1], param: 3 });
-    B.part({ x, y0: g + 411, z, hw: 2.2, hd: 2.2, h: 41, kind: 2, prm: 8, taper: 0.06, mat: MAT.METAL, col: [0.8, 0.82, 0.85] });
-    // pinnacle rings
-    for (let k = 0; k < 4; k++) B.part({ x, y0: g + 412 + k * 7, z, hw: 3 - k * 0.5, hd: 3 - k * 0.5, h: 0.8, kind: 2, prm: 16, mat: MAT.EMIT, col: [0.85, 0.92, 1], param: 4 });
-    av(B, x, g + 452, z, 5 + sgn);
-    B.tops.push({ x, y: g + 393, z, cbd: true });
-    B.light(x + 30 * sgn * ca, g + 3, z + 30 * sgn * sa, 36, [0.85, 0.9, 1], 100, 3);
-  }
-  // skybridge at levels 41-42 with struts
-  const by = g + 170;
-  B.part({ x: L.x, y0: by, z: L.z, a, hw: sep / 2, hd: 3, h: 9, mat: MAT.GLASS, col: [0.7, 0.75, 0.8], floorH: 4.5, winW: 1.5, baseY: g, param: 0.9, flags: FLAG.BOTTOM | FLAG.EDGE });
+    const top = g + Ht;
+    // crown: glowing hexagonal lantern pyramid and a light needle
+    B.part({ x, y0: top, z, a: a + ti * 0.5, hw: tipR * 0.22, hd: tipR * 0.22, h: 34, kind: 2, prm: 6, taper: 0.08, mat: MAT.CROWN, col: [1, 0.78, 0.45], param: 3.5 });
+    B.part({ x, y0: top + 30, z, hw: 1.2, hd: 1.2, h: 46 - ti * 10, kind: 2, prm: 8, taper: 0.1, mat: MAT.CROWN, col: [1, 0.9, 0.7], param: 4 });
+    av(B, x, top + 76 - ti * 10, z, 5 + ti);
+    B.tops.push({ x, y: top, z, cbd: true });
+    B.light(x + 34 * sgn * ca, g + 3, z + 34 * sgn * sa, 36, [1, 0.8, 0.55], 100, 3);
+    tips.push({ x, z });
+  });
+  // rhombus truss skybridge
+  const by = g + 190;
+  const gap = sep - tipR * 1.4;
+  B.part({ x: L.x, y0: by, z: L.z, a, hw: gap / 2 + 4, hd: 3.2, h: 7, mat: MAT.GLASS, col: [0.75, 0.7, 0.6], floorH: 3.5, winW: 1.5, baseY: by, param: 0.95, flags: FLAG.BOTTOM | FLAG.EDGE, seed: 8.8 });
+  B.part({ x: L.x, y0: by - 0.5, z: L.z, a, hw: gap / 2 + 4, hd: 3.6, h: 0.5, mat: MAT.EMIT, col: [1, 0.75, 0.4], param: 4, flags: FLAG.BOTTOM });
+  const half = gap / 2 + 2;
   for (const sgn of [-1, 1]) {
-    const x0 = L.x + ca * (sep / 2 - 14) * sgn, z0 = L.z + sa * (sep / 2 - 14) * sgn;
-    B.part({ x: x0, y0: g + 120, z: z0, hw: 1.2, hd: 1.2, h: 50, kind: 2, prm: 8, lx: -ca * (sep / 2 - 14) * sgn, lz: -sa * (sep / 2 - 14) * sgn, mat: MAT.METAL, col: [0.7, 0.72, 0.75] });
+    const ex = L.x + ca * half * sgn, ez = L.z + sa * half * sgn;
+    // lower strut from the tower face up to the deck centre, upper strut from the deck centre up to the tower face
+    B.part({ x: ex, y0: by - 45, z: ez, hw: 0.9, hd: 0.9, h: 45, kind: 2, prm: 8, lx: -ca * half * sgn, lz: -sa * half * sgn, mat: MAT.EMIT, col: [1, 0.85, 0.6], param: 2.2 });
+    B.part({ x: L.x, y0: by + 7, z: L.z, hw: 0.9, hd: 0.9, h: 45, kind: 2, prm: 8, lx: ca * half * sgn, lz: sa * half * sgn, mat: MAT.EMIT, col: [1, 0.85, 0.6], param: 2.2 });
   }
 }
 
@@ -223,31 +264,44 @@ function truss(B, R, L, g) {
   B.light(x + 45, g + 3, z, 34, [0.7, 0.85, 1], 90, 3);
 }
 
+// Orbital Lantern Mast: a leaning hexagonal core with a slimmer companion shaft; luminous orbs of different
+// sizes hang off both sides on cantilevered arms (asymmetric cluster), in a cyan-to-violet treatment.
 function tvtower(B, R, L, g) {
   const x = L.x, z = L.z;
-  const pink = [1, 0.2, 0.62];
-  const col = [0.75, 0.75, 0.8];
-  // three vertical columns from ground to the upper sphere
-  for (let k = 0; k < 3; k++) {
-    const ang = k * TAU / 3 + 0.5;
-    const cx = x + Math.cos(ang) * 7, cz = z + Math.sin(ang) * 7;
-    B.part({ x: cx, y0: g - 2, z: cz, hw: 4.5, hd: 4.5, h: 262, kind: 2, prm: 24, mat: MAT.METAL, col, solid: true });
-    // inclined legs
-    const lx0 = x + Math.cos(ang + Math.PI / 3) * 48, lz0 = z + Math.sin(ang + Math.PI / 3) * 48;
-    B.part({ x: lx0, y0: g - 2, z: lz0, hw: 3.6, hd: 3.6, h: 92, kind: 2, prm: 24, lx: (x - lx0) * 0.78, lz: (z - lz0) * 0.78, mat: MAT.METAL, col });
-    // small spheres between the big ones
-    for (const sy of [160, 186, 212, 238]) B.part({ x: cx, y0: g + sy - 6, z: cz, hw: 6, hd: 6, h: 12, kind: 2, prm: 32, prof: 2, mat: MAT.TV, col: pink, param: 1.2, flags: FLAG.NOTOP });
-    B.light(lx0, g + 4, lz0, 40, pink, 160, 4);
+  const lean = [14, -6];           // top offset of the main core (m)
+  const H = 330;
+  const steel = [0.62, 0.64, 0.7];
+  const coreAt = (y) => [x + lean[0] * (y - g) / H, z + lean[1] * (y - g) / H];
+  B.part({ x, y0: g - 3, z, hw: 46, hd: 46, h: 8, kind: 2, prm: 48, mat: MAT.STONE, col: [0.35, 0.35, 0.4], floorH: 100, winW: 100, param: 0, flags: FLAG.NOWIN | FLAG.FLOOD, solid: true });
+  B.part({ x, y0: g + 2, z, a: 0.3, hw: 8.5, hd: 8.5, h: H, kind: 2, prm: 6, taper: 0.55, lx: lean[0], lz: lean[1], mat: MAT.METAL, col: steel, solid: true });
+  // companion shaft and three raking struts on one side only
+  const cx = x - 30, cz = z + 16;
+  B.part({ x: cx, y0: g + 2, z: cz, a: 0.3, hw: 4, hd: 4, h: 205, kind: 2, prm: 6, taper: 0.7, lx: 12, lz: -6, mat: MAT.METAL, col: steel, solid: true });
+  for (const [ox, oz, h] of [[-62, -10, 120], [-48, 46, 100], [-8, 58, 86]]) {
+    const [tx, tz] = coreAt(g + h);
+    B.part({ x: x + ox, y0: g + 2, z: z + oz, hw: 2.8, hd: 2.8, h, kind: 2, prm: 12, lx: tx - (x + ox), lz: tz - (z + oz), mat: MAT.METAL, col: steel });
   }
-  B.part({ x, y0: g + 88, z, hw: 25, hd: 25, h: 50, kind: 2, prm: 48, prof: 2, mat: MAT.TV, col: pink, param: 1.6, flags: FLAG.NOTOP });
-  B.part({ x, y0: g + 112, z, hw: 26, hd: 26, h: 2, kind: 2, prm: 48, mat: MAT.EMIT, col: [1, 0.5, 0.85], param: 4, flags: FLAG.BOTTOM });
-  B.part({ x, y0: g + 262, z, hw: 17, hd: 17, h: 34, kind: 2, prm: 48, prof: 2, mat: MAT.TV, col: pink, param: 1.6, flags: FLAG.NOTOP });
-  B.part({ x, y0: g + 296, z, hw: 4, hd: 4, h: 40, kind: 2, prm: 16, mat: MAT.METAL, col });
-  B.part({ x, y0: g + 334, z, hw: 7.5, hd: 7.5, h: 15, kind: 2, prm: 32, prof: 2, mat: MAT.TV, col: pink, param: 2, flags: FLAG.NOTOP });
-  B.part({ x, y0: g + 349, z, hw: 2.6, hd: 2.6, h: 121, kind: 2, prm: 12, taper: 0.08, mat: MAT.METAL, col: [0.85, 0.85, 0.9] });
-  for (let k = 0; k < 6; k++) B.part({ x, y0: g + 360 + k * 16, z, hw: 2.7 - k * 0.3, hd: 2.7 - k * 0.3, h: 1.2, kind: 2, prm: 16, mat: MAT.EMIT, col: [1, 0.3, 0.75], param: 6, flags: FLAG.BOTTOM });
-  av(B, x, g + 470, z, 9);
-  B.tops.push({ x, y: g + 296, z, cbd: true, tv: true });
+  // orbs: [height of centre, radius, side angle, offset from core axis, colour]
+  const cyan = [0.15, 0.85, 1], violet = [0.62, 0.32, 1], blue = [0.3, 0.5, 1], teal = [0.1, 0.95, 0.75];
+  const orbs = [[108, 24, 0, 0, cyan], [168, 10, 2.2, 21, violet], [196, 15, -0.7, 25, blue], [238, 8, 1.4, 16, teal], [268, 12, -2.4, 19, violet], [300, 18, 0, 0, blue], [352, 6, 0, 0, cyan]];
+  for (const [yc, r, side, off, col] of orbs) {
+    const [ax, az] = coreAt(g + yc);
+    const ox = ax + Math.cos(side) * off, oz = az + Math.sin(side) * off;
+    B.part({ x: ox, y0: g + yc - r, z: oz, hw: r, hd: r, h: 2 * r, kind: 2, prm: 48, prof: 2, mat: MAT.TV, col, param: 1.5, flags: FLAG.NOTOP });
+    if (off > 0) {
+      // cantilever arm from the core to the orb
+      B.part({ x: (ax + ox) / 2, y0: g + yc - 1.5, z: (az + oz) / 2, a: side, hw: off / 2, hd: 1.4, h: 3, mat: MAT.METAL, col: steel, flags: FLAG.BOTTOM });
+    } else {
+      // equator ring on the centred orbs
+      B.part({ x: ox, y0: g + yc - 1, z: oz, hw: r + 1.5, hd: r + 1.5, h: 2, kind: 2, prm: 48, mat: MAT.EMIT, col: [0.7, 0.4, 1], param: 4, flags: FLAG.BOTTOM });
+    }
+  }
+  const [mx, mz] = coreAt(g + H);
+  B.part({ x: mx, y0: g + H + 2, z: mz, hw: 2.4, hd: 2.4, h: 120, kind: 2, prm: 12, taper: 0.08, mat: MAT.METAL, col: [0.85, 0.85, 0.9] });
+  for (let k = 0; k < 5; k++) B.part({ x: mx, y0: g + H + 20 + k * 18, z: mz, hw: 2.5 - k * 0.35, hd: 2.5 - k * 0.35, h: 1.2, kind: 2, prm: 16, mat: MAT.EMIT, col: [0.4, 0.8, 1], param: 6, flags: FLAG.BOTTOM });
+  av(B, mx, g + H + 122, mz, 9);
+  B.tops.push({ x: mx, y: g + 300, z: mz, cbd: true, tv: true });
+  for (const [ox, oz] of [[40, 0], [-20, 35], [-20, -35]]) B.light(x + ox, g + 8, z + oz, 40, [0.4, 0.6, 1], 140, 4);
 }
 
 function jinCrown(B, R, L, g) {
@@ -279,33 +333,50 @@ function jinCrown(B, R, L, g) {
 
 // ------------------------------------------------------------------ peninsula landmarks
 
+// Sky Vault: four towers set on a gentle arc, threaded mid-height (not on top) by a long glass vault garden;
+// the towers continue above it with lit crowns. Two taller towers at the tip connect to the vault ends with
+// angled sky tubes at a lower level.
 function raffles(B, R, L, world) {
-  // row of four towers along the peninsula axis (+x toward the tip) carrying a horizontal conservatory
-  const xs = [-185, -125, -65, -5];   // relative to the site (the plateau ends near x = 230)
+  const pts = [[-185, -8], [-125, 4], [-65, 4], [-5, -8]];   // relative to the site (the plateau ends near x = 230)
   const glass = [0.4, 0.55, 0.62];
-  const towerAt = (x, z, top, w, conserv) => {
-    const g = world.heightAt(x, z);
-    B.part({ x, y0: g - 6, z, a: 0, hw: w, hd: w * 0.8, h: top - g + 6, kind: 0, prm: 0.35, mat: MAT.GLASS, col: glass, floorH: 4, winW: 1.5, baseY: g, param: 0.4, flags: FLAG.EDGE | (conserv ? 0 : FLAG.CROWNLIT), seed: x + z, solid: true });
-    return top;
-  };
   let gmax = 0;
-  for (const dx of xs) gmax = Math.max(gmax, world.heightAt(L.x + dx, L.z));
-  const H0 = 245;
-  const cy = gmax + H0;
-  for (const dx of xs) towerAt(L.x + dx, L.z, cy, 16, true);
-  // horizontal glass conservatory
-  B.part({ x: L.x - 95, y0: cy, z: L.z, a: 0, hw: 112, hd: 16, h: 24, kind: 0, prm: 0.85, mat: MAT.GLASS, col: [0.5, 0.8, 0.7], floorH: 6, winW: 3, baseY: cy, param: 0.85, flags: FLAG.EDGE | FLAG.BOTTOM | FLAG.LED });
-  B.part({ x: L.x - 95, y0: cy - 1.2, z: L.z, a: 0, hw: 113, hd: 17, h: 1.2, mat: MAT.EMIT, col: [0.4, 0.9, 1], param: 3, flags: FLAG.BOTTOM });
-  B.led.push({ x: L.x - 95, z: L.z, y0: cy, y1: cy + 24, r: 112 });
-  // two taller flanking towers at the tip
+  for (const [dx, dz] of pts) gmax = Math.max(gmax, world.heightAt(L.x + dx, L.z + dz));
+  const vy = gmax + 190;                       // vault floor
+  const tops = [270, 300, 285, 255];
+  pts.forEach(([dx, dz], i) => {
+    const x = L.x + dx, z = L.z + dz;
+    const g = world.heightAt(x, z);
+    const lean = i === 0 ? -9 : i === 3 ? 9 : 0;   // end towers lean outward
+    const top = gmax + tops[i];
+    B.part({ x, y0: g - 6, z, a: 0.08 * (i - 1.5), hw: 15, hd: 12, h: top - g + 6, kind: 0, prm: 0.45, lx: lean, mat: MAT.GLASS, col: glass, floorH: 4, winW: 1.5, baseY: g, param: 0.4, flags: FLAG.EDGE | FLAG.CROWNLIT, seed: 52 + i, solid: true });
+    B.part({ x: x + lean, y0: top, z, hw: 6, hd: 6, h: 14, kind: 2, prm: 6, taper: 0.3, mat: MAT.CROWN, col: [0.5, 1, 0.85], param: 3 });
+    B.light(x, g + 3, z + 20, 30, [0.6, 0.9, 1], 70, 3);
+  });
+  // vault garden: lit deck plus an elongated glass dome threaded through the towers
+  const vx = L.x - 95, vz = L.z;
+  B.part({ x: vx, y0: vy - 4, z: vz, a: 0, hw: 118, hd: 19, h: 4, kind: 0, prm: 1, mat: MAT.METAL, col: [0.3, 0.32, 0.35], flags: FLAG.BOTTOM });
+  B.part({ x: vx, y0: vy - 4.6, z: vz, a: 0, hw: 119, hd: 19.5, h: 0.6, kind: 0, prm: 1, mat: MAT.EMIT, col: [0.3, 1, 0.7], param: 3, flags: FLAG.BOTTOM });
+  B.part({ x: vx, y0: vy, z: vz, a: 0, hw: 118, hd: 18, h: 30, kind: 0, prm: 1, prof: 1, mat: MAT.GLASS, col: [0.35, 0.9, 0.6], floorH: 5, winW: 3, baseY: vy, param: 0.9, flags: FLAG.LED, seed: 61 });
+  // ribs over the vault (lit arches every 24 m)
+  for (let k = -4; k <= 4; k++) {
+    const rx = vx + k * 24;
+    B.part({ x: rx, y0: vy, z: vz, hw: 0.6, hd: 18.5 * Math.sqrt(Math.max(0.05, 1 - (k * 24 / 118) ** 2)), h: 30 * Math.sqrt(Math.max(0.05, 1 - (k * 24 / 118) ** 2)), kind: 0, prm: 1, prof: 1, mat: MAT.EMIT, col: [0.6, 1, 0.85], param: 2.2 });
+  }
+  B.led.push({ x: vx, z: vz, y0: vy, y1: vy + 30, r: 118 });
+  // two taller tip towers and angled sky tubes to the vault ends
   for (const sz of [-1, 1]) {
     const x = L.x - 70, z = L.z + (sz < 0 ? -110 : 105);
-    const top = towerAt(x, z, world.heightAt(x, z) + 300, 20, false);
+    const g = world.heightAt(x, z);
+    const top = g + 310;
+    B.part({ x, y0: g - 6, z, a: 0, hw: 19, hd: 16, h: top - g + 6, kind: 1, prm: 0.3, mat: MAT.GLASS, col: glass, floorH: 4, winW: 1.5, baseY: g, param: 0.4, flags: FLAG.EDGE | FLAG.CROWNLIT, seed: 70 + sz, solid: true });
     B.part({ x, y0: top, z, hw: 3, hd: 3, h: 40, kind: 2, prm: 8, taper: 0.1, mat: MAT.METAL, col: [0.8, 0.8, 0.85] });
     av(B, x, top + 40, z, sz * 3);
     B.tops.push({ x, y: top, z });
+    const [ex, ez] = [L.x + pts[3][0], L.z + pts[3][1]];
+    const dx = ex - x, dz = ez - z, len = Math.hypot(dx, dz);
+    const ty = gmax + 140;
+    B.part({ x: (x + ex) / 2, y0: ty, z: (z + ez) / 2, a: Math.atan2(dz, dx), hw: len / 2, hd: 2.6, h: 4.5, kind: 0, prm: 0.9, mat: MAT.GLASS, col: [0.5, 0.85, 0.8], floorH: 4.5, winW: 2, baseY: ty, param: 0.95, flags: FLAG.BOTTOM | FLAG.EDGE, seed: 61, solid: true });
   }
-  for (const dx of xs) B.light(L.x + dx, gmax + 3, L.z + 22, 30, [0.6, 0.9, 1], 70, 3);
 }
 
 function ridgeTower(B, R, L, world) {
@@ -389,6 +460,76 @@ function stilts(B, R, L, world) {
     B.light(lx, 9, lz, 22, [1, 0.62, 0.25], 60, 5);
     if (k > 3) { const [mx, mz] = Builder.tw(c.x, c.z, a, 0, 10); B.light(mx, y - 6, mz, 22, [1, 0.6, 0.25], 50, 5); }
   }
+}
+
+// ------------------------------------------------------------------ added landmarks
+
+// Crystal Lance (Jiangbei): a faceted crystalline supertall. Hexagonal segments, each rotated 30 degrees from the
+// one below and tapering into the next, give a zig-zag faceted silhouette; the glass carries a diamond lattice of
+// glowing seams. A faceted pinnacle and a long slender spire bring it to ~670 m.
+function crystal(B, R, L, g) {
+  const x = L.x, z = L.z;
+  B.part({ x, y0: g - 4, z, a: 0.2, hw: 58, hd: 46, h: 30, kind: 1, prm: 0.45, mat: MAT.GLASS, col: [0.35, 0.35, 0.5], floorH: 6, winW: 2, baseY: g, param: 0.6, flags: FLAG.EDGE, seed: 54.7, solid: true });
+  const segs = [92, 86, 80, 72, 64, 56, 46];
+  let y = g + 26, ap = 34, rot = 0.2;
+  for (let i = 0; i < segs.length; i++) {
+    const h = segs[i];
+    const tp = 0.84;
+    B.part({ x, y0: y, z, a: rot, hw: ap, hd: ap, h, kind: 2, prm: 6, taper: tp, mat: MAT.CRYSTAL, col: [0.4, 0.42, 0.62], floorH: 4.2, winW: 1.6, baseY: g, param: 0.2, flags: FLAG.LED, seed: 54.7, solid: i < 3 });
+    y += h;
+    // lit joint ring where the next facet set begins
+    B.part({ x, y0: y - 0.6, z, a: rot, hw: ap * tp + 0.4, hd: ap * tp + 0.4, h: 1.0, kind: 2, prm: 6, mat: MAT.EMIT, col: [0.75, 0.6, 1], param: 3, flags: FLAG.BOTTOM | FLAG.NOTOP });
+    ap = ap * tp * 0.98;   // next hexagon (rotated 30 deg): its corners overhang the faces below as small facets
+    rot += Math.PI / 6;
+  }
+  B.led.push({ x, z, y0: g + 26, y1: y, r: 34 });
+  // faceted pinnacle, then the spire
+  B.part({ x, y0: y, z, a: rot, hw: ap, hd: ap, h: 58, kind: 2, prm: 6, taper: 0.06, mat: MAT.CRYSTAL, col: [0.5, 0.5, 0.75], floorH: 4.2, winW: 1.6, baseY: g, param: 0.5, flags: FLAG.EDGE | FLAG.CROWNLIT, seed: 54.7 });
+  const top = y + 54;
+  B.part({ x, y0: top, z, hw: 1.8, hd: 1.8, h: g + 670 - top, kind: 2, prm: 8, taper: 0.06, mat: MAT.METAL, col: [0.85, 0.85, 0.92] });
+  for (let k = 0; k < 4; k++) B.part({ x, y0: top + 12 + k * 20, z, hw: 1.9 - k * 0.3, hd: 1.9 - k * 0.3, h: 1, kind: 2, prm: 8, mat: MAT.EMIT, col: [0.8, 0.7, 1], param: 5, flags: FLAG.BOTTOM });
+  av(B, x, g + 670, z, 31);
+  B.tops.push({ x, y: y, z, lm: true });
+  B.light(x + 55, g + 3, z, 36, [0.7, 0.6, 1], 100, 3);
+  B.light(x - 55, g + 3, z, 36, [0.7, 0.6, 1], 100, 3);
+}
+
+// Hilltop Beacon (West Hills edge): a slender tapering concrete shaft with three climbing light strips, a
+// two-lobed observation pod (flared lower bowl, glazed bulb, lit deck ring) and a stepped antenna mast.
+function beacon(B, R, L, world) {
+  const x = L.x, z = L.z;
+  // sit on the local high point and extend the footing down the slope
+  let g = world.heightAt(x, z), gmin = g;
+  for (let k = 0; k < 8; k++) { const t = k / 8 * TAU; const h = world.heightAt(x + Math.cos(t) * 26, z + Math.sin(t) * 26); g = Math.max(g, h); gmin = Math.min(gmin, h); }
+  B.part({ x, y0: gmin - 4, z, a: 0.26, hw: 26, hd: 26, h: g - gmin + 10, kind: 2, prm: 6, mat: MAT.STONE, col: [0.42, 0.42, 0.46], floorH: 100, winW: 100, param: 0, flags: FLAG.NOWIN | FLAG.FLOOD, solid: true });
+  const H = 235, r0 = 9, tp = 0.5;
+  const base = g + 6;
+  B.part({ x, y0: base, z, hw: r0, hd: r0, h: H, kind: 2, prm: 48, taper: tp, mat: MAT.CONCRETE, col: [0.42, 0.42, 0.45], solid: true });
+  for (let k = 0; k < 3; k++) {
+    const t = k / 3 * TAU + 0.4;
+    const c = Math.cos(t), s = Math.sin(t);
+    B.part({ x: x + c * (r0 + 0.3), y0: base, z: z + s * (r0 + 0.3), hw: 0.35, hd: 0.35, h: H, lx: -c * r0 * (1 - tp), lz: -s * r0 * (1 - tp), mat: MAT.EMIT, col: [1, 0.55, 0.2], param: 3.5 });
+  }
+  // observation pod
+  const py = base + H;
+  B.part({ x, y0: py - 16, z, hw: r0 * tp, hd: r0 * tp, h: 16, kind: 2, prm: 32, taper: 4.2, mat: MAT.METAL, col: [0.55, 0.55, 0.6], flags: FLAG.NOTOP });
+  B.part({ x, y0: py - 1, z, hw: 22, hd: 22, h: 2, kind: 2, prm: 48, mat: MAT.EMIT, col: [1, 0.6, 0.25], param: 4, flags: FLAG.BOTTOM });
+  B.part({ x, y0: py, z, hw: 21, hd: 21, h: 26, kind: 2, prm: 48, prof: 3, mat: MAT.TV, col: [1, 0.55, 0.22], param: 1.3, flags: FLAG.NOTOP });
+  B.part({ x, y0: py + 9, z, hw: 22.5, hd: 22.5, h: 1.5, kind: 2, prm: 48, mat: MAT.EMIT, col: [0.3, 0.9, 1], param: 3, flags: FLAG.BOTTOM | FLAG.NOTOP });
+  // stepped antenna mast with alternating red/white bands
+  let my = py + 24, mr = 3.2;
+  for (let k = 0; k < 3; k++) {
+    const mh = [52, 46, 40][k];
+    B.part({ x, y0: my, z, hw: mr, hd: mr, h: mh, kind: 2, prm: 8, taper: 0.75, mat: MAT.METAL, col: [0.8, 0.8, 0.85] });
+    for (let b = 0; b < 3; b++) B.part({ x, y0: my + 8 + b * 14, z, hw: mr * (1 - 0.25 * (8 + b * 14) / mh) + 0.15, hd: mr * (1 - 0.25 * (8 + b * 14) / mh) + 0.15, h: 2.5, kind: 2, prm: 8, mat: MAT.EMIT, col: b % 2 ? [1, 1, 1] : [1, 0.1, 0.05], param: 3, flags: FLAG.BOTTOM });
+    my += mh; mr *= 0.62;
+  }
+  av(B, x, my, z, 41);
+  av(B, x, py + 26, z, 42);
+  B.tops.push({ x, y: py + 26, z, lm: true });
+  B.sites.beacon = { x, z, y: g, podY: py };
+  B.light(x + 30, g + 4, z, 30, [1, 0.6, 0.3], 70, 4);
+  B.light(x - 30, g + 4, z, 30, [1, 0.6, 0.3], 70, 4);
 }
 
 // ------------------------------------------------------------------ steppe landmarks
@@ -488,6 +629,8 @@ export function genLandmarks(B, R, world) {
       case 'stilts': stilts(B, R, L, world); break;
       case 'gerdome': gerdome(B, R, L, world); break;
       case 'registan': registan(B, R, L, world); break;
+      case 'crystal': crystal(B, R, L, g); break;
+      case 'beacon': beacon(B, R, L, world); break;
       default: break;
     }
   }

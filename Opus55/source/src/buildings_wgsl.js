@@ -19,7 +19,7 @@ export const FLAG = {
 
 export const MAT = {
   CONCRETE: 0, RES: 1, OFFICE: 2, GLASS: 3, STONE: 4, SHOP: 5, BRICK: 6, TILE: 7, WOOD: 8, FELT: 9,
-  METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17,
+  METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17, CRYSTAL: 18,
 };
 
 export const PART_WGSL = /* wgsl */ `
@@ -77,7 +77,7 @@ export const DRAW_WGSL = /* wgsl */ `
 @group(1) @binding(1) var<storage, read> vis: array<u32>;
 
 struct VOut {
-  @builtin(position) pos: vec4f,
+  @builtin(position) @invariant pos: vec4f,
   @location(0) wp: vec3f,
   @location(1) n: vec3f,
   @location(2) uv: vec4f,                       // face distance (m, unscaled), world y, ring scale, face length
@@ -425,6 +425,9 @@ fn carpet(p: vec2f) -> vec3f {
   return c;
 }
 
+// Depth-only prepass (colour writes masked): lets the main pass shade each visible facade pixel once.
+@fragment fn fsDepth(i: VOut) -> GOut { var o: GOut; return o; }
+
 @fragment fn fs(i: VOut) -> GOut {
   let P = parts[i.info.x];
   let fid = i.info.y & 255u;
@@ -500,7 +503,7 @@ fn carpet(p: vec2f) -> vec3f {
       S.rough = mix(S.rough, 0.1, G.cov);
       if (G.cov > 0.5 && G.det > 0.5 && G.g.x < 0.5) { S.mid = 2.0; }
     }
-  } else if (mat == 3u || mat == 16u) {
+  } else if (mat == 3u || mat == 16u || mat == 18u) {
     // ---------------- glass curtain wall
     S.alb = col * 0.1; S.rough = 0.06; S.mid = 2.0; S.wet = 0.3; S.ao = 0.55;
     let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, prm, 5u, 0.75);
@@ -522,6 +525,21 @@ fn carpet(p: vec2f) -> vec3f {
       S.alb = mix(S.alb, vec3f(0.6, 0.62, 0.65), line); S.metal = line * 0.8; S.rough = mix(S.rough, 0.3, line);
       S.emis += vec3f(0.8, 0.9, 1.0) * line * 0.35 + tr * 0.0;
       if (line > 0.5) { S.mid = 0.0; }
+    }
+    if (mat == 18u) {
+      // crystalline facets: elongated diamond lattice with glowing seams
+      let pu = max(fl, 6.0) * 0.5; let pv = max(fl, 6.0) * 1.1;
+      let tu = fd / pu; let tv = yRel / pv;
+      let w = fw.x / pu * 1.5 + 0.01;
+      let d1 = abs(fract(tu + tv) - 0.5); let d2 = abs(fract(tu - tv) - 0.5);
+      let seam = max(smoothstep(0.5 - w, 0.5, d1), smoothstep(0.5 - w, 0.5, d2));
+      let fade = 1.0 - smoothstep(0.08, 0.3, max(fw.x / pu, fw.y / pv));
+      // alternate facet tint so neighbouring diamonds catch the sky differently
+      let cell = floor(tu + tv) + floor(tu - tv) * 3.0;
+      S.alb *= 0.6 + 0.9 * hash11u(u32(cell + 500.0));
+      S.emis += vec3f(0.75, 0.7, 1.0) * seam * mix(0.04, 0.22, fade);
+      S.alb = mix(S.alb, vec3f(0.5, 0.5, 0.55), seam * fade);
+      if (seam * fade > 0.5) { S.mid = 0.0; }
     }
     if ((flags & 4u) != 0u) {
       let hf = saturate((wp.y - P.a.y) / max(P.b.z, 1.0));
@@ -701,14 +719,14 @@ fn carpet(p: vec2f) -> vec3f {
     S.emis = vec3f(1.0, 0.6, 0.25) * prm * (1.0 - smoothstep(0.0, 0.12, hf));
   } else if (mat == 13u) {
     // ---------------- TV tower spheres: pink glass with LED dots
-    S.alb = vec3f(0.35, 0.05, 0.18); S.metal = 0.2; S.rough = 0.12; S.mid = 2.0;
+    S.alb = col * 0.3; S.metal = 0.2; S.rough = 0.12; S.mid = 2.0;
     let cu = fd / 1.6; let cv = wp.y / 1.6;
     let cell = floor(vec2f(cu, cv));
     let fr = fract(vec2f(cu, cv)) - 0.5;
     let dotm = 1.0 - smoothstep(0.15, 0.3, length(fr));
     let tw = 0.5 + 0.5 * sin(time() * (1.0 + 2.0 * hash21(cell)) + hash21(cell + 3.0) * 6.28);
     let det = 1.0 - smoothstep(0.15, 0.4, max(fw.x, fw.y) / 1.6);
-    S.emis = col * prm * 0.35 + mix(vec3f(0.25), vec3f(1.0, 0.6, 0.9) * dotm * tw * 3.0, det) * prm;
+    S.emis = col * prm * 0.35 + mix(col * 0.25, mix(col, vec3f(1.0), 0.45) * dotm * tw * 3.0, det) * prm;
   } else if (mat == 14u) {
     // ---------------- lit crown lantern (slats)
     let hf = saturate((wp.y - P.a.y) / max(P.b.z, 1.0));

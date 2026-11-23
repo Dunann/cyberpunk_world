@@ -14,6 +14,9 @@ import { DT } from './world.js';
 import { PART_WGSL, CULL_WGSL, DRAW_WGSL, PART_FLOATS } from './buildings_wgsl.js';
 import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges } from './buildings_gen.js';
 import { prepareLots, genLandmarks, genMarket } from './buildings_landmarks.js';
+import { WGSL_LIB, WGSL_FRAME, GBUFFER_OUT } from './common.js';
+import { WGSL_LIGHT, GBUFFER_FORMATS, DEPTH_FORMAT } from './renderer.js';
+import { shader } from './gpu.js';
 
 const LIGHT_BUDGET = 1450;
 const LISTS = 6;
@@ -102,9 +105,11 @@ export default {
     this.lightCount = nl;
 
     // shared data
-    const cbd = B.tops.filter((t) => t.cbd).sort((a, b) => b.y - a.y).slice(0, 14);
+    // landmark tops (new supertall and telecom tower) are always included, then the tallest CBD and Bund towers
+    const lm = B.tops.filter((t) => t.lm && !t.cbd);
+    const cbd = B.tops.filter((t) => t.cbd).sort((a, b) => b.y - a.y).slice(0, 14 - lm.length);
     const bund = B.tops.filter((t) => t.bund).sort((a, b) => b.y - a.y).slice(0, 6);
-    world.shared.towerTops = cbd.concat(bund).map((t) => ({ x: t.x, y: t.y, z: t.z }));
+    world.shared.towerTops = lm.concat(cbd, bund).map((t) => ({ x: t.x, y: t.y, z: t.z }));
     world.shared.ledFacades = B.led;
     world.shared.landmarkSites = B.sites;
     world.shared.buildingStats = { parts: P.count, props: B.props, bridges: B.bridges, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
@@ -156,10 +161,17 @@ export default {
         { binding: 0, resource: { buffer: this.partBuf } },
         { binding: 1, resource: { buffer: this.visBuf, offset: l * stride * 4, size: stride * 4 } }] }));
     }
-    this.pipe = ctx.renderer.gbufferPipeline({
-      label: 'buildings', code: PART_WGSL + DRAW_WGSL, groups: [this.drawLayout],
-      buffers: [{ arrayStride: 16, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }],
-    });
+    // Depth prepass + equal-depth shading pass: the city is dense, so this keeps facade shading at ~1x per pixel.
+    const module = shader(d, WGSL_LIB + WGSL_FRAME + WGSL_LIGHT + GBUFFER_OUT + PART_WGSL + DRAW_WGSL, 'buildings');
+    const layout = d.createPipelineLayout({ bindGroupLayouts: [ctx.renderer.frameLayout, this.drawLayout] });
+    const vertex = { module, entryPoint: 'vs', buffers: [{ arrayStride: 16, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x4' }] }] };
+    const primitive = { topology: 'triangle-list', cullMode: 'back' };
+    this.prePipe = d.createRenderPipeline({ label: 'buildings-depth', layout, vertex, primitive,
+      fragment: { module, entryPoint: 'fsDepth', targets: GBUFFER_FORMATS.map((format) => ({ format, writeMask: 0 })) },
+      depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: true, depthCompare: 'greater' } });
+    this.pipe = d.createRenderPipeline({ label: 'buildings', layout, vertex, primitive,
+      fragment: { module, entryPoint: 'fs', targets: GBUFFER_FORMATS.map((format) => ({ format })) },
+      depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: false, depthCompare: 'greater-equal' } });
     this.cullDesc = { timestampWrites: undefined };
     this.groups = Math.ceil(N / 64);
     console.log(`buildings: ${P.count} parts, ${P.solid.length} solids, ${world.lots.length} lots, ${world.signSlots.length} sign slots, ${nl} lights, ${(performance.now() - t0).toFixed(0)} ms`);
@@ -177,12 +189,14 @@ export default {
   },
 
   gbuffer(ctx, pass) {
-    pass.setPipeline(this.pipe);
     pass.setVertexBuffer(0, this.vbuf);
     pass.setIndexBuffer(this.ibuf, 'uint32');
-    for (let l = 0; l < LISTS; l++) {
-      pass.setBindGroup(1, this.drawGroups[l]);
-      pass.drawIndexedIndirect(this.argsBuf, l * 20);
+    for (let p = 0; p < 2; p++) {
+      pass.setPipeline(p === 0 ? this.prePipe : this.pipe);
+      for (let l = 0; l < LISTS; l++) {
+        pass.setBindGroup(1, this.drawGroups[l]);
+        pass.drawIndexedIndirect(this.argsBuf, l * 20);
+      }
     }
   },
 };

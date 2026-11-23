@@ -161,7 +161,11 @@ function billboard(B, R, x, z, y, a, w, h, style) {
 
 // Crown on top of a tower part. Returns the highest point.
 function crown(B, R, o) {
-  const { x, z, a, hw, hd, top, kind, prm, type, style, baseY } = o;
+  const { x, z, a, hw, hd, top, kind, prm, style, baseY } = o;
+  let type = o.type;
+  // keep tall crowns (spires, masts, lanterns) under the lot height cap (viewpoint sight lines)
+  const capped = o.maxTop !== undefined && top + 12 > o.maxTop;
+  if (capped) type = 'machine';
   const m = Math.min(hw, hd);
   if (type === 'machine') {
     B.part({ x, y0: top, z, a, hw: hw * (0.3 + R() * 0.2), hd: hd * (0.3 + R() * 0.2), h: 3.5 + R() * 3, mat: MAT.CONCRETE, col: [0.32, 0.32, 0.33] });
@@ -170,7 +174,7 @@ function crown(B, R, o) {
       const [tx, tz] = Builder.tw(x, z, a, (R() - 0.5) * hw * 1.2, (R() - 0.5) * hd * 1.2);
       waterTank(B, R, tx, tz, top);
     }
-    if (R() < 0.4) { const [mx, mz] = Builder.tw(x, z, a, hw * 0.5, -hd * 0.5); mast(B, R, mx, mz, top, 8 + R() * 10, 0.25); }
+    if (!capped && R() < 0.4) { const [mx, mz] = Builder.tw(x, z, a, hw * 0.5, -hd * 0.5); mast(B, R, mx, mz, top, 8 + R() * 10, 0.25); }
     return top + 6;
   }
   if (type === 'lit') {
@@ -337,7 +341,7 @@ export function genHillside(B, R, L) {
       B.part({ x: cx, y0: y, z: cz, a: L.angle, hw: bw, hd: bd, h, mat: MAT.RES, col: pick(R, PAL.res), floorH: 3.1, winW: 3 + R(), baseY: podTop, param: lit, flags: R() < 0.4 ? FLAG.BALC : 0, solid: true });
       acUnits(B, R, cx, cz, L.angle, bw, bd, y, podTop, y + h, 3.1, 3.5, 0.1);
       y += h;
-      if (i === n - 1) crown(B, R, { x: cx, z: cz, a: L.angle, hw: bw, hd: bd, top: y, kind: 0, prm: 0, type: R() < 0.5 ? 'machine' : 'billboard', style: DT.HILLSIDE });
+      if (i === n - 1) crown(B, R, { x: cx, z: cz, a: L.angle, hw: bw, hd: bd, top: y, kind: 0, prm: 0, type: R() < 0.5 ? 'machine' : 'billboard', maxTop: L.maxTop, style: DT.HILLSIDE });
     }
     return;
   }
@@ -379,7 +383,7 @@ export function genHillside(B, R, L) {
       B.part({ x: T.x, y0: podTop, z: T.z, a: L.angle, hw: T.hw * 0.45, hd: T.hd + 3, h: h * 0.92, mat: MAT.RES, col, floorH, winW, baseY: podTop, param: lit, seed: R() * 999, solid: true });
     }
     const type = pick(R, CROWNS_RES);
-    const top = crown(B, R, { x: T.x, z: T.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type, style: DT.HILLSIDE });
+    const top = crown(B, R, { x: T.x, z: T.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type, maxTop: L.maxTop, style: DT.HILLSIDE });
     if (tw.top > 140) {
       const [ax, az] = Builder.tw(T.x, T.z, L.angle, tw.hw * 0.9, tw.hd * 0.9);
       aviation(B, ax, tw.top, az, R() * 999);
@@ -408,7 +412,7 @@ export function genUrban(B, R, L) {
     } else {
       const n = 1 + Math.floor(R() * 3);
       for (let i = 0; i < n; i++) { const [x, z] = Builder.tw(L.x, L.z, L.angle, (R() - 0.5) * hw * 1.4, (R() - 0.5) * hd * 1.4); waterTank(B, R, x, z, top); }
-      if (R() < 0.35) crown(B, R, { x: L.x, z: L.z, a: L.angle, hw, hd, top, type: 'billboard', style: DT.URBAN });
+      if (R() < 0.35) crown(B, R, { x: L.x, z: L.z, a: L.angle, hw, hd, top, type: 'billboard', maxTop: L.maxTop, style: DT.URBAN });
       if (R() < 0.3) B.part({ x: L.x + (R() - 0.5) * hw, y0: top, z: L.z + (R() - 0.5) * hd, a: L.angle, hw: 2 + R() * 2, hd: 2 + R() * 2, h: 2.6, mat: MAT.CONCRETE, col: [0.35, 0.34, 0.32] });
     }
     acUnits(B, R, L.x, L.z, L.angle, hw, hd, L.gMax + 4, L.gMin, top, 3.4, 3.2, 0.1);
@@ -430,7 +434,7 @@ export function genUrban(B, R, L) {
   if (podTop + h > maxTop) h = Math.max(maxTop - podTop, 8);
   const tw = tower(B, R, { x: L.x, z: L.z, a: L.angle, y0: podTop, baseY: podTop, hw, hd, h, segs: R() < 0.3 ? 2 : 1, kind, prm, mat, col, floorH, winW, lit, flags, seed: R() * 999 });
   if (mat === MAT.RES && kind === 0) acUnits(B, R, L.x, L.z, L.angle, hw, hd, podTop, podTop, podTop + h * 0.6, floorH, winW, 0.07);
-  crown(B, R, { x: L.x, z: L.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, crowns), style: DT.URBAN });
+  crown(B, R, { x: L.x, z: L.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, crowns), maxTop: L.maxTop, style: DT.URBAN });
   if (tw.top - L.gMin > 140) { const [ax, az] = Builder.tw(L.x, L.z, L.angle, tw.hw * 0.9, -tw.hd * 0.9); aviation(B, ax, tw.top, az, R() * 999); }
 }
 
@@ -447,7 +451,7 @@ export function genBund(B, R, L, clockTower) {
     const glass = R() < 0.7;
     const kind = R() < 0.4 ? 1 : 0, prm = kind ? 0.25 : (R() < 0.3 ? 0.4 : 0);
     const tw = tower(B, R, { x: L.x, z: L.z, a: L.angle, y0: podTop, baseY: podTop, hw: Math.max(hw, 8), hd: Math.max(hd, 8), h, segs: 1 + Math.floor(R() * 3), kind, prm, mat: glass ? MAT.GLASS : MAT.OFFICE, col: glass ? pick(R, PAL.glass) : pick(R, PAL.office), floorH: 3.9, winW: glass ? 1.5 : 3.2, lit: 0.16 + R() * 0.2, flags: R() < 0.5 ? FLAG.EDGE : FLAG.CROWNLIT, seed: R() * 999 });
-    const top = crown(B, R, { x: L.x, z: L.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, CROWNS_CBD), style: DT.BUND });
+    const top = crown(B, R, { x: L.x, z: L.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, CROWNS_CBD), maxTop: L.maxTop, style: DT.BUND });
     B.tops.push({ x: L.x, y: tw.top, z: L.z, bund: true });
     if (tw.top > 140) aviation(B, L.x, top, L.z, R() * 999);
     return;
@@ -655,7 +659,7 @@ export function genCBD(B, R, L) {
     if (R() < 0.3) flags |= FLAG.CROWNLIT;
     const tw = tower(B, R, { x, z, a: L.angle, y0: podTop, baseY: podTop, hw, hd, h: H, segs, kind, prm, taper, twist, mat, col: mat === MAT.GLASS ? glassC : pick(R, PAL.office), floorH: 4.0, winW: mat === MAT.GLASS ? 1.5 : 3, lit: 0.14 + R() * 0.2, flags, seed: R() * 999 });
     if (flags & FLAG.LED) B.led.push({ x, z, y0: podTop, y1: tw.top, r: Math.max(hw, hd) });
-    const top = crown(B, R, { x, z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, CROWNS_CBD), style: DT.CBD });
+    const top = crown(B, R, { x, z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, CROWNS_CBD), maxTop: L.maxTop, style: DT.CBD });
     B.tops.push({ x, y: tw.top, z, cbd: true });
     for (const [sx, sz] of [[1, 1], [-1, -1]]) { const [ax, az] = Builder.tw(x, z, L.angle, sx * tw.hw * 0.85, sz * tw.hd * 0.85); aviation(B, ax, tw.top, az, R() * 999); }
     if (top > tw.top + 10) aviation(B, x, top, z, R() * 999);
