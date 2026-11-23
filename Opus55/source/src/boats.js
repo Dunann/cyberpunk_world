@@ -310,6 +310,8 @@ export default {
     addPath(1, 2, 2); addPath(1, 0, 3); addPath(1, 1, 2);
     for (let i = 0; i < (q >= 1 ? 5 : 3); i++) specs.push({ type: 3, path: 0, loop: true });
     specs.push({ type: 1, path: 0, loop: true });
+    // a lit tour boat that crosses the view under the Peninsula South Bridge (viewpoint 8) at its capture time
+    specs.push({ type: 1, path: 0, loop: true, featured: true });
     specs.sort((a, b) => a.type - b.type);
     const boats = specs.slice(0, MAX_BOATS);
     const palette = [[0.1, 0.9, 1.0], [1.0, 0.15, 0.6], [1.0, 0.7, 0.15], [0.5, 0.2, 1.0], [0.2, 1.0, 0.45], [1.0, 0.25, 0.1]];
@@ -330,6 +332,10 @@ export default {
         b.omega = (T.speed * 0.8) / Math.sqrt((b.Lh * b.Lh + b.Rl * b.Rl) / 2) * (li % 2 ? 1 : -1);
         li++;
       }
+      if (b.featured) {
+        b.sMid = nearestS(this.paths[0], -605, 590); b.Lh = 220; b.Rl = 30; b.base = -100; b.omega = 0.012;
+        b.theta0 = Math.PI / 2 - 60 * b.omega;
+      }
       const ca = palette[(R() * palette.length) | 0], cb = palette[(R() * palette.length) | 0];
       b.ledA = ca; b.ledB = cb;
       b.ledMode = b.type === 1 || b.type === 3 ? 1 : b.type === 0 ? (R() < 0.5 ? 1 : 0) : 0;
@@ -345,6 +351,7 @@ export default {
     // keep boats from sitting on top of a viewpoint camera at its capture time
     const tmp = new Float32Array(3);
     for (const b of boats) {
+      if (b.featured) continue;
       for (let tries = 0; tries < 12; tries++) {
         let clash = false;
         for (const p of world.poses) {

@@ -114,6 +114,9 @@ fn bandAA(y: f32, c: f32, h: f32, fw: f32) -> f32 {
     rough = 0.55;
     let seams = bandAA(fract(i.uv.y / 12.0), 0.5, 0.02, fwv / 12.0);
     albedo *= 1.0 - seams * 0.3;
+  } else if (kind == 9u) { // small maintenance-walkway lamp
+    albedo = vec3f(0.1);
+    emis = vec3f(1.0, 0.78, 0.5) * 6.0;
   } else if (kind == 8u) { // flood-lit tower base glow (static emissive)
     albedo = vec3f(0.2);
     emis = bridgeLed(bid, i.uv.x, i.uv.y, t) * 4.0;
@@ -294,7 +297,28 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
     q(hw * 0.62, -1.8, hw * 0.5, -3.2, lateral, 6, -1.8, -3.2);
     q(-hw * 0.5, -3.2, hw * 0.5, -3.2, [0, -1, 0], 6, -3.2, -3.2);          // girder bottom
   }
-  // end caps of the deck (at the ground, mostly hidden)
+  // ---- underside structure where the deck is high: edge girders, cross-beams, maintenance walkway with small lamps
+  const elevated = (s) => deckY(s) - Math.max(world.heightAt(ax + ux * s, az + uz * s), 0) > 6;
+  for (let i = 0; i < n; i++) {
+    const s0 = S[i], s1 = S[i + 1];
+    if (!elevated(s0) || !elevated(s1)) continue;
+    for (const sd of [-1, 1]) mesh.beam(P(s0, sd * hw * 0.8, -2.4), P(s1, sd * hw * 0.8, -2.4), up, 0.65, 0.3, 0, bid, s0);
+    mesh.beam(P(s0, hw * 0.4, -3.95), P(s1, hw * 0.4, -3.95), up, 0.05, 0.5, 3, bid, s0);        // walkway grating
+    mesh.beam(P(s0, hw * 0.4 + 0.5, -3.0), P(s1, hw * 0.4 + 0.5, -3.0), up, 0.04, 0.04, 3, bid, s0); // handrail
+  }
+  for (let s = 4; s < len - 4; s += 8) {
+    if (!elevated(s)) continue;
+    mesh.beam(P(s, -hw * 0.95, -2.3), P(s, hw * 0.95, -2.3), up, 0.55, 0.22, 0, bid, s);           // cross-beam
+    if (((s - 4) / 8) % 2 === 0) {
+      const l = P(s, hw * 0.4, -4.1);
+      mesh.beam(add(l, mul(along, -0.25)), add(l, mul(along, 0.25)), lateral, 0.12, 0.08, 9, bid, s); // walkway lamp
+    }
+  }
+  // warm uplights washing the underside over the water
+  for (let s = sw0 + 30; s < sw1 - 20; s += 55) {
+    const l = P(s, 0, -9);
+    lightsOut.push([l[0], Math.max(l[1], 4), l[2], 24, 32, 25, 17]);
+  }
   // ---- railings: posts every 2.5 m + top rail (thin beams)
   for (const sd of [-1, 1]) {
     const lat = sd * (hw - 0.15);
@@ -361,6 +385,7 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
     }
     const c0 = P(s, -hw * 0.6, -3.2), c1 = P(s, hw * 0.6, -3.2);
     mesh.beam(add(c0, [0, -1.2, 0]), add(c1, [0, -1.2, 0]), along, 1.2, 1.2, 0, bid, s);
+    for (const sd of [-1, 1]) { const bb = P(s, sd * hw * 0.42, -3.35); mesh.beam(add(bb, [0, -0.2, 0]), add(bb, [0, 0.15, 0]), along, 0.7, 0.7, 3, bid, s); } // bearings
     // accent light washing the pier and the deck underside
     if (g < -0.5) {
       const c = P(s, hw * 0.42, 0);

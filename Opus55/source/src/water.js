@@ -184,7 +184,8 @@ fn ndcOf(dir: vec3f) -> vec2f {
   if (R.y < 0.005) { R = normalize(vec3f(R.x, 0.005, R.z)); }
   var off = (ndcOf(R) - ndcOf(Rf)) * vec2f(0.5, -0.5);
   off = clamp(off * 0.4, vec2f(-0.04), vec2f(0.04));
-  let streak = clamp(sqrt(sigma2) * 0.9 + 0.0015, 0.0, 0.035);
+  // the SSR pass already streaks water reflections vertically; these taps only add the sub-pixel roughness
+  let streak = clamp(sqrt(sigma2) * 0.35 + 0.001, 0.0, 0.012);
   var refl = vec3f(0.0);
   var rw = 0.0;
   for (var k = 0; k < 4; k++) {
@@ -204,7 +205,7 @@ fn ndcOf(dir: vec3f) -> vec2f {
 
   // moon glitter
   let hm = normalize(v + F.moon.xyz);
-  let a = 0.05 + sqrt(sigma2) * 0.6;
+  let a = 0.08 + sqrt(sigma2) * 0.8;
   let a2 = a * a;
   let nh = max(dot(n, hm), 0.0);
   let dd = nh * nh * (a2 - 1.0) + 1.0;
