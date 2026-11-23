@@ -76,8 +76,8 @@ fn wakes(p: vec2f, t: f32) -> vec3f {
 // Rain drop rings (two layers of cells, one drop per cell per cycle). Returns slope.
 fn rainRings(p: vec2f, t: f32) -> vec2f {
   var s = vec2f(0.0);
-  for (var l = 0; l < 3; l++) {
-    let q = p * 1.7 + vec2f(f32(l) * 3.71, f32(l) * 1.37);
+  for (var l = 0; l < 4; l++) {
+    let q = p * 2.2 + vec2f(f32(l) * 3.71, f32(l) * 1.37);
     let cell = floor(q);
     let f = fract(q) - 0.5;
     let h = hash22(cell + f32(l) * 17.0);
@@ -130,9 +130,9 @@ fn ndcOf(dir: vec3f) -> vec2f {
 
   // macro variation (breaks up tiling): wind gust patches and calmer streaks
   let mvar = textureSample(waveTex, sampWave, p.xz * (1.0 / 640.0) + vec2f(0.21, 0.83));
-  let gust = saturate(0.75 + 0.5 * mvar.x - 0.3 * mvar.y);
+  let gust = 0.9 + 0.1 * clamp(mvar.x - 0.5 * mvar.y, -1.0, 1.0);
   let calm = mix(0.35, 1.0, river) * gust;
-  let K1 = 0.05 * calm; let K2 = 0.07 * calm; let K3 = 0.045 * (0.6 + 0.6 * F.params.x) * mix(0.6, 1.0, river);
+  let K1 = 0.03 * calm; let K2 = 0.075 * calm; let K3 = 0.045 * (0.6 + 0.6 * F.params.x) * mix(0.6, 1.0, river);
   let m1 = (A1 * w0 + B1 * w1); let m2 = (A2 * w0 + B2 * w1);
   let s1 = m1.xy * norm; let s2a = A2.xy * w0 + B2.xy * w1;
   let s2 = r1 * (s2a * norm);
@@ -153,8 +153,8 @@ fn ndcOf(dir: vec3f) -> vec2f {
     slope += wv.xy;
     foam += wv.z;
   }
-  if (F.params.x > 0.0 && dist < 70.0) {
-    slope += rainRings(p.xz, t) * 0.3 * F.params.x * (1.0 - smoothstep(20.0, 70.0, dist));
+  if (F.params.x > 0.0 && dist < 120.0) {
+    slope += rainRings(p.xz, t) * 0.3 * F.params.x * (1.0 - smoothstep(35.0, 120.0, dist));
   }
   let n = normalize(vec3f(-slope.x, 1.0, -slope.y));
 
@@ -185,11 +185,10 @@ fn ndcOf(dir: vec3f) -> vec2f {
   var off = (ndcOf(R) - ndcOf(Rf)) * vec2f(0.5, -0.5);
   off = clamp(off * 0.4, vec2f(-0.04), vec2f(0.04));
   let streak = clamp(sqrt(sigma2) * 0.9 + 0.0015, 0.0, 0.035);
-  let jit = ign(i.pos.xy, F.params.y) - 0.5;
   var refl = vec3f(0.0);
   var rw = 0.0;
-  for (var k = 0; k < 4; k++) {
-    let fk = f32(k) - 1.5 + jit;
+  for (var k = 0; k < 5; k++) {
+    let fk = f32(k) - 2.0;
     let su = clamp(uv + off + vec2f(0.0, fk * streak), vec2f(0.0), vec2f(1.0));
     let s = textureSampleLevel(reflTex, sampClamp, su, 0.0);
     let w = select(0.0, exp(-fk * fk * 0.35), s.a > 1.9);
@@ -210,7 +209,7 @@ fn ndcOf(dir: vec3f) -> vec2f {
   let nh = max(dot(n, hm), 0.0);
   let dd = nh * nh * (a2 - 1.0) + 1.0;
   let D = a2 / (PI * dd * dd);
-  let moonSpec = vec3f(0.55, 0.65, 0.95) * F.moon.w * D * 0.15 * saturate(dot(n, F.moon.xyz));
+  let moonSpec = vec3f(0.55, 0.65, 0.95) * F.moon.w * D * 0.06 * saturate(dot(n, F.moon.xyz));
 
   let NdotV = saturate(dot(n, v));
   let fres = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);

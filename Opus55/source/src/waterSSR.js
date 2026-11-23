@@ -73,7 +73,7 @@ fn trace(P: vec3f, R: vec3f, steps: i32, jit: f32, maxLen: f32, dims: vec2f) -> 
     let rayZ = 1.0 / mix(k0, k1, tt);
     let uv = (n0 + dn * tt) * vec2f(0.5, -0.5) + 0.5;
     let dz = rayZ - sceneLin(vec2i(uv * dims));
-    let thick = max(abs(rayZ - zPrev) * 1.2, 0.8) + rayZ * 0.008;
+    let thick = max(abs(rayZ - zPrev) * 1.0, 0.6) + rayZ * 0.005;
     if (dz > 0.0 && dz < thick) {
       var lo = tPrev; var hi = tt;
       for (var j = 0; j < 4; j++) {
@@ -107,7 +107,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   if (gid.x >= hd.x || gid.y >= hd.y) { return; }
   let fd = textureDimensions(dTex);
   let dims = vec2f(fd);
-  let px = min(vec2i(gid.xy) * 2, vec2i(fd) - 1);
+  let fi = u32(F.params.y) % 4u;
+  let px = min(vec2i(gid.xy) * 2 + vec2i(i32(fi & 1u), i32(fi >> 1u)), vec2i(fd) - 1);
   let uv = (vec2f(px) + 0.5) * F.res.zw;
   let dRaw = textureLoad(dTex, px, 0);
   let sz = select(1e9, linearDepth(dRaw), dRaw > 0.0);
@@ -140,22 +141,69 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     // the composite then smears the result vertically into the streaks typical of wet streets
     let rough = mix(A.a, 0.05, saturate(F.params.z * M.w));
     let q = P.xz * 0.7;
-    let wn = vec2f(sin(q.x * 1.7 + sin(q.y * 1.3)), sin(q.y * 1.9 + sin(q.x * 1.1))) * (0.012 + rough * 0.1);
+    let wn = vec2f(sin(q.x * 1.7 + sin(q.y * 1.3)), sin(q.y * 1.9 + sin(q.x * 1.1))) * (0.008 + rough * 0.06);
     let hj = (vec2f(jit, fract(jit * 7.31)) - 0.5) * 0.01;
     R = reflect(dir, normalize(n + vec3f(wn.x + hj.x, 0.0, wn.y + hj.y)));
     if (R.y < 0.02) { R = normalize(vec3f(R.x, 0.02, R.z)); }
     P += n * 0.05;
     steps = STEPS_G; maxLen = 600.0;
   }
-  let h = trace(P, R, steps, jit, maxLen, dims);
+  var h = trace(P, R, steps, jit, maxLen, dims);
+  // reject hits on surfaces facing away from the ray (the ray passed behind them)
+  if (h.z > 0.0) {
+    let nh = textureLoad(nTex, clamp(vec2i(h.xy * dims), vec2i(0), vec2i(fd) - 1), 0).xyz;
+    if (dot(nh, R) > 0.15) { h.z = 0.0; }
+  }
   let hit = min(textureSampleLevel(sTex, sampClamp, h.xy, 0.0).rgb, vec3f(100.0));
   if (tW > 0.0) {
     let col = mix(waterFallback(R), hit, h.z);
     textureStore(outR, gid.xy, vec4f(col, 2.0 + h.z));
     return;
   }
+  // hits: premultiplied colour, weight k > 0; misses: weight stored negative (filled by the resolve)
+  if (h.z <= 0.0) { textureStore(outR, gid.xy, vec4f(0.0, 0.0, 0.0, -g)); return; }
   let k = g * h.z;
   textureStore(outR, gid.xy, vec4f(hit * k, k));
+}
+`;
+
+// Temporal resolve of the half-resolution trace: misses are filled from neighbouring hits, then the result is
+// blended with the reprojected history (motion vectors) after clamping it to the current 3x3 neighbourhood.
+const RESOLVE_WGSL = /* wgsl */ `
+@group(1) @binding(0) var rawTex: texture_2d<f32>;
+@group(1) @binding(1) var histTex: texture_2d<f32>;
+@group(1) @binding(2) var mTex: texture_2d<f32>;
+@group(1) @binding(3) var outT: texture_storage_2d<rgba16float, write>;
+@compute @workgroup_size(8, 8)
+fn main(@builtin(global_invocation_id) gid: vec3u) {
+  let hd = vec2i(textureDimensions(outT));
+  let p = vec2i(gid.xy);
+  if (p.x >= hd.x || p.y >= hd.y) { return; }
+  let c = textureLoad(rawTex, p, 0);
+  if (c.a >= 1.5) { textureStore(outT, p, c); return; }       // river texel: used directly by the water shader
+  var mn = vec4f(1e9); var mx = vec4f(-1e9); var sum = vec4f(0.0); var nh = 0.0; var refl = 0.0;
+  for (var y = -1; y <= 1; y++) {
+    for (var x = -1; x <= 1; x++) {
+      let s = textureLoad(rawTex, clamp(p + vec2i(x, y), vec2i(0), hd - 1), 0);
+      if (s.a > 0.0 && s.a < 1.5) { mn = min(mn, s); mx = max(mx, s); sum += s; nh += 1.0; }
+      if (s.a != 0.0 && s.a < 1.5) { refl += 1.0; }
+    }
+  }
+  if (c.a == 0.0 && refl < 1.0) { textureStore(outT, p, vec4f(0.0)); return; }
+  var cur = c;
+  if (c.a <= 0.0) { cur = select(vec4f(0.0), sum / max(nh, 1.0), nh > 0.0); }   // miss: spatial fill
+  let fd = vec2i(textureDimensions(mTex));
+  let uv = (vec2f(p) + 0.5) / vec2f(hd);
+  let mv = textureLoad(mTex, clamp(vec2i(uv * vec2f(fd)), vec2i(0), fd - 1), 0).xy;
+  let puv = uv - mv;
+  var hist = textureSampleLevel(histTex, sampClamp, puv, 0.0);
+  var a = 0.2;
+  if (any(puv < vec2f(0.0)) || any(puv > vec2f(1.0)) || hist.a >= 1.5 || hist.a < 0.0) { hist = cur; }
+  if (nh > 0.0) {
+    let ext = (mx - mn) * 0.25 + 0.02;
+    hist = clamp(hist, mn - ext, mx + ext);
+  } else { a = 0.08; }
+  textureStore(outT, p, max(mix(hist, cur, a), vec4f(0.0)));
 }
 `;
 
@@ -195,8 +243,16 @@ export class WaterSSR {
     ] });
     const q = ctx.quality.level;
     this.tracePipe = r.computePipeline({ label: 'ssr-trace', code: WGSL_SSR_COMMON + TRACE_WGSL, groups: [this.traceLayout],
-      constants: { STEPS_W: q >= 2 ? 24 : q === 1 ? 16 : 12, STEPS_G: q >= 2 ? 12 : q === 1 ? 10 : 8 } });
+      constants: { STEPS_W: q >= 2 ? 24 : q === 1 ? 16 : 12, STEPS_G: q >= 2 ? 16 : q === 1 ? 12 : 8 } });
 
+    const C = GPUShaderStage.COMPUTE;
+    this.resLayout = d.createBindGroupLayout({ entries: [
+      { binding: 0, visibility: C, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 1, visibility: C, texture: { sampleType: 'float' } },
+      { binding: 2, visibility: C, texture: { sampleType: 'unfilterable-float' } },
+      { binding: 3, visibility: C, storageTexture: { access: 'write-only', format: 'rgba16float' } },
+    ] });
+    this.resPipe = r.computePipeline({ label: 'ssr-resolve', code: RESOLVE_WGSL, groups: [this.resLayout] });
     const F = GPUShaderStage.FRAGMENT;
     this.compLayout = d.createBindGroupLayout({ entries: [
       { binding: 0, visibility: F, texture: { sampleType: 'float' } },
@@ -220,13 +276,21 @@ export class WaterSSR {
   resize(ctx) {
     const d = ctx.device, v = ctx.views;
     const w = Math.max(1, Math.ceil(ctx.renderer.width / 2)), h = Math.max(1, Math.ceil(ctx.renderer.height / 2));
-    if (this.reflTex) this.reflTex.destroy();
-    this.reflTex = d.createTexture({ size: [w, h], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING, label: 'reflHalf' });
+    for (const k of ['rawTex', 'reflTex', 'histTex']) if (this[k]) this[k].destroy();
+    const T = GPUTextureUsage;
+    this.rawTex = d.createTexture({ size: [w, h], format: 'rgba16float', usage: T.STORAGE_BINDING | T.TEXTURE_BINDING, label: 'reflRaw' });
+    this.reflTex = d.createTexture({ size: [w, h], format: 'rgba16float', usage: T.STORAGE_BINDING | T.TEXTURE_BINDING | T.COPY_SRC, label: 'reflHalf' });
+    this.histTex = d.createTexture({ size: [w, h], format: 'rgba16float', usage: T.TEXTURE_BINDING | T.COPY_DST, label: 'reflHist' });
+    this.rawView = this.rawTex.createView();
     this.reflView = this.reflTex.createView();
+    this.copySrc = { texture: this.reflTex }; this.copyDst = { texture: this.histTex }; this.copySize = [w, h];
+    this.resGroup = d.createBindGroup({ layout: this.resLayout, entries: [
+      { binding: 0, resource: this.rawView }, { binding: 1, resource: this.histTex.createView() },
+      { binding: 2, resource: v.motion }, { binding: 3, resource: this.reflView }] });
     this.hw = w; this.hh = h;
     this.traceGroup = d.createBindGroup({ layout: this.traceLayout, entries: [
       { binding: 0, resource: v.depth }, { binding: 1, resource: v.normal }, { binding: 2, resource: v.albedo },
-      { binding: 3, resource: v.motion }, { binding: 4, resource: v.scene }, { binding: 5, resource: this.reflView }] });
+      { binding: 3, resource: v.motion }, { binding: 4, resource: v.scene }, { binding: 5, resource: this.rawView }] });
     this.compGroup = d.createBindGroup({ layout: this.compLayout, entries: [
       { binding: 0, resource: this.reflView }] });
     this.att[0].view = v.scene;
@@ -240,7 +304,11 @@ export class WaterSSR {
     p.setPipeline(this.tracePipe);
     p.setBindGroup(1, this.traceGroup);
     p.dispatchWorkgroups(Math.ceil(this.hw / 8), Math.ceil(this.hh / 8));
+    p.setPipeline(this.resPipe);
+    p.setBindGroup(1, this.resGroup);
+    p.dispatchWorkgroups(Math.ceil(this.hw / 8), Math.ceil(this.hh / 8));
     p.end();
+    enc.copyTextureToTexture(this.copySrc, this.copyDst, this.copySize);
     this.compDesc.timestampWrites = ctx.prof.ts('ssr-comp');
     const rp = enc.beginRenderPass(this.compDesc);
     rp.setPipeline(this.compPipe);
