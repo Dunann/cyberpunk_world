@@ -77,6 +77,8 @@ export const LANDMARKS = [
   { id: 'gerdome',   x: 900,  z: -2780, r: 150, h: 120, district: 3 },
   { id: 'registan',  x: 1250, z: -2430, r: 120, h: 70,  district: 3 },
   { id: 'pagoda',    x: -1980, z: 3020, r: 40,  h: 60,  district: 7 },
+  { id: 'crystal',   x: 900,  z: -1150, r: 75,  h: 670, district: 4 },   // faceted crystalline supertall (Merdeka 118-inspired), Jiangbei
+  { id: 'beacon',    x: -1250, z: -900, r: 45,  h: 420, district: 1 },   // hilltop telecom tower (KL Tower-inspired), on the hill west of the peninsula
 ];
 
 // Viewpoints (keys 1-0) and the 10 verification poses. y is meters above ground when rel is true.
