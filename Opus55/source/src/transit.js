@@ -98,6 +98,11 @@ function cabinMesh() {
   mb.beam([0, -3.45, -0.3], [0, -3.45, -2.4], 0.08, 0.08, 1);
   mb.beam([0, -3.45, 0.3], [0, -3.45, 2.4], 0.08, 0.08, 1);
   mb.box([0, -3.52, 0], X, Y, Z, 1.0, 0.06, 2.6, 5);                    // roof equipment
+  // grip housing: a fairing over the hanger joint with a beacon on top, and marker lights on the roof corners
+  mb.box([0, -3.22, 0], X, Y, Z, 0.5, 0.22, 1.1, 5);
+  mb.box([0, -3.0, 0.5], X, Y, Z, 0.4, 0.05, 0.5, 5);
+  mb.box([0, -2.93, -0.2], X, Y, Z, 0.09, 0.06, 0.09, 10);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) mb.box([sx * 1.3, -3.66, sz * 3.05], X, Y, Z, 0.07, 0.05, 0.07, 10);
   return mb;
 }
 
@@ -143,12 +148,28 @@ fn deform(lp: vec3f, n: vec3f, flags: u32, kind: f32, halfL: f32, mat: f32) -> D
   return d;
 }
 
+// rotate a cabin point about the carriage pivot (0, -0.3, 0): pitch about local x, then roll about local z
+fn sway(p: vec3f, ap: f32, ar: f32) -> vec3f {
+  var q = p - vec3f(0.0, -0.3, 0.0);
+  q = vec3f(q.x, q.y * cos(ap) - q.z * sin(ap), q.y * sin(ap) + q.z * cos(ap));
+  q = vec3f(q.x * cos(ar) - q.y * sin(ar), q.x * sin(ar) + q.y * cos(ar), q.z);
+  return q + vec3f(0.0, -0.3, 0.0);
+}
+
 @vertex fn vs(v: VIn, @builtin(instance_index) ii: u32) -> VOut {
   let C = cars[ii];
   let flags = u32(C.p.w + 0.5);
   let kind = C.pp.w;
   let halfL = C.pf.w;
-  let d = deform(v.pos, v.nrm, flags, kind, halfL, v.me.x);
+  var d = deform(v.pos, v.nrm, flags, kind, halfL, v.me.x);
+  var dp = d.p;
+  if (kind > 1.5 && v.pos.y < -0.25) {
+    // cabin sway: the body swings slightly about the carriage under the ropes (pitch along travel, a little roll)
+    let t = time(); let pt = t - F.camFwd.w; let s = C.f.w * 6.28;
+    d.p = sway(d.p, 0.022 * sin(t * 0.8 + s), 0.012 * sin(t * 1.15 + s * 1.7));
+    d.n = sway(d.n + vec3f(0.0, -0.3, 0.0), 0.022 * sin(t * 0.8 + s), 0.012 * sin(t * 1.15 + s * 1.7)) - vec3f(0.0, -0.3, 0.0);
+    dp = sway(dp, 0.022 * sin(pt * 0.8 + s), 0.012 * sin(pt * 1.15 + s * 1.7));
+  }
   let f = C.f.xyz;
   let l = normalize(cross(vec3f(0.0, 1.0, 0.0), f));
   let u = cross(f, l);
@@ -157,7 +178,7 @@ fn deform(lp: vec3f, n: vec3f, flags: u32, kind: f32, halfL: f32, mat: f32) -> D
   let pu = cross(pf, pl);
   var o: VOut;
   o.wp = C.p.xyz + l * d.p.x + u * d.p.y + f * d.p.z;
-  o.pwp = C.pp.xyz + pl * d.p.x + pu * d.p.y + pf * d.p.z;
+  o.pwp = C.pp.xyz + pl * dp.x + pu * dp.y + pf * dp.z;
   o.n = l * d.n.x + u * d.n.y + f * d.n.z;
   o.lp = v.pos;
   o.info = vec4f(v.me.x, C.p.w, kind, C.f.w);
@@ -275,15 +296,33 @@ fn passengers(z: f32, y: f32, seed: f32, floorY: f32) -> f32 {
     // cable cabin: red body, white band, lit panoramic windows
     albedo = select(vec3f(0.6, 0.03, 0.03), vec3f(0.85, 0.85, 0.84), lp.y > -4.0);
     rough = 0.35; metal = 0.2;
-    if (lp.y > -5.35 && lp.y < -4.08 && abs(n.y) < 0.6) {
-      let fr = fract(lp.z / 1.25);
-      let post = fr < 0.06 && abs(lp.z) < 3.1;
-      if (!post) {
+    // white pinstripe and a dark skirt along the red lower body
+    if (abs(lp.y + 5.62) < 0.035) { albedo = vec3f(0.9, 0.88, 0.82); }
+    if (lp.y < -6.1) { albedo = vec3f(0.08); }
+    let wall = abs(n.y) < 0.6;
+    let endWall = abs(lp.z) > 3.15;
+    // sliding door on the right side: outline and a vertical grab bar
+    let door = wall && !endWall && lp.x < -1.5 && abs(lp.z) < 0.7 && lp.y > -6.1 && lp.y < -4.0;
+    if (door && (abs(abs(lp.z) - 0.7) < 0.03 || abs(lp.z) < 0.015 || abs(lp.y + 4.03) < 0.03)) { albedo = vec3f(0.12); }
+    if (wall && lp.y > -5.4 && lp.y < -4.03) {
+      // window band: grey aluminium frame (sill, head, posts) around each pane
+      let fr = fract((lp.z + 0.625) / 1.25);
+      let post = (fr < 0.07 || fr > 0.93) && !endWall;
+      let rail = lp.y < -5.33 || lp.y > -4.1;
+      let endPost = endWall && abs(lp.x) > 1.25;
+      if (post || rail || endPost) { albedo = vec3f(0.22, 0.23, 0.25); metal = 0.7; rough = 0.3; }
+      else {
         albedo = vec3f(0.02); rough = 0.05; metal = 0.0; mtl = 2.0;
         emis = vec3f(1.0, 0.8, 0.55) * 1.4 * passengers(lp.z + lp.x * 0.5, lp.y, seed, -6.15);
+        // a horizontal transom bar across each pane
+        if (abs(lp.y + 4.55) < 0.02) { emis *= 0.15; albedo = vec3f(0.2); mtl = 0.0; }
       }
     }
-    if (lp.y < -6.1) { albedo = vec3f(0.08); }
+  } else if (mat == 10.0) {
+    // cabin lights: blinking red beacon on the grip housing, white marker lamps on the roof corners
+    albedo = vec3f(0.3); rough = 0.3; metal = 0.0;
+    let blink = step(0.5, fract(t * 0.9 + seed * 3.0));
+    emis = select(vec3f(1.0, 0.05, 0.03) * 14.0 * (0.15 + 0.85 * blink), vec3f(1.0, 0.92, 0.8) * 6.0, lp.y < -3.4);
   }
   return gbuf(albedo, rough, n, metal, emis, 1.0, motionVector(i.wp, i.pwp), mtl, 0.8);
 }
@@ -341,8 +380,8 @@ export class Transit {
     this.cableExt = Math.hypot(cw.a.x - cw.a.cx, cw.a.z - cw.a.cz);
     this.cabTravel = 92; this.cabDwell = 18;
     this.cabCycle = 2 * (this.cabTravel + this.cabDwell);
-    // at t = 70 (pose 10) cabin 0 is over the river a quarter of the way out, in the middle of that view
-    this.cabOffset = this.cabDwell + this.cabTravel * 0.56 - 70; // cabin 0 mid-river at t = 70 (pose 10)
+    // at t = 70 (pose 10) cabin 0 is 73% of the way across, on the left third of that view below the hill station
+    this.cabOffset = this.cabDwell + this.cabTravel * 0.694 - 70;
 
     // dynamic lights: train headlights, cabin interiors
     this.lightBase = ctx.lights.reserve(this.trains.length + 2);

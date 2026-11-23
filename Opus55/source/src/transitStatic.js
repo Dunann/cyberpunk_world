@@ -10,7 +10,7 @@ import { rng } from './math.js';
 // material ids (see TRANSIT_STATIC_WGSL)
 export const M = {
   CONCRETE: 0, METAL: 1, RESID: 2, STATIONFACADE: 3, CEILING: 4, PLATFORM: 5, LED: 6, PORTAL: 7, TRACKBED: 8, RAIL: 9,
-  CABLETOWER: 10, CABLE: 11, INWALL: 12, GLASS: 13, ROOF: 14, SLAB: 15, ACUNIT: 16, BLACK: 17, SHED: 18, YELLOW: 19, LAUNDRY: 20, DOWNLIGHT: 21,
+  CABLETOWER: 10, CABLE: 11, INWALL: 12, GLASS: 13, ROOF: 14, SLAB: 15, ACUNIT: 16, BLACK: 17, SHED: 18, YELLOW: 19, LAUNDRY: 20, DOWNLIGHT: 21, PAVING: 22, RUG: 23, WOOD: 24,
 };
 
 export const TRANSIT_STATIC_WGSL = /* wgsl */ `
@@ -224,6 +224,27 @@ fn concrete(p: vec3f, uv: vec2f) -> vec3f {
     let k = hash21(vec2f(ex, 3.0));
     albedo = select(select(vec3f(0.6, 0.6, 0.58), vec3f(0.5, 0.1, 0.08), k > 0.5), select(vec3f(0.08, 0.2, 0.45), vec3f(0.6, 0.45, 0.1), k > 0.85), k > 0.7);
     rough = 0.9; wet = 0.2;
+  } else if (m == 22) { // market plaza paving: large stone slabs in a running bond with dark joints
+    let row = floor(uv.y / 1.2);
+    let su = uv.x / 1.8 + row * 0.5;
+    let fu = fract(su); let fv = fract(uv.y / 1.2);
+    let joint = 1.0 - smoothstep(0.0, 0.03, min(min(fu, 1.0 - fu) * 1.8, min(fv, 1.0 - fv) * 1.2));
+    let tone = hash21(vec2f(floor(su), row));
+    albedo = mix(vec3f(0.2, 0.19, 0.17), vec3f(0.3, 0.27, 0.23), tone) * (1.0 - 0.6 * joint);
+    rough = mix(0.55, 0.85, joint); wet = 0.9; mat = 3.0;
+  } else if (m == 23) { // rug: woven border and medallion pattern, colours per rug (extra = seed)
+    let k = hash21(vec2f(ex, 1.7));
+    let c1 = select(select(vec3f(0.45, 0.06, 0.05), vec3f(0.06, 0.12, 0.4), k > 0.4), vec3f(0.5, 0.32, 0.06), k > 0.75);
+    let c2 = select(vec3f(0.6, 0.5, 0.3), vec3f(0.08, 0.3, 0.28), k > 0.6);
+    let q = abs(fract(uv) - 0.5) * 2.0;
+    let border = step(0.8, max(q.x, q.y));
+    let med = step(0.55, sin((q.x + q.y) * 9.0)) * (1.0 - border);
+    albedo = mix(mix(c1, c2, med), c2 * 0.7, border);
+    rough = 0.95; wet = 0.1;
+  } else if (m == 24) { // wooden crate planks
+    albedo = vec3f(0.3, 0.19, 0.1) * (0.75 + 0.35 * hash21(vec2f(floor(uv.y * 5.0), ex)));
+    albedo *= 1.0 - 0.5 * step(0.9, fract(uv.y * 5.0));
+    rough = 0.8;
   } else if (m == 21) { // warm downlight panel (station portal canopy underside)
     albedo = vec3f(0.6); rough = 0.4;
     emis = vec3f(1.0, 0.8, 0.55) * 3.0;
@@ -413,6 +434,7 @@ export function buildTransitStatic(ctx, tracks) {
   if (mono) buildLizibaTower(mb, world, mono, lights, signs, col, R);
 
   buildCableway(mb, world, lights, signs, col);
+  buildMarketPlaza(mb, world);
 
   return { mesh: mb, lights, signs };
 }
@@ -659,7 +681,8 @@ function buildLizibaTower(mb, world, T, lights, signs, col, R) {
     const bands = [['老火锅', [1.0, 0.25, 0.1]], ['旅馆', [0.3, 0.9, 1.0]], ['麻将', [1.0, 0.75, 0.2]], ['小面', [1.0, 0.2, 0.6]]];
     bands.forEach(([text, color], k) => {
       const [xs, zs] = W(e * (HX + 0.05), e * (k % 2 ? 5 : -4));
-      signs.push({ x: xs, y: yU + 4.5 + k * 6.2, z: zs, nx: ex[0] * e, nz: ex[1] * e, w: 8, h: 1.8, text, kind: k % 2 ? 'lightbox' : 'fascia', color, offset: 0.3 });
+      // start above the big station name sign (it spans yU + 1.7 .. yU + 4.7)
+      signs.push({ x: xs, y: yU + 7.6 + k * 6.2, z: zs, nx: ex[0] * e, nz: ex[1] * e, w: 8, h: 1.8, text, kind: k % 2 ? 'lightbox' : 'fascia', color, offset: 0.3 });
     });
     // light spill over the opening
     const [x3, z3] = W(e * (HX + 4), 0);
@@ -754,6 +777,60 @@ function buildCableway(mb, world, lights, signs, col) {
 }
 
 export const CABLE_GAUGE = 0.6, HAUL_DROP = 0.9;
+
+// Night market (pose 6) as a pedestrian plaza: stone paving laid over the street (hides its lane markings), rugs on
+// the ground in front of stalls, stacked crates between the stalls and bollards closing both ends to traffic.
+function buildMarketPlaza(mb, world) {
+  const pose = world.poses[5];
+  if (!pose || !pose.resolved) return;
+  const C = pose.resolved, T = pose.target;
+  const len = Math.hypot(T[0] - C.x, T[2] - C.z);
+  const ux = (T[0] - C.x) / len, uz = (T[2] - C.z) / len, px = -uz, pz = ux;
+  const P = (a, c) => [C.x + ux * a + px * c, C.z + uz * a + pz * c];
+  // paving starts at the entrance bollards (the street in front of them keeps its markings)
+  const A0 = 9.5, A1 = 182, HW = 10, step = 2;
+  const R = rng(4242);
+  // paving: a terrain-following grid 5 cm above the ground; uv in plaza meters
+  const hs = [];
+  for (let a = A0; a <= A1 + 0.01; a += step) {
+    const row = [];
+    for (let c = -HW; c <= HW; c += step) { const [x, z] = P(a, c); row.push(world.waterDist(x, z) < 6 ? null : [x, world.heightAt(x, z) + 0.05, z]); }
+    hs.push(row);
+  }
+  for (let i = 0; i < hs.length - 1; i++) for (let j = 0; j < hs[i].length - 1; j++) {
+    const p0 = hs[i][j], p1 = hs[i][j + 1], p2 = hs[i + 1][j + 1], p3 = hs[i + 1][j];
+    if (!p0 || !p1 || !p2 || !p3) continue;
+    const e1 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]], e2 = [p1[0] - p3[0], p1[1] - p3[1], p1[2] - p3[2]];
+    let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    const l = Math.hypot(n[0], n[1], n[2]) || 1; n = [n[0] / l, n[1] / l, n[2] / l];
+    if (n[1] < 0) n = [-n[0], -n[1], -n[2]];
+    const a = A0 + i * step, c = -HW + j * step;
+    mb.quad(p0, p1, p2, p3, n, [[c, a], [c + step, a], [c + step, a + step], [c, a + step]], M.PAVING);
+  }
+  const ang = Math.atan2(pz, px); // ybox local x runs across the lane
+  const box = (a, c, y0, hx, hy, hz, mat, extra = 0) => {
+    const [x, z] = P(a, c);
+    mb.ybox(x, world.heightAt(x, z) + y0 + hy, z, hx, hy, hz, ang, mat, extra);
+  };
+  let seed = 0;
+  for (let t = 14; t < 175; t += 5.5) for (const side of [-1, 1]) {
+    // rug on the ground in front of every other stall
+    if (R() < 0.5) box(t + (R() - 0.5) * 1.5, side * (4.3 + R() * 0.3), 0.05, 0.75, 0.015, 1.1 + R() * 0.3, M.RUG, seed++);
+    // crate stacks in the gap between neighbouring stalls
+    if (R() < 0.55) {
+      const a = t + 2.75, c = side * (6.0 + R() * 1.2);
+      const n = 1 + ((R() * 3) | 0);
+      for (let k = 0; k < n; k++) box(a + (R() - 0.5) * 0.2, c + (R() - 0.5) * 0.2, 0.05 + k * 0.52, 0.26, 0.25, 0.3, M.WOOD, seed++);
+    }
+  }
+  // rugs displayed in a heap near the entrance
+  for (let k = 0; k < 4; k++) box(9 + k * 0.3, -7 + (R() - 0.5), 0.05 + k * 0.04, 0.8, 0.02, 1.2, M.RUG, seed++);
+  // bollards across both ends (gaps for people every ~1.6 m)
+  for (const a of [10, 180]) for (let c = -HW + 0.6; c <= HW - 0.5; c += 1.6) {
+    box(a, c, 0, 0.09, 0.45, 0.09, M.METAL);
+    box(a, c, 0.62, 0.095, 0.05, 0.095, M.YELLOW);
+  }
+}
 
 export function cablePoint(c, u, off) {
   const x = c.a.x + (c.b.x - c.a.x) * u + c.ez[0] * off;

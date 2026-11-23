@@ -37,19 +37,23 @@ fn carState(ci: CarIn, R: Run, t: f32) -> State {
   let off = dir * R.b.y * (lane + 0.5);
   let xz = R.a.xy + d * along + right * off;
   let fd = d * dir;
-  let y = runHeight(R, xz, along);
-  let y1 = runHeight(R, xz + fd * 2.0, along + dir * 2.0);
-  let y0 = runHeight(R, xz - fd * 2.0, along - dir * 2.0);
+  // rest on the road plane through the wheel contact points: front and rear axles (+-1.4 m) on both sides
+  let side = right * 0.75;
+  let y1 = max(runHeight(R, xz + fd * 1.4 + side, along + dir * 1.4), runHeight(R, xz + fd * 1.4 - side, along + dir * 1.4));
+  let y0 = max(runHeight(R, xz - fd * 1.4 + side, along - dir * 1.4), runHeight(R, xz - fd * 1.4 - side, along - dir * 1.4));
+  let y = max(runHeight(R, xz, along), 0.5 * (y0 + y1));
   st.p = vec3f(xz.x, y, xz.y);
-  st.f = normalize(vec3f(fd.x * 4.0, y1 - y0, fd.y * 4.0));
+  st.f = normalize(vec3f(fd.x * 2.8, y1 - y0, fd.y * 2.8));
   st.fade = smoothstep(0.0, 10.0, s) * smoothstep(0.0, 10.0, L - s);
+  // too steep for a car (a kerb or a stair street crossing the run): shrink it away instead of clipping
+  st.fade *= 1.0 - smoothstep(0.32, 0.42, abs(y1 - y0) / 2.8);
   return st;
 }
 `;
 
 const CAR_CS = /* wgsl */ `
 ${CAR_STATE_WGSL}
-struct Lamp { a: vec4f, b: vec4f, c: vec4f }; // a: pos, radius   b: color (fog applied), kind (0 sprite, 1 streak)   c: streak dir xz, length, width
+struct Lamp { a: vec4f, b: vec4f, c: vec4f, d: vec4f }; // a: pos, radius   b: color (fog applied), kind (0 sprite, 1 streak)   c: streak dir xz, length, width   d: previous-frame pos (motion vectors)
 @group(1) @binding(0) var<storage, read> runs: array<Run>;
 @group(1) @binding(1) var<storage, read> carsIn: array<CarIn>;
 @group(1) @binding(2) var<storage, read_write> nearOut: array<CarOut>;
@@ -82,8 +86,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let c = F.viewProjNJ * vec4f(st.p + vec3f(0.0, 1.0, 0.0), 1.0);
   let r = 8.0;
   if (c.w < -r || abs(c.x) > c.w * 1.05 + r * 1.5 || abs(c.y) > c.w * 1.05 + r * 2.0) { return; }
+  let pst = carState(ci, R, t - F.camFwd.w);
   if (dist < P.y) {
-    let pst = carState(ci, R, t - F.camFwd.w);
     var o: CarOut;
     o.p = vec4f(st.p, ci.b.z);
     o.f = vec4f(st.f, ci.b.x);
@@ -99,12 +103,17 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let f = st.f;
   let l = normalize(cross(vec3f(0.0, 1.0, 0.0), f));
   let up = cross(f, l);
+  let pfw = pst.f;
+  let pl = normalize(cross(vec3f(0.0, 1.0, 0.0), pfw));
+  let pup = cross(pfw, pl);
   let pxk = 2.0 * F.camRight.w * F.res.w;
   let wet = F.params.z;
   for (var e = 0; e < 2; e++) {
     let head = e == 0;
     let sg = select(-1.0, 1.0, head);
-    let center = st.p + f * (hl + 0.06) * sg + up * select(0.68, 0.62, head) * ys;
+    // lamp offsets shrink with the car body at the run ends (the mesh is scaled by the same fade)
+    let center = st.p + (f * (hl + 0.06) * sg + up * select(0.68, 0.62, head) * ys) * st.fade;
+    let pcenter = pst.p + (pfw * (hl + 0.06) * sg + pup * select(0.68, 0.62, head) * ys) * pst.fade;
     let tcv = F.camPos.xyz - center;
     let d = length(tcv);
     let vis = smoothstep(-0.15, 0.5, dot(f, tcv / d) * sg) * st.fade;
@@ -115,14 +124,16 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     if (d > 320.0) {
       let rr = max(0.32, 1.15 * d * pxk);
       L.a = vec4f(center, rr);
+      L.d = vec4f(pcenter, 0.0);
       L.b = vec4f(base * pow(0.32 / rr, 1.5) * fog, 0.0);
       emit(L);
     } else {
       let rr = max(0.16, 1.15 * d * pxk);
       L.b = vec4f(base * pow(0.16 / rr, 1.5) * fog, 0.0);
-      let off = l * select(0.62, 0.66, head) * xs;
-      L.a = vec4f(center + off, rr); emit(L);
-      L.a = vec4f(center - off, rr); emit(L);
+      let off = l * select(0.62, 0.66, head) * xs * st.fade;
+      let poff = pl * select(0.62, 0.66, head) * xs * pst.fade;
+      L.a = vec4f(center + off, rr); L.d = vec4f(pcenter + poff, 0.0); emit(L);
+      L.a = vec4f(center - off, rr); L.d = vec4f(pcenter - poff, 0.0); emit(L);
       if (d < 450.0 && wet > 0.05) {
         // wet-road reflection streak lying on the road toward the camera (strongest at grazing angles)
         let g = st.p + f * (hl - 0.3) * sg;
@@ -134,6 +145,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
         S.a = vec4f(g.x, g.y + 0.04, g.z, 0.0);
         S.b = vec4f(base * 0.12 * wet * graze * fog, 1.0);
         S.c = vec4f(dc, clamp(dl * 0.08, 2.0, 14.0), 0.7 * xs);
+        S.d = vec4f(pst.p + pfw * (hl - 0.3) * sg + vec3f(0.0, 0.04, 0.0), 0.0);
         if (graze > 0.02) { emit(S); }
       }
     }
@@ -235,41 +247,52 @@ fn paint(ci: f32) -> vec3f {
 `;
 
 const CAR_LIGHT_WGSL = /* wgsl */ `
-struct Lamp { a: vec4f, b: vec4f, c: vec4f };
+struct Lamp { a: vec4f, b: vec4f, c: vec4f, d: vec4f };
 @group(2) @binding(0) var<storage, read> lamps: array<Lamp>;
 @group(2) @binding(1) var<storage, read> counts: array<u32>;
 struct VOut {
   @builtin(position) cp: vec4f,
   @location(0) q: vec2f,
   @location(1) @interpolate(flat) col: vec4f,
+  @location(2) mv: vec2f,
 };
+struct FOut { @location(0) color: vec4f, @location(1) motion: vec4f };
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
   var o: VOut;
   if (ii >= counts[6]) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
   let L = lamps[ii];
   var corners = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = corners[vi];
+  var pos: vec3f;
   if (L.b.w < 0.5) {
     let tc = normalize(F.camPos.xyz - L.a.xyz);
-    let pos = L.a.xyz + tc * 0.35 + (F.camRight.xyz * c.x + F.camUp.xyz * c.y) * L.a.w * 1.6;
-    o.cp = F.viewProj * vec4f(pos, 1.0);
+    pos = L.a.xyz + tc * 0.35 + (F.camRight.xyz * c.x + F.camUp.xyz * c.y) * L.a.w * 1.6;
     o.q = c * 1.6;
   } else {
     let dc = L.c.xy;
     let perp = vec2f(-dc.y, dc.x);
     let u = c.y * 0.5 + 0.5;
     let p2 = L.a.xz + dc * u * L.c.z + perp * c.x * L.c.w;
-    o.cp = F.viewProj * vec4f(p2.x, L.a.y, p2.y, 1.0);
+    pos = vec3f(p2.x, L.a.y, p2.y);
     o.q = vec2f(c.x, u);
   }
+  o.cp = F.viewProj * vec4f(pos, 1.0);
+  // the glow moves with its car: motion vector from the car's previous-frame lamp position, so TAA reprojects the
+  // history of these pixels with the car instead of with the road behind it
+  o.mv = motionVector(pos, pos + L.d.xyz - L.a.xyz);
   o.col = L.b;
   return o;
 }
-@fragment fn fs(i: VOut) -> @location(0) vec4f {
+@fragment fn fs(i: VOut) -> FOut {
   var a: f32;
   if (i.col.w < 0.5) { a = exp(-dot(i.q, i.q) * 1.6); }
   else { a = exp(-i.q.y * 2.5) * (1.0 - i.q.x * i.q.x) * smoothstep(0.0, 0.1, i.q.y); }
-  return vec4f(i.col.rgb * a, 0.0);
+  // only the visible part of the sprite takes over the motion vector (quad corners keep the road's)
+  if (a < 0.04) { discard; }
+  var o: FOut;
+  o.color = vec4f(i.col.rgb * a, 0.0);
+  o.motion = vec4f(i.mv, 0.0, 0.0);
+  return o;
 }
 `;
 // ---------------------------------------------------------------- road network
@@ -286,7 +309,7 @@ export function buildRuns(world) {
       // the night market lane (pose 6) is pedestrian only
       const rx = x - market.x, rz = z - market.z;
       const along = rx * market.ux + rz * market.uz, across = -rx * market.uz + rz * market.ux;
-      if (along > -5 && along < 185 && Math.abs(across) < 12) return true;
+      if (along > -25 && along < 192 && Math.abs(across) < 16) return true;
     }
     const cs = world.collidersNear ? world.collidersNear(x, z) : null;
     if (cs) {
@@ -337,8 +360,10 @@ export function buildRuns(world) {
               const x = a[0] + (b[0] - a[0]) * s / 4, z = a[1] + (b[1] - a[1]) * s / 4;
               const h = world.heightAt(x, z);
               if (h < 2.0 || world.waterDist(x, z) < 6 || blockedAt(x, z)) ok = false;
-              // steep hillside streets are drawn up to ~0.5 grade; cars pitch with the terrain
-              if (hPrev !== null && Math.abs(h - hPrev) / (D.block / 4) > 0.5) ok = false;
+              // the terrain paints the streets of the dominant district only: stay on that grid
+              if (world.districtAt(x, z).index !== di) ok = false;
+              // cars pitch with the terrain, but very steep stretches are left to pedestrians
+              if (hPrev !== null && Math.abs(h - hPrev) / (D.block / 4) > 0.4) ok = false;
               hPrev = h;
             }
           }
@@ -429,7 +454,7 @@ export class Cars {
     this.nearCap = 2600;
     this.nearBuf = mk(this.nearCap * 64, GPUBufferUsage.STORAGE, 'cars-near');
     this.lampCap = Math.max(1024, Math.min(this.count * 3, 36000));
-    this.lightBuf = mk(this.lampCap * 48, GPUBufferUsage.STORAGE, 'car-lamps');
+    this.lightBuf = mk(this.lampCap * 64, GPUBufferUsage.STORAGE, 'car-lamps');
     this.mesh = carMesh().upload(d, 'car');
     this.argsInit = new Uint32Array([this.mesh.count, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0]);
     this.argsBuf = mk(48, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC, 'car-args');
@@ -458,7 +483,7 @@ export class Cars {
     this.nearDraw = [1200, 1800, 2600][q];
     this.lampDraw = Math.min(this.lampCap, [16000, 24000, 36000][q]);
     this.meshPipe = R.gbufferPipeline({ label: 'cars', code: CAR_MESH_WGSL, buffers: [VERTEX_LAYOUT], groups: [this.vLayout] });
-    this.lightPipe = R.forwardPipeline({ label: 'car-lights', code: CAR_LIGHT_WGSL, groups: [this.vLayout], blend: 'add' });
+    this.lightPipe = R.forwardPipeline({ label: 'car-lights', code: CAR_LIGHT_WGSL, groups: [this.vLayout], blend: 'add', writeMotion: true });
     this.computeDesc = { timestampWrites: undefined };
     this.wg = Math.ceil(this.count / 128);
     world.shared.roadRuns = runs.length;
