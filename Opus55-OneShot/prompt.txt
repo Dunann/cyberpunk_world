@@ -1,0 +1,38 @@
+Build a real-time explorable cyberpunk city scene explorable in the browser, inspired by https://www.reddit.com/r/ClaudeAI/comments/1xw376f/i_built_a_swimmable_underwater_world_in_one_97_kb/?share_id=vUouu3mHFIDE_vx-MUvhL&utm_medium=ios_app&utm_name=iossmf&utm_source=share&utm_term=1 and https://github.com/Noniv/abyssal-garden.
+
+For this iteration, build everything within a file labeled Opus55-OneShot. Also include this intial prompt in the repo.
+
+PRIORITIZE:
+1. Visual quality and detail
+2. Stable FPS on my device (inspect specs as necessary)
+3. Immersion including sound, etc
+
+Constraints: Same as abyssal-garden. WebGPU if it fits with my specs. Deliverable ideally a single index.html, and something easilly accessible from the github associated with this project.
+
+Target: 2560x1440 at full resolution.
+
+Scene:
+- Not in space, but rather on beautiful mountainous terrain
+- Significant river system running through the city
+- Skyline and river layout nspired heavily by chinese cities such as Chongqing and Shanghai, other skyline features similar to those in Kuala Lumpur or Hong Kong, for example
+- Borrowing culture from both China and Central Asia/Mongolia
+- Have a part of the city that is more nature focused, inspired by Suzhou's gardens and Hangzhou's west lake
+- Animated: buildings, neon lights on street signs, light show, river movement, flying aircraft, drones, trains/trams
+- Diversity in size of skyscrapers
+- World: bounded, but large. boundaries invisible from the start.
+
+Controls:
+WASD move, look in the direction of the mouse. Fly is like minecraft creative move. 
+
+Verification:
+- Visual critic: separate subagent that sees only the renders. Give it 10 camera poses, have it provide evaluations. 
+- Performance: evaluate GPU performance, timestamp queries
+
+Other:
+Use multiple agents to parallelize. Make sure verifications pass, and that output feels immersive. Deliver the final index.html. 
+
+No further prompting by me will occur once the plan is initiated, so make decisions on your own.
+
+---
+Follow-up from the user (after the prompt above):
+Sorry, build everything within a folder, not a file (Opus55-OneShot).

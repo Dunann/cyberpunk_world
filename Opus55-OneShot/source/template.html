@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neon Confluence · 霓虹汇流</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05040a; overflow: hidden; font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; color: #e8e6f0; }
+  canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  .hidden { display: none !important; }
+  #loading, #overlay { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  #loading { background: radial-gradient(ellipse at 50% 60%, #1a0b24 0%, #05040a 70%); z-index: 3; }
+  #overlay { background: rgba(5, 3, 12, 0.55); backdrop-filter: blur(3px); cursor: pointer; z-index: 2; }
+  h1 { margin: 0; font-weight: 300; letter-spacing: 0.35em; font-size: clamp(28px, 4vw, 64px); text-shadow: 0 0 18px #ff2a8a, 0 0 42px #7a2cff; }
+  .cn { font-size: clamp(16px, 1.8vw, 28px); letter-spacing: 0.6em; color: #7ff3ff; text-shadow: 0 0 12px #19c6ff; margin-top: 8px; }
+  #loadText { margin-top: 28px; font-size: 14px; letter-spacing: 0.2em; color: #b9a7d8; text-transform: uppercase; }
+  #play { margin-top: 36px; padding: 12px 28px; border: 1px solid #ff2a8a; color: #ffd6ea; letter-spacing: 0.25em; text-transform: uppercase; font-size: 14px; box-shadow: 0 0 18px rgba(255, 42, 138, 0.45) inset, 0 0 18px rgba(255, 42, 138, 0.35); }
+  table { margin-top: 30px; border-collapse: collapse; font-size: 13px; color: #cfc8e2; }
+  td { padding: 3px 12px; } td:first-child { text-align: right; color: #7ff3ff; font-family: Consolas, monospace; }
+  #stats { position: fixed; top: 10px; left: 10px; padding: 8px 10px; background: rgba(0, 0, 0, 0.55); font: 12px/1.35 Consolas, monospace; white-space: pre; color: #bfffd0; z-index: 1; pointer-events: none; }
+  #hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 12px; color: rgba(255,255,255,0.45); letter-spacing: 0.1em; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="loading"><h1>NEON CONFLUENCE</h1><div class="cn">霓虹汇流</div><div id="loadText">Starting WebGPU</div></div>
+<div id="overlay" class="hidden">
+  <h1>NEON CONFLUENCE</h1><div class="cn">霓虹汇流</div>
+  <div id="play">Click to enter the city</div>
+  <table>
+    <tr><td>Mouse</td><td>Look</td></tr>
+    <tr><td>W A S D</td><td>Move</td></tr>
+    <tr><td>Space ×2</td><td>Toggle flying (Minecraft creative style)</td></tr>
+    <tr><td>Space / Shift</td><td>Fly up / down · Space jumps when walking</td></tr>
+    <tr><td>Ctrl</td><td>Sprint · Mouse wheel: flying speed</td></tr>
+    <tr><td>1 – 0</td><td>Viewpoints</td></tr>
+    <tr><td>R · M · H</td><td>Rain · Sound · Stats</td></tr>
+    <tr><td>Esc</td><td>Menu</td></tr>
+  </table>
+</div>
+<div id="stats"></div>
+<script type="module">/*BUNDLE*/</script>
+</body>
+</html>
