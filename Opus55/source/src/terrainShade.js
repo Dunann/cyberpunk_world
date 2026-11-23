@@ -403,7 +403,7 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   let hz = 1.0 - exp(-max(dist - 3500.0, 0.0) / 16000.0);
   if (hz > 0.0) {
     let dir = -v;
-    let sky = skyBase(normalize(vec3f(dir.x, max(dir.y, 0.0) * 0.5 + 0.02, dir.z)));
+    let sky = skyHorizon(normalize(vec3f(dir.x, max(dir.y, 0.0) * 0.5 + 0.02, dir.z)));
     emis += sky * hz * 0.9;
     albedo *= 1.0 - hz;
   }
