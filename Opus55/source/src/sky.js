@@ -50,7 +50,9 @@ fn skyHorizon(dir: vec3f) -> vec3f {
   // out in the southern mountains a faint moonlit haze sits on the horizon, so the far ridgelines stand
   // out as darker layers against it (zero anywhere in the city or the gardens)
   let mtn = smoothstep(3600.0, 4600.0, F.camPos.z);
-  return SKY_HORIZON + far * 1.15 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6 + SKY_MOON_COL * F.moon.w * 0.011 * mtn;
+  // and the faint warm glow of a village hidden behind the far ridges of the south valley
+  let vg = pow(max(dot(h, normalize(vec2f(1120.0, 8350.0) - F.camPos.xz)), 0.0), 90.0) * mtn;
+  return SKY_HORIZON + far * 1.15 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6 + (SKY_MOON_COL * F.moon.w * 0.011 + vec3f(1.0, 0.5, 0.25) * 0.018 * vg) * mtn;
 }
 
 fn skyAmbient(dir: vec3f) -> vec3f {

@@ -99,6 +99,32 @@ fn blk(u: vec2f, size: vec2f) -> vec2f {
     let b = blk(i.wp.xz, vec2f(0.7, 0.7));
     albedo *= (0.8 + 0.4 * b.y) * (1.0 - 0.4 * b.x);
     rough = 0.6; wet = 0.9; mat = 3.0;
+  } else if (pat == 10.0) {   // pebble mosaic paving: rounded pebbles in a diamond motif, moss in the joints
+    let q = i.wp.xz * 9.0;
+    let cell = floor(q); let f = fract(q) - 0.5;
+    let h = hash21(cell);
+    let o = (vec2f(h, hash21(cell + 17.0)) - 0.5) * 0.3;
+    let d = length(f - o);
+    let peb = 1.0 - smoothstep(0.28, 0.42, d);
+    // motif: diamonds of pale pebbles framed by dark ones (in a 1.6 m grid along the paving uv)
+    let m = abs(fract(uv / 1.6) - 0.5);
+    let dm = m.x + m.y;
+    let ring = smoothstep(0.03, 0.0, abs(dm - 0.33)) + smoothstep(0.025, 0.0, abs(dm - 0.18));
+    let pale = mix(vec3f(0.16, 0.155, 0.145), vec3f(0.06, 0.058, 0.055), saturate(ring));
+    let stone = pale * (0.75 + 0.5 * h);
+    let moss = smoothstep(0.55, 0.8, N.r) * 0.8;
+    let joint = mix(vec3f(0.03, 0.028, 0.026), vec3f(0.02, 0.04, 0.015), moss);
+    albedo = mix(joint, stone, peb);
+    n = normalize(n + vec3f(f.x - o.x, 0.0, f.y - o.y) * peb * 0.9);
+    rough = mix(0.85, 0.45, peb); wet = mix(0.5, 0.95, peb) * (1.0 - moss * 0.5); mat = 3.0;
+  } else if (pat == 11.0) {  // aircraft-warning beacon: slow blink with a per-light phase
+    let ph = fract(time() * 0.55);
+    emis = i.col * em * (0.2 + 0.8 * smoothstep(0.0, 0.05, ph) * (1.0 - smoothstep(0.35, 0.45, ph)));
+  } else if (pat == 12.0) {  // leaf: midrib and veins, back faces lit too
+    if (dot(n, F.camPos.xyz - i.wp) < 0.0) { n = -n; }
+    let vein = smoothstep(0.92, 1.0, abs(sin(uv.x * 9.0 + abs(uv.y) * 4.0))) * 0.25 + smoothstep(0.04, 0.0, abs(uv.y)) * 0.35;
+    albedo *= (0.8 + 0.3 * N.g) * (1.0 + vein);
+    rough = 0.55; wet = 0.7; mat = 1.0;
   } else {
     albedo *= 0.9 + 0.2 * N.g;
     emis = i.col * em;
