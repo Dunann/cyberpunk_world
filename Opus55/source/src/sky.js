@@ -10,6 +10,8 @@
 // skyRadiance() runs for every lit pixel (reflections), so the cloud noise uses a cheap single-hash gradient
 // noise and skips its fine octaves at grazing angles.
 
+import { DISTRICTS, DT } from './world.js';
+
 export const SKY_WGSL = /* wgsl */ `
 const SKY_CITY = vec2f(300.0, -300.0);
 const SKY_CBD = vec2f(3300.0, -1250.0);
@@ -30,8 +32,17 @@ fn skyCityGlow(xz: vec2f) -> vec3f {
   let warm = vec3f(1.0, 0.40, 0.48);
   let vio = vec3f(0.58, 0.20, 0.95);
   let col = mix(warm, vio, smoothstep(700.0, 4200.0, d));
-  return (col * m + vec3f(0.85, 0.30, 0.95) * b * 0.6) * 0.12;
+  return (col * m + vec3f(0.85, 0.30, 0.95) * b * 0.6) * 0.095;
 }
+
+// 0 in the city, 1 out in the gardens / mountains. Computed on the CPU from the camera position and the
+// urban districts (sky.update) and passed through the moon intensity, which it drives.
+const SKY_MOON_CITY = 0.25;
+const SKY_MOON_NATURE = 1.0;
+fn skyNature() -> f32 { return saturate((F.moon.w - SKY_MOON_CITY) / (SKY_MOON_NATURE - SKY_MOON_CITY)); }
+// Night-sky base: deep blue-violet over the city (the neon does the lighting there), lighter moonlit
+// overcast in the nature areas.
+fn skyBase(c: vec3f) -> vec3f { return c * mix(vec3f(0.5, 0.42, 0.72), vec3f(1.0), skyNature()); }
 
 // Moon light seen through the atmosphere around the moon direction (no disk).
 fn skyMoonHalo(md: f32) -> vec3f {
@@ -50,20 +61,20 @@ fn skyHorizon(dir: vec3f) -> vec3f {
   // out in the southern mountains a faint moonlit haze sits on the horizon, so the far ridgelines stand
   // out as darker layers against it (zero anywhere in the city or the gardens)
   let mtn = smoothstep(3600.0, 4600.0, F.camPos.z);
-  return SKY_HORIZON + far * 1.15 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6 + SKY_MOON_COL * F.moon.w * 0.011 * mtn;
+  return skyBase(SKY_HORIZON) + far * 1.15 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6 + SKY_MOON_COL * F.moon.w * 0.011 * mtn;
 }
 
 fn skyAmbient(dir: vec3f) -> vec3f {
   let up = saturate(dir.y);
   let over = skyCityGlow(F.camPos.xz);
-  let dome = SKY_ZENITH * 1.5 + over * (0.75 * SKY_COVER_AVG);
-  let hz = SKY_HORIZON + over * 0.8;
+  let dome = skyBase(SKY_ZENITH) * 1.5 + over * (0.45 * SKY_COVER_AVG);
+  let hz = skyBase(SKY_HORIZON) + over * 0.5;
   var c = mix(hz, dome, sqrt(up));
   c += skyMoonHalo(dot(dir, F.moon.xyz)) * 1.5;
   // moonlight diffused by the overcast: keeps nature areas readable away from the city lights
   // (stronger when the camera is out in the gardens or the mountains, where nothing else lights the scene)
-  let nature = smoothstep(1400.0, 3600.0, length(F.camPos.xz - SKY_CITY));
-  c += SKY_MOON_COL * F.moon.w * (0.08 + 0.08 * nature) * (0.55 + 0.45 * up);
+  let nature = skyNature();
+  c += SKY_MOON_COL * F.moon.w * (0.03 + 0.13 * nature) * (0.55 + 0.45 * up);
   if (dir.y < 0.0) { c *= mix(1.0, 0.35, saturate(-dir.y * 3.0)); }
   return c;
 }
@@ -127,7 +138,7 @@ fn skyRadiance(dir: vec3f) -> vec3f {
   cloud += SKY_MOON_COL * F.moon.w * (0.042 + thin * (0.04 + m32 * 0.13 + m8 * 0.02) + (1.0 - dens) * m4 * 0.008);
 
   // clear sky behind the clouds: gradient, moon halo, moon disk, sparse stars in the gaps
-  var clear = mix(SKY_HORIZON, SKY_ZENITH, sqrt(y)) + skyMoonHalo(md);
+  var clear = skyBase(mix(SKY_HORIZON, SKY_ZENITH, sqrt(y))) + skyMoonHalo(md);
   if (cov < 0.3 && y > 0.03) {
     let sp = dir.xz / (y + 0.35) * 260.0;
     let cell = floor(sp);
@@ -150,11 +161,31 @@ fn skyRadiance(dir: vec3f) -> vec3f {
   c += SKY_MOON_COL * F.moon.w * (m128 * 0.5 + m32 * 0.025) * rk;
   // blend into the horizon haze (continuous with the dir.y <= 0 branch)
   let hb = smoothstep(0.0, 0.12, y);
-  c = mix(hz, c + (hz - SKY_HORIZON) * (1.0 - smoothstep(0.0, 0.35, y)) * 0.6, hb);
+  c = mix(hz, c + (hz - skyBase(SKY_HORIZON)) * (1.0 - smoothstep(0.0, 0.35, y)) * 0.6, hb);
   return c;
 }
 `;
 
 export default {
   name: 'sky',
+  // Moon intensity follows the camera: low over the city (neon and lamps light the streets, unlit facades
+  // fall near black), full in the gardens and mountains where the moon is the only light.
+  // (must match SKY_MOON_CITY / SKY_MOON_NATURE in the WGSL)
+  moonCity: 0.25,
+  moonNature: 1.0,
+  init(ctx) {
+    this.urban = DISTRICTS.map((d) => d.type !== DT.GARDEN);
+    this.nature = -1;
+  },
+  update(ctx) {
+    const c = ctx.cam, w = ctx.world;
+    if (!c || !w) return;
+    const s = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
+    let urban = 0;
+    for (let i = 0; i < DISTRICTS.length; i++) if (this.urban[i]) urban = Math.max(urban, w.districtWeight(i, c.x, c.z));
+    const target = s(1400, 3600, Math.hypot(c.x - 300, c.z + 300)) * (1 - s(0.1, 0.6, urban));
+    // smoothed so flying between districts never pops the lighting
+    this.nature = this.nature < 0 || ctx.renderer.resetHistory ? target : this.nature + (target - this.nature) * Math.min(1, ctx.dt * 1.5);
+    ctx.env.moonIntensity = this.moonCity + (this.moonNature - this.moonCity) * this.nature;
+  },
 };
