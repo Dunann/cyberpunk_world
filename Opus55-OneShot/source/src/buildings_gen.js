@@ -72,6 +72,7 @@ export class Builder {
     this.tops = [];            // {x,y,z,cbd}
     this.led = [];
     this.sites = {};             // landmark anchor points published to world.shared.landmarkSites
+    this.hillTowers = [];        // hillside tower shafts, used to add skybridges
     this.propBudget = quality >= 2 ? 70000 : quality === 1 ? 40000 : 15000;
     this.props = 0;
   }
@@ -348,7 +349,9 @@ export function genHillside(B, R, L) {
   let kind = 0, prm = 0;
   if (shapeR < 0.2) { kind = 1; prm = 0.2 + R() * 0.2; } else if (shapeR < 0.3) { kind = 0; prm = 0.25 + R() * 0.2; }
   const winW = 2.8 + R() * 1.6;
-  const flags = R() < 0.45 ? FLAG.BALC : 0;
+  let flags = R() < 0.45 ? FLAG.BALC : 0;
+  const fr = R();
+  if (fr < 0.14) flags |= FLAG.EDGE; else if (fr < 0.22) flags |= FLAG.CROWNLIT;
   const towers = [];
   if (two) {
     const alongX = L.w > L.d;
@@ -367,6 +370,7 @@ export function genHillside(B, R, L) {
     if (podTop + h > maxTop) h = Math.max(maxTop - podTop, 12);
     const segs = R() < 0.35 ? 2 : 1;
     const tw = tower(B, R, { x: T.x, z: T.z, a: L.angle, y0: podTop, baseY: podTop, hw: T.hw, hd: T.hd, h, segs, kind, prm, mat: MAT.RES, col, floorH, winW, lit, flags, seed: R() * 999 });
+    B.hillTowers.push({ x: T.x, z: T.z, a: L.angle, hw: T.hw, hd: T.hd, y0: podTop, top: podTop + h * (segs === 2 ? 0.6 : 1), district: L.district });
     if (kind === 0 && prm === 0) acUnits(B, R, T.x, T.z, L.angle, T.hw, T.hd, podTop, podTop, podTop + h * (segs === 2 ? 0.6 : 1), floorH, winW, 0.07);
     if (R() < 0.12 && kind === 0) {
       // cross plan: perpendicular wing
@@ -629,7 +633,7 @@ export function genCBD(B, R, L) {
       const s = Math.min(L.w, L.d) / 2 - ins - 3;
       hw = Math.min(s, 20 + R() * 10); hd = Math.min(s, hw * (0.75 + R() * 0.4));
     }
-    let H = 150 + 300 * Math.pow(R(), 1.6) * (1 - 0.45 * dfc);
+    let H = 130 + 200 * Math.pow(R(), 1.7) * (1 - 0.4 * dfc);
     if (ti === 1) H *= 0.55 + R() * 0.2;
     if (podTop + H > maxTop) H = Math.max(maxTop - podTop, 60);
     const sr = R();
@@ -647,11 +651,51 @@ export function genCBD(B, R, L) {
     if (R() < 0.35) flags |= FLAG.LED;
     if (R() < 0.45) flags |= FLAG.EDGE;
     if (R() < 0.3) flags |= FLAG.CROWNLIT;
-    const tw = tower(B, R, { x, z, a: L.angle, y0: podTop, baseY: podTop, hw, hd, h: H, segs, kind, prm, taper, twist, mat, col: mat === MAT.GLASS ? glassC : pick(R, PAL.office), floorH: 4.0, winW: mat === MAT.GLASS ? 1.5 : 3, lit: 0.25 + R() * 0.25, flags, seed: R() * 999 });
+    const tw = tower(B, R, { x, z, a: L.angle, y0: podTop, baseY: podTop, hw, hd, h: H, segs, kind, prm, taper, twist, mat, col: mat === MAT.GLASS ? glassC : pick(R, PAL.office), floorH: 4.0, winW: mat === MAT.GLASS ? 1.5 : 3, lit: 0.14 + R() * 0.2, flags, seed: R() * 999 });
     if (flags & FLAG.LED) B.led.push({ x, z, y0: podTop, y1: tw.top, r: Math.max(hw, hd) });
     const top = crown(B, R, { x, z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, CROWNS_CBD), style: DT.CBD });
     B.tops.push({ x, y: tw.top, z, cbd: true });
     for (const [sx, sz] of [[1, 1], [-1, -1]]) { const [ax, az] = Builder.tw(x, z, L.angle, sx * tw.hw * 0.85, sz * tw.hd * 0.85); aviation(B, ax, tw.top, az, R() * 999); }
     if (top > tw.top + 10) aviation(B, x, top, z, R() * 999);
   }
+}
+
+
+// Pedestrian skybridges between neighbouring hillside towers (Chongqing-style layered city).
+export function skybridges(B, R) {
+  const T = B.hillTowers;
+  const cell = new Map();
+  const key = (x, z) => Math.floor(x / 60) * 7919 + Math.floor(z / 60);
+  T.forEach((t, i) => { const k = key(t.x, t.z); if (!cell.has(k)) cell.set(k, []); cell.get(k).push(i); });
+  let n = 0;
+  for (let i = 0; i < T.length; i++) {
+    const A = T[i];
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const list = cell.get(key(A.x + dx * 60, A.z + dz * 60));
+      if (!list) continue;
+      for (const j of list) {
+        if (j <= i) continue;
+        const Bt = T[j];
+        if (Bt.district !== A.district || R() > 0.3) continue;
+        const c = Math.cos(A.a), s = Math.sin(A.a);
+        const ox = Bt.x - A.x, oz = Bt.z - A.z;
+        const lx = ox * c + oz * s, lz = -ox * s + oz * c;
+        const alongX = Math.abs(lx) > Math.abs(lz);
+        if (Math.abs(alongX ? lz : lx) > 6) continue;
+        const gap = Math.abs(alongX ? lx : lz) - (alongX ? A.hw + Bt.hw : A.hd + Bt.hd);
+        if (gap < 3 || gap > 34) continue;
+        const lo = Math.max(A.y0, Bt.y0) + 8, hi = Math.min(A.top, Bt.top) - 10;
+        if (hi < lo + 4) continue;
+        const y = lo + (hi - lo) * (0.15 + R() * 0.7);
+        const mx = A.x + ox / 2, mz = A.z + oz / 2;
+        const len = Math.hypot(ox, oz);
+        const ang = Math.atan2(oz, ox);
+        const col = [0.28, 0.28, 0.3];
+        B.part({ x: mx, y0: y, z: mz, a: ang, hw: len / 2, hd: 1.8, h: 3.4, mat: MAT.OFFICE, col, floorH: 3.4, winW: 2.2, baseY: y, param: 0.7, flags: FLAG.BOTTOM, seed: R() * 999, solid: true });
+        B.part({ x: mx, y0: y - 0.25, z: mz, a: ang, hw: len / 2, hd: 1.95, h: 0.25, mat: MAT.EMIT, col: R() < 0.5 ? [0.3, 0.9, 1] : [1, 0.35, 0.7], param: 3.5, flags: FLAG.BOTTOM });
+        n++;
+      }
+    }
+  }
+  return n;
 }

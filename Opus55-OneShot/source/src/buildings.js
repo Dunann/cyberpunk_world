@@ -12,7 +12,7 @@
 import { rng } from './math.js';
 import { DT } from './world.js';
 import { PART_WGSL, CULL_WGSL, DRAW_WGSL, PART_FLOATS } from './buildings_wgsl.js';
-import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD } from './buildings_gen.js';
+import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges } from './buildings_gen.js';
 import { prepareLots, genLandmarks, genMarket } from './buildings_landmarks.js';
 
 const LIGHT_BUDGET = 1450;
@@ -66,6 +66,7 @@ function generate(ctx) {
       default: break;
     }
   }
+  B.bridges = skybridges(B, rng(5150));
   return B;
 }
 
@@ -106,7 +107,7 @@ export default {
     world.shared.towerTops = cbd.concat(bund).map((t) => ({ x: t.x, y: t.y, z: t.z }));
     world.shared.ledFacades = B.led;
     world.shared.landmarkSites = B.sites;
-    world.shared.buildingStats = { parts: P.count, props: B.props, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
+    world.shared.buildingStats = { parts: P.count, props: B.props, bridges: B.bridges, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
 
     // ---------------- GPU resources
     const verts = [], idx = [];

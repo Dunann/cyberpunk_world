@@ -117,8 +117,8 @@ export function genMarket(B, R, world, market) {
       const [cx, cz] = [x - px * side * 0.3, z - pz * side * 0.3];
       B.part({ x: cx, y0: g + 2.35, z: cz, a, hw: 1.9, hd: 1.3, h: 0.7, taper: 0.5, mat: MAT.CONCRETE, col: fabric[Math.floor(R() * fabric.length)], param: 2.2, flags: FLAG.BOTTOM });
       for (const o of [-2.2, 2.2]) B.prop({ x: x + ux * o, y0: g, z: z + uz * o, hw: 0.07, h: 2.6, kind: 2, prm: 8, mat: MAT.METAL, col: [0.2, 0.2, 0.2] });
-      for (let k = 0; k < 3; k++) B.prop({ x: x + ux * (k - 1) * 1.2, y0: g + 1.0, z: z + uz * (k - 1) * 1.2, hw: 0.3 + R() * 0.2, hd: 0.3, h: 0.25 + R() * 0.3, mat: MAT.EMIT, col: [[1, 0.5, 0.2], [0.9, 0.8, 0.4], [1, 0.3, 0.3], [0.5, 0.9, 0.3]][k], param: 0.6 + R() * 0.6, flags: FLAG.BOTTOM });
-      B.prop({ x: x - px * side * 1.2, y0: g + 2.05, z: z - pz * side * 1.2, hw: 0.22, h: 0.4, kind: 2, prm: 8, mat: MAT.EMIT, col: [1, 0.55, 0.18], param: 9, winW: 2, flags: FLAG.BOTTOM });
+      for (let k = 0; k < 3; k++) B.prop({ x: x + ux * (k - 1) * 1.2, y0: g + 1.0, z: z + uz * (k - 1) * 1.2, a, hw: 0.3 + R() * 0.2, hd: 0.3, h: 0.25 + R() * 0.3, mat: MAT.EMIT, col: [[1, 0.5, 0.2], [0.9, 0.8, 0.4], [1, 0.3, 0.3], [0.5, 0.9, 0.3]][k], param: 0.15 + R() * 0.2, flags: FLAG.BOTTOM });
+      B.prop({ x: x - px * side * 1.2, y0: g + 1.85, z: z - pz * side * 1.2, hw: 0.24, h: 0.5, kind: 2, prm: 16, prof: 2, mat: MAT.EMIT, col: [1, 0.55, 0.18], param: 6, winW: 2 });
       B.slot(cx - px * side * 1.7, g + 3.2, cz - pz * side * 1.7, -px * side, -pz * side, 3.5, 0.8, false, DT.STEPPE);
     }
     // lantern string across the lane
@@ -127,7 +127,7 @@ export function genMarket(B, R, world, market) {
       for (let k = -6; k <= 6; k++) {
         const o = k * 0.95;
         const sag = 1.2 * (1 - (o / 6.5) * (o / 6.5));
-        B.prop({ x: C.x + ux * t + px * o, y0: g + 5.2 - sag, z: C.z + uz * t + pz * o, hw: 0.17, h: 0.3, kind: 2, prm: 8, mat: MAT.EMIT, col: k % 2 ? [1, 0.2, 0.1] : [1, 0.7, 0.25], param: 9, winW: 2, flags: FLAG.BOTTOM });
+        B.prop({ x: C.x + ux * t + px * o, y0: g + 5.2 - sag, z: C.z + uz * t + pz * o, hw: 0.2, h: 0.36, kind: 2, prm: 16, prof: 2, mat: MAT.EMIT, col: k % 2 ? [1, 0.18, 0.08] : [1, 0.62, 0.22], param: 6, winW: 2 });
       }
       if (t < 150) B.light(C.x + ux * t, g + 4.2, C.z + uz * t, 14, [1, 0.6, 0.3], 26, 4);
     }
@@ -149,7 +149,7 @@ export function genMarket(B, R, world, market) {
 function twist(B, R, L, g) {
   const x = L.x, z = L.z, H = 560;
   B.part({ x, y0: g - 4, z, hw: 62, hd: 62, h: 28, kind: 3, prm: 3.14, mat: MAT.GLASS, col: [0.3, 0.5, 0.6], floorH: 6, winW: 2, baseY: g, param: 0.6, flags: FLAG.EDGE, solid: true });
-  B.part({ x, y0: g + 24, z, a: 0.3, hw: 40, hd: 40, h: H, kind: 3, prm: 3.14, taper: 0.58, twist: 2.0, mat: MAT.GLASS, col: [0.35, 0.55, 0.68], floorH: 4.4, winW: 1.6, baseY: g, param: 0.32, flags: FLAG.LED, solid: true });
+  B.part({ x, y0: g + 24, z, a: 0.3, hw: 40, hd: 40, h: H, kind: 3, prm: 3.14, taper: 0.58, twist: 2.0, mat: MAT.GLASS, col: [0.35, 0.55, 0.68], floorH: 4.4, winW: 1.6, baseY: g, param: 0.22, flags: FLAG.LED | FLAG.EDGE, seed: 38, solid: true });
   // spiral of lit floor rings every 15 floors (sky lobbies)
   for (let i = 1; i < 9; i++) {
     const t = i / 9;
@@ -176,10 +176,10 @@ function twin(B, R, L, g) {
     for (const [y0, y1, r] of tiers) {
       const yb = y0 === 0 ? g - 4 : g + y0;
       const h = g + y1 - yb;
-      const common = { x, y0: yb, z, h, mat: MAT.GLASS, col: [0.62, 0.66, 0.72], floorH: 4.0, winW: 1.4, baseY: g, param: 0.45, flags: FLAG.CROWNLIT, seed: 77 + sgn, solid: true };
+      const common = { x, y0: yb, z, h, mat: MAT.GLASS, col: [0.62, 0.66, 0.72], floorH: 4.0, winW: 1.4, baseY: g, param: 0.4, flags: FLAG.EDGE, seed: 0.5 + sgn * 0.2, solid: true };
       B.part({ ...common, a, hw: r, hd: r });
       B.part({ ...common, a: a + Math.PI / 4, hw: r, hd: r, solid: false });
-      B.part({ ...common, hw: r * 1.12, hd: r * 1.12, kind: 2, prm: 48, solid: false, flags: 0 });
+      B.part({ ...common, hw: r * 1.04, hd: r * 1.04, kind: 2, prm: 48, solid: false, flags: 0 });
       // steel band at each setback
       B.part({ x, y0: g + y1 - 1.2, z, hw: r * 1.16, hd: r * 1.16, h: 1.4, kind: 2, prm: 48, mat: MAT.EMIT, col: [0.85, 0.9, 1], param: 2.5, flags: FLAG.BOTTOM | FLAG.NOTOP });
     }

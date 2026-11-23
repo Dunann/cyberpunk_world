@@ -502,7 +502,7 @@ fn carpet(p: vec2f) -> vec3f {
     }
   } else if (mat == 3u || mat == 16u) {
     // ---------------- glass curtain wall
-    S.alb = col * 0.16; S.rough = 0.05; S.mid = 2.0; S.wet = 0.3;
+    S.alb = col * 0.1; S.rough = 0.06; S.mid = 2.0; S.wet = 0.3; S.ao = 0.55;
     let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, prm, 5u, 0.75);
     let spand = 1.0 - pulse(0.22, 0.96, G.f.y, fw.y / floorH);
     let mull = 1.0 - pulse(0.04, 0.96, G.f.x, fw.x / G.cw);
@@ -581,7 +581,8 @@ fn carpet(p: vec2f) -> vec3f {
       let pillar = 1.0 - pulse(colw, 1.0 - colw, bf, fw.x / bw);
       let fasc = pulse(3.35, 4.6, hr, fw.y);
       let shut = hb < 0.2 && !arcade;
-      let shopC = mix(mix(vec3f(1.0, 0.9, 0.76), vec3f(0.85, 0.92, 1.0), step(0.6, fract(hb * 9.1))), hsv(fract(hb * 5.3), 0.35, 1.0), step(0.75, fract(hb * 3.7)));
+      var shopC = mix(mix(vec3f(1.0, 0.9, 0.76), vec3f(0.85, 0.92, 1.0), step(0.6, fract(hb * 9.1))), hsv(fract(hb * 5.3), 0.35, 1.0), step(0.75, fract(hb * 3.7)));
+      if (brick) { shopC = mix(vec3f(1.0, 0.62, 0.3), hsv(fract(0.02 + hb * 0.1), 0.6, 1.0), step(0.5, fract(hb * 6.1))); }
       let fr = vec2f((bf - colw) / (1.0 - 2.0 * colw), saturate((hr - 0.15) / 3.2));
       let glassM = (1.0 - pillar) * pulse(0.15, 3.35, hr, fw.y);
       var room = vec3f(0.0);
@@ -609,7 +610,7 @@ fn carpet(p: vec2f) -> vec3f {
       let cb = carpet(vec2f(fd / 1.7, (hr - 4.9) / 1.7));
       S.alb = cb; S.emis = cb * 0.35;
     } else {
-      let style = select(1u, 3u, brick);
+      let style = select(select(1u, 0u, hash11u(u32(seed) + 99u) < 0.55), 3u, brick);
       let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, prm, style, select(0.8, 1.5, brick));
       S.alb = mix(S.alb, vec3f(0.02, 0.025, 0.03), G.cov);
       S.emis = G.e; S.rough = mix(S.rough, 0.1, G.cov);
@@ -741,8 +742,14 @@ fn carpet(p: vec2f) -> vec3f {
   // edge light strips (CBD accent) and lit crowns
   if (!isCap && (flags & 32u) != 0u) {
     let ew = 0.45 + fwp * 0.5;
-    let edge = max(1.0 - smoothstep(0.0, ew, fd), 1.0 - smoothstep(0.0, ew, fl - fd));
-    let accent = hsv(fract(seed * 0.0137), 0.55, 1.0);
+    var edge = max(1.0 - smoothstep(0.0, ew, fd), 1.0 - smoothstep(0.0, ew, fl - fd));
+    if (u32(P.c.x + 0.5) == 3u) {
+      // lobed plan: strips run along the lobe tips (they spiral with the twist)
+      let per = fl / max(floor(P.c.y), 1.0);
+      let dd = abs(fract(fd / per + 0.5) - 0.5) * per * scale;
+      edge = 1.0 - smoothstep(0.0, ew * 1.6, dd);
+    }
+    let accent = hsv(fract(seed * 0.0137), select(0.55, 0.08, seed < 1.0), 1.0);
     S.emis += accent * edge * 3.0;
   }
   if (!isCap && (flags & 32768u) != 0u) {
