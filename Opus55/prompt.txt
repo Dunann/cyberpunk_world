@@ -36,3 +36,6 @@ No further prompting by me will occur once the plan is initiated, so make decisi
 ---
 Follow-up from the user (after the prompt above):
 Sorry, build everything within a folder, not a file (Opus55-OneShot).
+
+---
+Later note from the user: this is no longer a one-shot experiment (they will keep giving feedback), so the folder was renamed from Opus55-OneShot to Opus55.

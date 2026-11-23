@@ -19,7 +19,7 @@ You are one of five engineers building **Neon Confluence**, a real-time, explora
 3. Immersion.
 
 ## Setup
-- You work in your own git worktree, an isolated copy of the repo. The project root is `Opus55-OneShot/source`.
+- You work in your own git worktree, an isolated copy of the repo. The project root is `Opus55/source`.
 - Run `npm install` there first.
 - Read these files first, in this order:
   1. `src/renderer.js`:
@@ -99,7 +99,7 @@ You are one of five engineers building **Neon Confluence**, a real-time, explora
   - Shared files (`common.js`, `renderer.js`, `world.js`, `main.js`, `gpu.js`, `lights.js`, `math.js`, `controls.js`, `post.js` unless it is yours): avoid editing them. If a change is truly necessary, keep it minimal and additive, and list it exactly in your final report.
 - **Delivery:**
   1. Make sure both builds succeed.
-  2. Commit in your worktree branch: `git add -A Opus55-OneShot/source/src` and then `git commit -m "<module>: ..."`. Never commit `out/` or `node_modules`. Do not add co-author lines.
+  2. Commit in your worktree branch: `git add -A Opus55/source/src` and then `git commit -m "<module>: ..."`. Never commit `out/` or `node_modules`. Do not add co-author lines.
   3. Write a concise final report covering:
      - your branch name and the files you changed
      - any shared-file edits, exactly
