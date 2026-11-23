@@ -6,7 +6,7 @@
 //            rockery, willows and lanterns along a stone-edged shore, lotus, lantern boats)
 //  - pose 9: cliff-top lookout on the crag above the south valley (carved stone balustrade, a pavilion eave
 //            corner with a lantern), plus village and road lights in the valley and on the far slopes
-//  - pose 10: promenade lamps, a lit park path and pavilions on the right river bank
+//  - pose 10: promenade lamps, lit stairways and pavilions on the river banks
 // Each piece is placed from the POSES entry it frames (world.js), so the camera and the set stay in sync.
 
 import { PAT, V3 } from './gardenMesh.js';
@@ -82,10 +82,7 @@ function stoneBalustrade(M, Pf, pts, y, skip = () => false, bay = 2.0) {
       M.set(C.marble, PAT.PLAIN);
       M.box([p[0], y + 0.16, p[2]], 0.12, 0.12, 0.98, ang);
       if (skip(p)) continue;
-      M.prism([p[0], y + 1.14, p[2]], 0.15, 8, 0, 0.06, ang, false, 0.15);
-      M.prism([p[0], y + 1.14, p[2]], 0.15, 8, 0.06, 0.16, ang, false, 0.12);
-      M.prism([p[0], y + 1.14, p[2]], 0.12, 8, 0.16, 0.3, ang, false, 0.15);
-      M.prism([p[0], y + 1.14, p[2]], 0.15, 8, 0.3, 0.5, ang, true, 0.02);
+      M.lathe([p[0], y + 1.14, p[2]], [[0.15, 0], [0.15, 0.06], [0.11, 0.12], [0.12, 0.17], [0.15, 0.24], [0.15, 0.3], [0.13, 0.38], [0.08, 0.45], [0.0, 0.52]], 12, false);
     }
     for (let k = 0; k < n; k++) {
       const s0 = L * k / n + 0.12, s1 = L * (k + 1) / n - 0.12, sm = (s0 + s1) / 2, hl = (s1 - s0) / 2;
@@ -103,10 +100,7 @@ function stoneBalustrade(M, Pf, pts, y, skip = () => false, bay = 2.0) {
       for (let j = 0; j < nb; j++) {
         const f = (j + 0.5) / nb * 2 - 1;
         const p = at(sm + f * hl, 0);
-        M.prism([p[0], y + 0.58, p[2]], 0.05, 8, 0, 0.05, 0, false, 0.075);
-        M.prism([p[0], y + 0.58, p[2]], 0.075, 8, 0.05, 0.14, 0, false, 0.09);
-        M.prism([p[0], y + 0.58, p[2]], 0.09, 8, 0.14, 0.22, 0, false, 0.04);
-        M.prism([p[0], y + 0.58, p[2]], 0.04, 8, 0.22, 0.28, 0, false, 0.08);
+        M.lathe([p[0], y + 0.58, p[2]], [[0.05, 0], [0.065, 0.03], [0.085, 0.08], [0.09, 0.12], [0.075, 0.17], [0.045, 0.21], [0.04, 0.23], [0.075, 0.28]], 10, false);
       }
     }
     M.set(C.marble, PAT.PLAIN);
@@ -266,34 +260,107 @@ export function lakesideVignette(env) {
   stoneBalustrade(M, P, [[1.1, TF], [6, TF]], ty);
   col(...P(-3.55, TF, ty + 0.5), 0.2, 0.5, 2.45, F.yaw); col(...P(3.55, TF, ty + 0.5), 0.2, 0.5, 2.45, F.yaw);
   lantern(P(-6, TF, ty + 1.95), 0.9, true); lantern(P(6, TF, ty + 1.95), 0.9, true);
-  // steps down to the lawn, then stepping stones to the bridge
+  // steps down from the terrace to a courtyard of pebble mosaic paving that runs to the shore
   M.set(C.stone, PAT.STONE);
   for (let k = 0; k < 4; k++) M.box(P(0, TF + 0.4 + k * 0.5, ty - 0.25 * (k + 1)), 0.25, 0.9, 0.25, F.yaw);
-  for (let v = TF + 3; v < vs - 1.5; v += 1.25) {
-    const u = Math.sin(v * 0.35) * 0.5, y = Math.max(h(u, v), 0.2);
-    M.box(P(u, v, y - 0.1), 0.42, 0.62 + 0.1 * Math.sin(v * 3.1), 0.16, F.yaw + 0.2 * Math.sin(v * 1.7));
+  const PV0 = TF + 2.4, PV1 = vs - 1.2, PU0 = -6.5, PU1 = 9;
+  M.set([1, 1, 1], PAT.PEBBLE);
+  for (let v = PV0; v < PV1 - 0.01; v += 1.5) for (let u = PU0; u < PU1 - 0.01; u += 1.5) {
+    const v1 = Math.min(v + 1.5, PV1), u1 = Math.min(u + 1.5, PU1);
+    const y = (uu, vv) => Math.max(h(uu, vv), 0.25) + 0.05;
+    M.quad(P(u, v, y(u, v)), P(u1, v, y(u1, v)), P(u1, v1, y(u1, v1)), P(u, v1, y(u, v1)), [0, 1, 0], [[u, v], [u1, v], [u1, v1], [u, v1]]);
   }
-  // zigzag stone bridge from the shore to a hexagonal water pavilion
-  const zz = [[0, vs - 1.5], [-6, vs + 7], [5, vs + 17], [-4, vs + 28], [2, vs + 37]];
-  const by = 0.55;
+  // a dressed-stone path down the middle with lanterns on low posts both sides
+  M.set(C.stone, PAT.STONE);
+  for (let v = PV0 - 0.6; v < PV1 + 0.4; v += 1.2) M.box(P(0, v, Math.max(h(0, v), 0.25) - 0.06), 0.58, 0.85, 0.16, F.yaw);
+  for (let v = PV0 + 1; v < PV1; v += 3.2) for (const sd of [-1.4, 1.4]) {
+    const q = P(sd, v, 0), y = Math.max(h(sd, v), 0.25);
+    M.set(C.dwood, PAT.WOOD); M.box([q[0], y, q[2]], 0.05, 0.05, 1.1);
+    lantern([q[0], y + 1.32, q[2]], 0.55, false, [1.0, 0.55, 0.22]);
+  }
+  lights.push([...P(0, (PV0 + PV1) / 2, ty + 1.2), 12, 4.5, 2.4, 0.9]);
+  // planted beds with stone kerbs: osmanthus, bamboo, plantain
+  const bed = (u0, v0, u1, v1) => {
+    M.set(C.stone, PAT.STONE);
+    const yb = Math.max(h((u0 + u1) / 2, (v0 + v1) / 2), 0.25);
+    for (const [a, b] of [[[u0, v0], [u1, v0]], [[u1, v0], [u1, v1]], [[u1, v1], [u0, v1]], [[u0, v1], [u0, v0]]]) {
+      const pa = P(a[0], a[1], 0), pb = P(b[0], b[1], 0);
+      const L = Math.hypot(pb[0] - pa[0], pb[2] - pa[2]);
+      M.box([(pa[0] + pb[0]) / 2, yb - 0.1, (pa[2] + pb[2]) / 2], L / 2 + 0.12, 0.12, 0.5, Math.atan2(pb[2] - pa[2], pb[0] - pa[0]));
+    }
+    M.set([0.022, 0.04, 0.016], PAT.LEAF);   // moss and ground cover
+    M.quad(P(u0, v0, yb + 0.32), P(u1, v0, yb + 0.32), P(u1, v1, yb + 0.32), P(u0, v1, yb + 0.32), [0, 1, 0], [[u0 * 3, v0 * 3], [u1 * 3, v0 * 3], [u1 * 3, v1 * 3], [u0 * 3, v1 * 3]]);
+    return yb + 0.32;
+  };
+  const plantain = (u, v, y, s) => {
+    const c = P(u, v, 0);
+    M.set([0.12, 0.13, 0.06], PAT.PLAIN); M.prism([c[0], y, c[2]], 0.12 * s, 6, 0, 1.6 * s, 0, false, 0.08 * s);
+    M.set([0.03, 0.07, 0.022], PAT.LEAF);
+    for (let k = 0; k < 6; k++) {
+      const a = k * 1.05 + R() * 0.4, ca = Math.cos(a), sa = Math.sin(a), L = (1.5 + R() * 0.6) * s, W = 0.32 * s;
+      const b0 = [c[0], y + 1.5 * s, c[2]], tip = [c[0] + ca * L, y + (1.9 + R() * 0.4) * s, c[2] + sa * L];
+      const mid = [c[0] + ca * L * 0.5, y + (2.05 + R() * 0.2) * s, c[2] + sa * L * 0.5];
+      const ox = -sa * W, oz = ca * W;
+      M.quad(b0, [mid[0] + ox, mid[1], mid[2] + oz], tip, [mid[0] - ox, mid[1], mid[2] - oz], [0, 1, 0], [[0, 0], [0.5, 1], [1, 0], [0.5, -1]]);
+    }
+  };
+  let yb = bed(-6.2, PV0 + 2.0, -2.4, PV0 + 6.5);
+  plantain(-4.8, PV0 + 3.4, yb, 0.75); plantain(-3.4, PV0 + 5.3, yb, 0.6);
+  { const q = P(-4.2, PV0 + 5.8, 0); trees.push([q[0], yb, q[2], 0.32, 0]); }
+  yb = bed(2.4, PV0 + 9, 6.2, PV0 + 14);
+  { const q = P(4.0, PV0 + 11.5, 0); trees.push([q[0], yb, q[2], 0.55, 2]); }
+  plantain(2.9, PV0 + 13.4, yb, 0.7);
+  yb = bed(-6.0, PV0 + 11, -2.6, PV0 + 15.5);
+  { let q = P(-4.6, PV0 + 12.8, 0); trees.push([q[0], yb, q[2], 0.3, 0]); q = P(-3.4, PV0 + 14.6, 0); trees.push([q[0], yb, q[2], 0.26, 0]); }
+  // zigzag stone bridge from the shore to a hexagonal water pavilion: solid piers, square landings at the
+  // turns, low stone railings and lanterns on the corner posts
+  const zz = [[0, vs - 1.2], [-6, vs + 7], [5, vs + 17], [-4, vs + 28], [2, vs + 37]];
+  const by = 0.6;
+  const bridgeStone = [0.11, 0.105, 0.098];
+  for (let i = 0; i < zz.length; i++) {
+    const q = P(zz[i][0], zz[i][1], 0);
+    M.set(bridgeStone, PAT.STONE);
+    M.box([q[0], -2.5, q[2]], 1.15, 1.15, by + 2.5, F.yaw);
+    col(q[0], by - 0.6, q[2], 1.15, 0.6, 1.15, F.yaw);
+    M.set(C.stone, PAT.PLAIN);
+    for (const [cu, cv] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const c = P(zz[i][0] + cu, zz[i][1] + cv, 0); M.box([c[0], by, c[2]], 0.1, 0.1, 0.75, F.yaw); }
+    if (i > 0) for (const [cu, cv] of [[-1, 1], [1, 1]]) { const c = P(zz[i][0] + cu, zz[i][1] + cv, 0); lantern([c[0], by + 1.05, c[2]], 0.5, false, [1.0, 0.5, 0.2]); }
+  }
   for (let i = 0; i < zz.length - 1; i++) {
     const a = P(zz[i][0], zz[i][1], 0), b = P(zz[i + 1][0], zz[i + 1][1], 0);
     const L = Math.hypot(b[0] - a[0], b[2] - a[2]), ang = Math.atan2(b[2] - a[2], b[0] - a[0]);
     const m = [(a[0] + b[0]) / 2, 0, (a[2] + b[2]) / 2];
-    M.set(C.stone, PAT.STONE);
-    M.box([m[0], by - 0.25, m[2]], L / 2 + 0.7, 0.85, 0.25, ang);
-    for (let k = 0; k <= 2; k++) { const t = k / 2; M.box([a[0] + (b[0] - a[0]) * t, -2.5, a[2] + (b[2] - a[2]) * t], 0.3, 0.3, by + 2.2); }
-    col(m[0], by - 0.6, m[2], L / 2 + 0.7, 0.6, 0.85, ang);
+    M.set(bridgeStone, PAT.STONE);
+    M.box([m[0], by - 0.45, m[2]], L / 2 - 1.1, 0.8, 0.45, ang);
+    for (let k = 1; k <= 2; k++) { const t = k / 3; M.box([a[0] + (b[0] - a[0]) * t, -2.5, a[2] + (b[2] - a[2]) * t], 0.35, 0.65, by + 2.0, ang); }
+    col(m[0], by - 0.6, m[2], L / 2, 0.6, 0.8, ang);
     const nx = -Math.sin(ang), nz = Math.cos(ang);
-    M.set(C.marble, PAT.PLAIN);
-    for (const sd of [-1, 1]) M.box([m[0] + nx * 0.8 * sd, by, m[2] + nz * 0.8 * sd], L / 2 + 0.5, 0.06, 0.45, ang);
-    if (i % 2 === 1) lantern([b[0], by + 1.6, b[2]], 0.9, true);
+    M.set(C.stone, PAT.PLAIN);
+    const n = Math.max(2, Math.round((L - 2.2) / 1.6));
+    for (const sd of [-1, 1]) {
+      M.box([m[0] + nx * 0.75 * sd, by + 0.48, m[2] + nz * 0.75 * sd], L / 2 - 1.1, 0.06, 0.08, ang);
+      for (let k = 1; k < n; k++) {
+        const t = (1.1 + (L - 2.2) * k / n) / L;
+        M.box([a[0] + (b[0] - a[0]) * t + nx * 0.75 * sd, by, a[2] + (b[2] - a[2]) * t + nz * 0.75 * sd], 0.06, 0.06, 0.5, ang);
+      }
+    }
+    if (i % 2 === 1) lights.push([b[0], by + 1.2, b[2], 9, 4, 2.0, 0.7]);
   }
   const pc = P(2, vs + 42, 0);
   M.set(C.stone, PAT.STONE);
   M.prism([pc[0], -2.5, pc[2]], 5.2, 6, 0, 2.95, 0);
   col(pc[0], by - 0.6, pc[2], 3.6, 0.6, 3.6, 0);
   env.pavilion([pc[0], by - 0.1, pc[2]], 6, 3.2, 0.1);
+  // lanterns on posts along the shore
+  for (let u = -44; u <= 46; u += 5.5) {
+    if (Math.abs(u) < 3 || (u < -5 && u > -34)) continue;
+    let v = -1; for (let t = 4; t < 140; t += 0.5) if (h(u, t) < 0.35) { v = t; break; }
+    if (v < 0) continue;
+    const q = P(u, v - 1.6, 0), y = H(q[0], q[2]);
+    if (y < 0.3) continue;
+    M.set(C.dwood, PAT.WOOD); M.box([q[0], y, q[2]], 0.05, 0.05, 1.3);
+    lantern([q[0], y + 1.5, q[2]], 0.55, false, [1.0, 0.5, 0.2]);
+  }
   // covered corridor (lang) along the shore on the left, on posts over the water
   const cor = [[-7, 3], [-12, 14], [-20, 25], [-30, 33]];
   const cy = 0.9;
@@ -336,22 +403,22 @@ export function lakesideVignette(env) {
   const dx = (wb[0] - wa[0]) / WL, dz = (wb[2] - wa[2]) / WL, nx = -dz, nz = dx;
   const wy = Math.min(H(wa[0], wa[2]), H(wb[0], wb[2]), g0) - 0.3, WH = 3.6 + (ty - wy) * 0.3;
   const A = (s, o, y) => [wa[0] + dx * s + nx * o, y, wa[2] + dz * s + nz * o];
-  const gateS = WL * 0.36, gr = 1.45, gcy = wy + gr + 0.4;
+  const gateS = WL * 0.6, gr = 1.45, gcy = wy + gr + 0.4;
   for (const o of [0.22, -0.22]) {
     const n = o > 0 ? [nx, 0, nz] : [-nx, 0, -nz];
     M.set(C.plaster, PAT.PLASTER);
-    M.quad(A(0, o, wy), A(gateS - 1.7, o, wy), A(gateS - 1.7, o, wy + WH), A(0, o, wy + WH), n, [[0, 0], [1, 0], [1, WH], [0, WH]]);
-    M.quad(A(gateS + 1.7, o, wy), A(WL, o, wy), A(WL, o, wy + WH), A(gateS + 1.7, o, wy + WH), n, [[0, 0], [1, 0], [1, WH], [0, WH]]);
+    M.quad(A(0, o, wy), A(gateS - 1.7, o, wy), A(gateS - 1.7, o, wy + WH), A(0, o, wy + WH), n, [[0, 0], [gateS - 1.7, 0], [gateS - 1.7, WH], [0, WH]]);
+    M.quad(A(gateS + 1.7, o, wy), A(WL, o, wy), A(WL, o, wy + WH), A(gateS + 1.7, o, wy + WH), n, [[gateS + 1.7, 0], [WL, 0], [WL, WH], [gateS + 1.7, WH]]);
     const N = 28;
     for (let k = 0; k < N; k++) {
       const a0 = (k / N) * Math.PI * 2, a1 = ((k + 1) / N) * Math.PI * 2;
       const ray = (a) => { const cx = Math.cos(a), cy = Math.sin(a); const tx = cx > 0 ? 1.7 / cx : cx < 0 ? -1.7 / cx : 1e9; const tyy = cy > 0 ? (wy + WH - gcy) / cy : cy < 0 ? (wy - gcy) / cy : 1e9; const t = Math.min(tx, tyy); return [gateS + cx * t, gcy + cy * t]; };
       const r0 = ray(a0), r1 = ray(a1);
       const c0 = [gateS + Math.cos(a0) * gr, gcy + Math.sin(a0) * gr], c1 = [gateS + Math.cos(a1) * gr, gcy + Math.sin(a1) * gr];
-      M.quad(A(c0[0], o, c0[1]), A(c1[0], o, c1[1]), A(r1[0], o, r1[1]), A(r0[0], o, r0[1]), n, [[0, c0[1] - wy], [1, c1[1] - wy], [1, r1[1] - wy], [0, r0[1] - wy]]);
+      M.quad(A(c0[0], o, c0[1]), A(c1[0], o, c1[1]), A(r1[0], o, r1[1]), A(r0[0], o, r0[1]), n, [[c0[0], c0[1] - wy], [c1[0], c1[1] - wy], [r1[0], r1[1] - wy], [r0[0], r0[1] - wy]]);
     }
     M.set([1, 1, 1], PAT.LATTICE, 2.0);
-    for (const s of [WL * 0.18, WL * 0.85]) M.quad(A(s - 0.6, o * 1.05, wy + 1.4), A(s + 0.6, o * 1.05, wy + 1.4), A(s + 0.6, o * 1.05, wy + 2.4), A(s - 0.6, o * 1.05, wy + 2.4), n, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    for (const s of [2.2, 5.4, 8.6, 11.8, gateS + 3.6, gateS + 6.8, gateS + 10].filter((t) => t < WL - 1 && Math.abs(t - gateS) > 2.6)) M.quad(A(s - 0.6, o * 1.05, wy + 1.4), A(s + 0.6, o * 1.05, wy + 1.4), A(s + 0.6, o * 1.05, wy + 2.4), A(s - 0.6, o * 1.05, wy + 2.4), n, [[0, 0], [1, 0], [1, 1], [0, 1]]);
   }
   M.set(C.stone, PAT.PLAIN);
   for (let k = 0; k < 28; k++) {
@@ -414,6 +481,110 @@ export function lakesideVignette(env) {
   return F;
 }
 
+// Rectangular hall: plaster walls with glowing lattice windows on both long faces and a tiled roof.
+function rectHall(env, cx, cz, ang, L, W, y0, h, wall, em) {
+  const { M } = env;
+  const dx = Math.cos(ang), dz = Math.sin(ang), nx = -dz, nz = dx;
+  M.set(wall, PAT.PLASTER);
+  M.box([cx, y0, cz], L / 2, W / 2, h, ang, false);
+  M.set([1, 1, 1], PAT.LATTICE, em);
+  const nw = Math.max(1, Math.floor(L / 3.2));
+  for (const sd of [-1, 1]) for (let k = 0; k < nw; k++) {
+    const s = -L / 2 + (k + 0.5) * L / nw, o = (W / 2 + 0.03) * sd;
+    const b = [cx + dx * s + nx * o, y0 + h * 0.25, cz + dz * s + nz * o];
+    M.quad([b[0] - dx * 0.8, b[1], b[2] - dz * 0.8], [b[0] + dx * 0.8, b[1], b[2] + dz * 0.8], [b[0] + dx * 0.8, b[1] + h * 0.5, b[2] + dz * 0.8], [b[0] - dx * 0.8, b[1] + h * 0.5, b[2] - dz * 0.8], [nx * sd, 0, nz * sd]);
+  }
+  M.set(C.wood, PAT.WOOD);
+  M.box([cx, y0 + h - 0.6, cz], L / 2 + 0.1, W / 2 + 0.1, 0.6, ang, false);
+  const a = [cx - dx * L / 2, 0, cz - dz * L / 2], b = [cx + dx * L / 2, 0, cz + dz * L / 2];
+  hallRoof(M, a, b, y0 + h, W / 2 + 1.6, W * 0.32);
+}
+
+// Lit mountain monastery on three stepped terraces: gate hall, main hall with side halls, a seven-storey
+// floodlit pagoda at the top, lanterns along every terrace edge. front: direction the complex faces.
+function mountainTemple(env, x, z, front) {
+  const { M, H, col, lantern, lights, reserve } = env;
+  const fx = Math.cos(front), fz = Math.sin(front), rx = -fz, rz = fx;
+  const S = 1.45;   // overall scale: it is seen from 1.1 km
+  const Q = (u, v) => [x + (rx * u + fx * v) * S, z + (rz * u + fz * v) * S];   // v toward the front
+  const g = H(x, z);
+  const red = [0.34, 0.075, 0.045], stoneC = [0.13, 0.125, 0.115];
+  const ang = Math.atan2(rz, rx);   // long axis of the halls runs across the front
+  const terr = [[0, 26, 72, 22, 3], [0, 4, 58, 22, 11], [0, -18, 38, 20, 19]].map(([u, v, w, d, hh]) => [u, v, w * S, d * S, hh * S]);   // u, v, width, depth, height above g
+  for (const [u, v, w, d, hh] of terr) {
+    const [cx, cz] = Q(u, v);
+    let gmin = 1e9; for (const [a, b] of [[-w / 2, -d / 2], [w / 2, -d / 2], [w / 2, d / 2], [-w / 2, d / 2], [0, 0]]) { const q = Q(u + a / S, v + b / S); gmin = Math.min(gmin, H(q[0], q[1])); }
+    M.set(stoneC, PAT.STONE);
+    M.box([cx, gmin - 3, cz], w / 2, d / 2, g + hh - gmin + 3, ang);
+    col(cx, (gmin + g + hh) / 2, cz, w / 2, (g + hh - gmin) / 2, d / 2, ang);
+    // lanterns along the front edge
+    for (let s = -w / 2 + 3; s <= w / 2 - 3; s += 5) {
+      const q = Q(u + s / S, v + (d / 2 - 0.4) / S);
+      M.set(C.dwood, PAT.WOOD); M.box([q[0], g + hh, q[1]], 0.08, 0.08, 1.5);
+      lantern([q[0], g + hh + 1.9, q[1]], 1.6, false);
+    }
+    reserve.push({ x: cx, z: cz, hw: w / 2 + 6, hd: d / 2 + 6, angle: ang });
+  }
+  // central stairs between the terraces
+  M.set(stoneC, PAT.STONE);
+  for (let k = 0; k < 40; k++) {
+    const v = 40 - k * 1.5, q = Q(0, v);
+    const y = (v > 37 ? -1 + (40 - v) * 1.3 : v > 15 ? 3 + Math.min(8, (37 - v) * 0.55) : 11 + Math.min(8, (15 - v) * 0.6)) * S + g;
+    M.box([q[0], y - 0.4, q[1]], 3 * S, 0.8 * S, 0.45 * S, ang);
+  }
+  // gate hall, main hall, side halls
+  let q = Q(0, 28); rectHall(env, q[0], q[1], ang, 22 * S, 9 * S, g + 3 * S, 6.5 * S, red, 4.0);
+  q = Q(0, 2); rectHall(env, q[0], q[1], ang, 30 * S, 13 * S, g + 11 * S, 9 * S, red, 5.0);
+  q = Q(-21, 4); rectHall(env, q[0], q[1], ang + Math.PI / 2, 14 * S, 8 * S, g + 11 * S, 6 * S, red, 3.4);
+  q = Q(21, 4); rectHall(env, q[0], q[1], ang + Math.PI / 2, 14 * S, 8 * S, g + 11 * S, 6 * S, red, 3.4);
+  // seven-storey pagoda
+  const [px, pz] = Q(0, -19);
+  let y = g + 19 * S;
+  const rot = Math.PI / 8;
+  for (let i = 0; i < 7; i++) {
+    const r = (6.2 - i * 0.42) * S, hh = (i === 0 ? 6.5 : 4.4) * S;
+    M.set([0.6, 0.42, 0.22], PAT.PAGODA, 6.0 - i * 0.4);
+    M.prism([px, y, pz], r, 8, 0, hh, rot, false, r * 0.97);
+    y += hh;
+    M.set(C.tile, PAT.TILE);
+    const top = i === 6;
+    const eave = M.roof([px, y, pz], 8, r + 2.0 * S, 0, top ? 0 : (r - 0.42 * S) * 0.98, (top ? 5.5 : 1.4) * S, rot, 1.0 * S, 0.13, 4, 3);
+    for (let k = 0; k < 8; k++) { const e = eave[k * 4]; lantern([e[0], e[1] - 1.0, e[2]], 1.5, false, [1.0, 0.45, 0.12]); }
+    y += (top ? 5.5 : 1.4) * S;
+  }
+  M.set(C.gold, PAT.PLAIN, 0.5);
+  M.prism([px, y - 0.5, pz], 0.45, 8, 0, 9, rot, true, 0.12);
+  col(px, g + 19 * S + 25, pz, 8, 25, 8, 0);
+  // floodlights and hall glow (real lights; the complex is far away, so few and large)
+  lights.push([px, g + 26 * S, pz, 40, 60, 36, 14]);
+  q = Q(0, 12); lights.push([q[0], g + 17 * S, q[1], 40, 40, 22, 9]);
+  q = Q(0, 36); lights.push([q[0], g + 9 * S, q[1], 34, 30, 17, 6]);
+}
+
+// Lattice relay mast with blinking red aircraft-warning beacons.
+function relayMast(env, x, z) {
+  const { M, H } = env;
+  const g = H(x, z), Ht = 58;
+  const w = (y) => 3.2 * (1 - y / Ht) + 0.4;
+  M.set(C.iron, PAT.PLAIN);
+  for (let k = 0; k < 4; k++) {
+    const a = k * Math.PI / 2 + Math.PI / 4;
+    for (let s = 0; s < 6; s++) {
+      const y0 = s * Ht / 6, y1 = (s + 1) * Ht / 6;
+      const p0 = [x + Math.cos(a) * w(y0), g + y0, z + Math.sin(a) * w(y0)];
+      M.prism(p0, 0.14, 4, 0, y1 - y0, 0, false, 0.12);
+    }
+  }
+  for (let s = 1; s < 10; s++) {
+    const y = s * Ht / 10, ww = w(y) / Math.SQRT2;
+    for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; M.box([x + Math.cos(a) * ww, g + y, z + Math.sin(a) * ww], 0.06, ww, 0.12, a); }
+  }
+  M.set([1.0, 0.08, 0.04], PAT.BEACON, 70);
+  for (const y of [Ht * 0.45, Ht * 0.75, Ht + 1.2]) { M.prism([x, g + y, z], 0.01, 6, -1.5, 0, 0, false, 1.5); M.prism([x, g + y, z], 1.5, 6, 0, 1.5, 0, false, 0.01); }
+  M.set([0.5, 0.06, 0.04], PAT.PLAIN, 0);
+  M.prism([x, g + Ht, z], 0.12, 4, 0, 0.6, 0, true);
+}
+
 // ---------------------------------------------------------------- pose 9: cliff-top lookout and valley lights
 // mist cover at a valley point (mirrors valleyMist() in terrainShade.js), used to dim lights under the mist
 function mistAt(x, y, z) {
@@ -438,58 +609,35 @@ export function cragLookout(env) {
   col(...P(0, -5.0, ty - 1.5), 7.0, 1.5, 11.3, F.yaw);
   M.set(C.gravel, PAT.GRAVEL);
   M.quad(P(-11.3, -12, ty + 0.005), P(11.3, -12, ty + 0.005), P(11.3, 2.0, ty + 0.005), P(-11.3, 2.0, ty + 0.005), [0, 1, 0]);
-  // carved stone balustrade along the brink (a bay centred on the view axis) and down both sides; the post
-  // right of the axis carries a small stone lantern instead of a finial
-  const BV = 1.5;
-  const lq = P(2.2, BV, ty + 1.14);
-  const lpost = P(-2.2, BV, ty + 1.14);
-  const isLq = (p) => Math.hypot(p[0] - lq[0], p[2] - lq[2]) < 0.3 || Math.hypot(p[0] - lpost[0], p[2] - lpost[2]) < 0.3;
-  stoneBalustrade(M, P, [[-11, -11], [-11, BV], [11, BV], [11, -11]], ty, isLq, 4.4);
+  // carved stone balustrade along the brink (a bay centred on the view axis) and down both sides; only its
+  // hand rail and the tops of the balusters enter the bottom of the view
+  const BV = 1.1;
+  stoneBalustrade(M, P, [[-11, -11], [-11, BV], [11, BV], [11, -11]], ty, () => false, 4.4);
   col(...P(0, BV, ty + 0.55), 0.22, 0.55, 11, F.yaw);
   for (const u of [-11, 11]) col(...P(u, (BV - 11) / 2, ty + 0.55), (BV + 11) / 2, 0.55, 0.22, F.yaw);
-  M.set(C.marble, PAT.PLAIN);
-  M.prism(lq, 0.17, 4, 0, 0.1, Math.PI / 4 + F.yaw, true);
-  M.prism(lq, 0.07, 6, 0.1, 0.22, 0, false);
-  lantern([lq[0], lq[1] + 0.42, lq[2]], 0.55, true, [1.0, 0.55, 0.2]);
-  M.set(C.marble, PAT.PLAIN);
-  M.prism(lq, 0.26, 4, 0.66, 0.8, Math.PI / 4 + F.yaw, true, 0.03);
-  // a curved timber pole leaning out over the drop from the post left of the axis, a lantern hanging from it
-  const b0 = P(-2.2, BV, ty + 1.1), b1 = P(-2.35, BV + 1.2, ty + 3.1), b2 = P(-2.5, BV + 3.0, ty + 3.25);
-  const bz = (t) => [0, 1, 2].map((i) => (1 - t) * (1 - t) * b0[i] + 2 * (1 - t) * t * b1[i] + t * t * b2[i]);
-  M.set(C.wood, PAT.WOOD);
-  for (let k = 0; k < 6; k++) {
-    const p0 = bz(k / 6), p1 = bz((k + 1) / 6);
-    const L = Math.hypot(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
-    const r = 0.06 - 0.025 * k / 6;
-    // short square section along the curve (built as a quad strip so it can tilt)
-    const d = [(p1[0] - p0[0]) / L, (p1[1] - p0[1]) / L, (p1[2] - p0[2]) / L];
-    const s = V3.norm(V3.cross(d, [0, 1, 0])), u = V3.cross(s, d);
-    for (let f = 0; f < 4; f++) {
-      const a = f * Math.PI / 2 + Math.PI / 4, c0 = Math.cos(a), s0 = Math.sin(a), c1 = Math.cos(a + Math.PI / 2), s1 = Math.sin(a + Math.PI / 2);
-      const o0 = [s[0] * c0 + u[0] * s0, s[1] * c0 + u[1] * s0, s[2] * c0 + u[2] * s0], o1 = [s[0] * c1 + u[0] * s1, s[1] * c1 + u[1] * s1, s[2] * c1 + u[2] * s1];
-      M.quad(V3.add(p0, V3.mul(o0, r)), V3.add(p0, V3.mul(o1, r)), V3.add(p1, V3.mul(o1, r)), V3.add(p1, V3.mul(o0, r)), V3.norm(V3.add(o0, o1)));
-    }
-  }
-  M.set(C.gold, PAT.WOOD); M.prism(b2, 0.045, 6, -0.04, 0.1, 0, true, 0.02);
-  M.set(C.iron, PAT.PLAIN); M.box([b2[0], b2[1] - 0.6, b2[2]], 0.008, 0.008, 0.6);
-  lantern([b2[0], b2[1] - 0.9, b2[2]], 0.65, true);
-  // pavilion on the left of the platform; its upturned eave corner and lantern reach into the top-left of the view
-  const pc = P(-8.9, 0.4, ty);
+  // pavilion behind the camera on the left (out of view; lights the platform)
+  const pc = P(-8.6, -6.5, ty);
   const pr = F.yaw + Math.PI / 4, half = 2.3;
   M.set(C.wood, PAT.WOOD);
   for (let k = 0; k < 4; k++) { const a = pr + k * Math.PI / 2; M.prism([pc[0] + Math.cos(a) * half * Math.SQRT2, ty, pc[2] + Math.sin(a) * half * Math.SQRT2], 0.15, 6, 0, 2.45, 0, false); }
   M.prism([pc[0], ty, pc[2]], half * Math.SQRT2 + 0.12, 4, 2.2, 2.5, pr, false);
-  M.set([1, 1, 1], PAT.LATTICE, 0.7);
-  M.prism([pc[0], ty, pc[2]], half * Math.SQRT2 + 0.02, 4, 1.9, 2.2, pr, false);
   M.set(C.tile, PAT.TILE);
-  const eave = M.roof([pc[0], ty + 2.5, pc[2]], 4, (half + 1.6) * Math.SQRT2, 0, 0, 2.4, pr, 0.95, 0.12, 6, 5);
-  M.set(C.tile, PAT.PLAIN);
-  M.prism([pc[0], ty + 4.8, pc[2]], 0.16, 6, 0, 0.7, 0, true, 0.03);
-  const e0 = eave[0];
-  lantern([e0[0], e0[1] - 0.75, e0[2]], 0.6, true);
+  M.roof([pc[0], ty + 2.5, pc[2]], 4, (half + 1.6) * Math.SQRT2, 0, 0, 2.4, pr, 0.95, 0.12, 6, 5);
   lantern([pc[0], ty + 1.9, pc[2]], 0.9, true);
   col(pc[0], ty + 1.2, pc[2], 0.2, 1.2, 0.2, 0);
   reserve.push({ x: F.x, z: F.z, hw: 20, hd: 20, angle: F.yaw });
+  M.end(3000);
+
+  // hero of the view: a lit mountain monastery on the spur right of the valley, above the mist
+  M.begin();
+  const ts = [700 + 0.188 * 950 - 0.9822 * 600, 4560 + 0.9822 * 950 + 0.188 * 600];
+  mountainTemple(env, ts[0], ts[1], Math.atan2(4605 - ts[1], 708 - ts[0]));
+  M.end(6000);
+  // relay mast with blinking red beacons on the left ridge
+  M.begin();
+  relayMast(env, 700 + 0.188 * 1750 + 0.9822 * 1050, 4560 + 0.9822 * 1750 - 0.188 * 1050);
+  M.end(6000);
+  M.begin();
 
   // valley lights: a road winding down the valley floor, villages along it, hamlets on the far slopes
   const glow = [];
@@ -518,6 +666,15 @@ export function cragLookout(env) {
       glow.push([x, Hf(x, z) + 6 + R() * 4, z, 2.2 + s / 1600 + R(), 1.0, 0.66 + R() * 0.15, 0.32]);
     }
   }
+  // lit pilgrims' path zigzagging down from the monastery gate toward the valley floor
+  {
+    const tx = 700 + 0.188 * 950 - 0.9822 * 600, tz = 4560 + 0.9822 * 950 + 0.188 * 600;
+    const dx = 708 - tx, dz = 4605 - tz, dl = Math.hypot(dx, dz), fx = dx / dl, fz = dz / dl;
+    for (let s = 70; s < 420; s += 11) {
+      const w = Math.sin(s / 45) * 35, x = tx + fx * s - fz * w, z = tz + fz * s + fx * w;
+      glow.push([x, Hf(x, z) + 3, z, 1.6, 1.0, 0.6, 0.28]);
+    }
+  }
   // glows are small emissive octahedra (sub-pixel lamps would vanish at these distances), dimmed under the mist
   for (const [x, y, z, s, r, gg, b] of glow) {
     M.set([r, gg, b], PAT.PLAIN, 26 * (1 - 0.8 * mistAt(x, y, z)));
@@ -527,11 +684,11 @@ export function cragLookout(env) {
   return glow.length;
 }
 
-// ---------------------------------------------------------------- pose 10: life on the right river bank
-// Promenade lamps along the embankment, a lit park path behind it, cross paths to pavilions in clearings.
-// Only in the stretch seen from the cableway viewpoint.
+// ---------------------------------------------------------------- pose 10: life on the river banks
+// Promenade lamps along the embankments in view of the cableway viewpoint, and lit stairways climbing the
+// bank slopes to small pavilions, so the wooded hillside has paths and points of light.
 export function riverbankLife(env, world) {
-  const { M, H, col, lantern, lights, reserve, R } = env;
+  const { M, H, col, lantern, lights, reserve } = env;
   const F = frame(POSES[9]);
   const local = (x, z) => { const dx = x - F.x, dz = z - F.z; return [dx * F.rx + dz * F.rz, dx * F.fx + dz * F.fz]; };
   const bank = [];
@@ -539,75 +696,105 @@ export function riverbankLife(env, world) {
     for (let i = 0; i < run.length; i++) {
       const [x, z, nx, nz] = run[i];
       const [u, v] = local(x, z);
-      if (v > 40 && v < 1500 && u > 0 && u < 700 && (nx * F.rx + nz * F.rz) > 0.3) bank.push([x, z, nx, nz, v]);
+      // in front of the camera, landward normal pointing away from the view axis
+      if (v > 30 && v < 1400 && Math.abs(u) < 700 && Math.sign(u) * (nx * F.rx + nz * F.rz) > 0.3) bank.push([x, z, nx, nz, v, u]);
     }
   }
   bank.sort((a, b) => a[4] - b[4]);
-  let lampsPlaced = 0, last = null;
+  let lampsPlaced = 0;
   M.begin();
-  for (const [x, z, nx, nz] of bank) {
-    if (last && Math.hypot(x - last[0], z - last[1]) < 24) continue;
-    last = [x, z];
+  const lastBySide = {};
+  for (const [x, z, nx, nz, , u] of bank) {
+    const side = u > 0 ? 'r' : 'l', last = lastBySide[side];
+    if (last && Math.hypot(x - last[0], z - last[1]) < 30) continue;
+    lastBySide[side] = [x, z];
     const px = x + nx * 4.9, pz = z + nz * 4.9, y = 5.8;
     M.set(C.iron, PAT.PLAIN);
     M.prism([px, y, pz], 0.08, 6, 0, 4.2, 0, false, 0.06);
     M.box([px - nx * 0.45, y + 4.1, pz - nz * 0.45], 0.5, 0.04, 0.08, Math.atan2(-nz, -nx));
     lantern([px - nx * 0.85, y + 3.45, pz - nz * 0.85], 1.15, false, [1.0, 0.5, 0.18]);
-    lights.push([px - nx * 0.85, y + 3.2, pz - nz * 0.85, 16, 9, 4.6, 1.7]);
+    if (lampsPlaced % 2 === 0) lights.push([px - nx * 0.85, y + 3.2, pz - nz * 0.85, 16, 9, 4.6, 1.7]);
     lampsPlaced++;
   }
   M.end(2600);
-  // riverside park behind the promenade: a lit path parallel to the river, cross paths, pavilions in clearings
-  const path = bank.map(([x, z, nx, nz]) => [x + nx * 28, z + nz * 28, nx, nz]).filter(([x, z]) => world.waterDist(x, z) > 20);
-  let tops = 0;
-  M.begin();
-  for (let i = 1; i < path.length; i++) {
-    const [ax, az] = path[i - 1], [bx, bz] = path[i];
-    const L = Math.hypot(bx - ax, bz - az);
-    if (L > 80) continue;
-    const ang = Math.atan2(bz - az, bx - ax);
-    M.set(C.stone, PAT.STONE);
-    for (let s = 0; s < L; s += 2.1) {
-      const x = ax + (bx - ax) * s / L, z = az + (bz - az) * s / L;
-      M.box([x, H(x, z) - 0.25, z], 1.05, 1.3, 0.33, ang);
-    }
-    for (const f of [0.25, 0.75]) {
-      const nx = path[i][2], nz = path[i][3];
-      const x = ax + (bx - ax) * f + nx * 2.0, z = az + (bz - az) * f + nz * 2.0, y = H(x, z);
-      M.set(C.iron, PAT.PLAIN); M.prism([x, y, z], 0.06, 6, 0, 3.0, 0, false, 0.05);
-      lantern([x, y + 3.25, z], 0.85, false, [1.0, 0.55, 0.22]);
-      if ((i * 2 + (f > 0.5 ? 1 : 0)) % 3 === 0) lights.push([x, y + 3.0, z, 14, 6.5, 3.4, 1.3]);
-    }
-    reserve.push({ x: (ax + bx) / 2, z: (az + bz) / 2, hw: L / 2 + 2, hd: 4.5, angle: ang });
-  }
-  M.end(2600);
-  for (let i = 2; i < path.length; i += 4) {
-    const [px, pz, nx, nz] = path[i];
+  // stairways climbing the slope behind the promenade, lamp posts along them, a pavilion at the top
+  let stairs = 0;
+  for (let i = 2; i < bank.length; i += 5) {
+    const [bx, bz, nx, nz] = bank[i];
     M.begin();
-    // cross path from the promenade through the park to a pavilion further inland
-    M.set(C.stone, PAT.STONE);
-    for (let s = -22; s < 14; s += 2.1) { const x = px + nx * s, z = pz + nz * s; M.box([x, H(x, z) - 0.25, z], 1.0, 0.9, 0.33, Math.atan2(nz, nx)); }
-    const tx = px + nx * 24, tz = pz + nz * 24;
-    let gmin = 1e9, gmax = -1e9;
-    for (let k = 0; k < 8; k++) { const q = H(tx + Math.cos(k * 0.785) * 7, tz + Math.sin(k * 0.785) * 7); gmin = Math.min(gmin, q); gmax = Math.max(gmax, q); }
-    M.set(C.stone, PAT.STONE);
-    M.prism([tx, gmin - 2, tz], 7.5, 8, 0, gmax - gmin + 2.6, Math.PI / 8);
-    col(tx, (gmin + gmax) / 2 + 0.3, tz, 5.3, (gmax - gmin) / 2 + 0.3, 5.3, 0);
-    env.pavilion([tx, gmax + 0.6, tz], 6, 4.2, 0.3);
-    // lanterns on posts around the terrace
-    for (let k = 0; k < 8; k++) {
-      const a = k * Math.PI / 4 + Math.PI / 8, x = tx + Math.cos(a) * 7.0, z = tz + Math.sin(a) * 7.0;
-      M.set(C.dwood, PAT.WOOD); M.box([x, gmax + 0.6, z], 0.06, 0.06, 1.6);
-      lantern([x, gmax + 2.35, z], 0.7, false);
+    let x = bx + nx * 6.5, z = bz + nz * 6.5, len = 0;
+    const steps = [];
+    while (len < 75) {
+      const d = 3, gx = H(x + d, z) - H(x - d, z), gz = H(x, z + d) - H(x, z - d), gl = Math.hypot(gx, gz);
+      let sx = nx * 0.5 + (gl > 0.05 ? gx / gl : 0) * 0.8 + Math.sin(len / 9) * 0.5 * -nz, sz = nz * 0.5 + (gl > 0.05 ? gz / gl : 0) * 0.8 + Math.sin(len / 9) * 0.5 * nx;
+      const sl = Math.hypot(sx, sz); sx /= sl; sz /= sl;
+      x += sx * 1.5; z += sz * 1.5; len += 1.5;
+      if (world.waterDist(x, z) < 6) break;
+      steps.push([x, z, Math.atan2(sz, sx)]);
     }
-    lights.push([tx, gmax + 3.6, tz, 18, 9, 4.8, 1.8]);
-    reserve.push({ x: tx, z: tz, hw: 17, hd: 17 });
-    reserve.push({ x: px + nx * -4, z: pz + nz * -4, hw: 18, hd: 2.5, angle: Math.atan2(nz, nx) });
+    if (steps.length < 12) { M.end(); continue; }
+    M.set(C.stone, PAT.STONE);
+    for (const [x2, z2, a] of steps) M.box([x2, H(x2, z2) - 0.3, z2], 0.75, 1.0, 0.45, a);
+    for (let k = 2; k < steps.length; k += 5) {
+      const [x2, z2, a] = steps[k];
+      const lx = x2 - Math.sin(a) * 1.4, lz = z2 + Math.cos(a) * 1.4, ly = H(lx, lz);
+      M.set(C.dwood, PAT.WOOD); M.box([lx, ly, lz], 0.06, 0.06, 2.3);
+      lantern([lx, ly + 2.55, lz], 0.95, false, [1.0, 0.55, 0.22]);
+      reserve.push({ x: x2, z: z2, hw: 5, hd: 5 });
+    }
+    const [ex, ez, ea] = steps[steps.length - 1];
+    const tx = ex + Math.cos(ea) * 5, tz = ez + Math.sin(ea) * 5;
+    let gmin = 1e9, gmax = -1e9;
+    for (let k = 0; k < 8; k++) { const q = H(tx + Math.cos(k * 0.785) * 5, tz + Math.sin(k * 0.785) * 5); gmin = Math.min(gmin, q); gmax = Math.max(gmax, q); }
+    M.set(C.stone, PAT.STONE);
+    M.prism([tx, gmin - 2, tz], 5.2, 8, 0, gmax - gmin + 2.4, Math.PI / 8);
+    col(tx, (gmin + gmax) / 2, tz, 3.7, (gmax - gmin) / 2 + 0.4, 3.7, 0);
+    env.pavilion([tx, gmax + 0.4, tz], 6, 3.0, 0.3);
+    const mid = steps[steps.length >> 1];
+    lights.push([tx, gmax + 3.2, tz, 15, 8, 4.3, 1.6]);
+    lights.push([mid[0], H(mid[0], mid[1]) + 2.8, mid[1], 14, 6, 3.2, 1.2]);
+    reserve.push({ x: tx, z: tz, hw: 10, hd: 10 });
     M.end(2600);
-    tops++;
+    stairs++;
   }
-  void R;
-  return lampsPlaced + tops;
+  return lampsPlaced + stairs;
+}
+
+// ---------------------------------------------------------------- distant settlements on the mountain ring
+// Small villages and the roads climbing to them on the ranges around the basin, as warm points of light
+// (mostly seen from the Nanshan overlook, pose 1).
+export function distantLights(env) {
+  const { M, Hf, R } = env;
+  const cam = POSES[0].pos;
+  const glow = [];
+  const sites = [];
+  for (let k = 0; k < 400 && sites.length < 9; k++) {
+    const a = (-100 + R() * 70) * Math.PI / 180, d = 5200 + R() * 4200;
+    const x = cam[0] + Math.cos(a) * d, z = cam[2] + Math.sin(a) * d;
+    const h = Hf(x, z);
+    if (Math.hypot(x - 300, (z + 300) * 0.92) < 4500 || h < 120 || h > 1100) continue;
+    if (sites.some(([sx, sz]) => Math.hypot(sx - x, sz - z) < 1200)) continue;
+    sites.push([x, z]);
+  }
+  for (const [x, z] of sites) {
+    const n = 7 + Math.floor(R() * 9);
+    for (let i = 0; i < n; i++) {
+      const a = R() * 6.28, r = R() * 110, gx = x + Math.cos(a) * r, gz = z + Math.sin(a) * r;
+      glow.push([gx, Hf(gx, gz) + 6, gz, 6 + R() * 3]);
+    }
+    // a road winding down toward the basin
+    const dx = 300 - x, dz = -300 - z, dl = Math.hypot(dx, dz), fx = dx / dl, fz = dz / dl;
+    for (let s = 130; s < 1300; s += 75) {
+      const w = Math.sin(s / 160) * 120, gx = x + fx * s - fz * w, gz = z + fz * s + fx * w;
+      glow.push([gx, Hf(gx, gz) + 5, gz, 4.5]);
+    }
+  }
+  for (const [x, y, z, s] of glow) {
+    M.set([1.0, 0.68, 0.36], PAT.PLAIN, 20);
+    M.prism([x, y, z], 0.01, 4, -s, 0, 0, false, s);
+    M.prism([x, y, z], s, 4, 0, s, 0, false, 0.01);
+  }
+  return glow.length;
 }
 
 // ---------------------------------------------------------------- hillside life inside the city

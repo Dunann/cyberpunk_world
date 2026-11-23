@@ -1,10 +1,11 @@
 // Mesh builder for the garden: static geometry with per-vertex material.
 // Vertex: pos.xyz, normal.xyz, albedo.rgb, pattern, emissive, uv.xy  (13 floats)
 // Patterns: 0 plain, 1 plaster, 2 roof tiles, 3 lacquered wood, 4 stone blocks, 5 glowing lattice window,
-//           6 mirror pond, 7 paper lantern, 8 lit pagoda wall, 9 gravel path
+//           6 mirror pond, 7 paper lantern, 8 lit pagoda wall, 9 gravel path, 10 pebble mosaic paving,
+//           11 blinking beacon, 12 leaf (two-sided, veined)
 
 export const STRIDE = 13;
-export const PAT = { PLAIN: 0, PLASTER: 1, TILE: 2, WOOD: 3, STONE: 4, LATTICE: 5, POND: 6, LANTERN: 7, PAGODA: 8, GRAVEL: 9 };
+export const PAT = { PLAIN: 0, PLASTER: 1, TILE: 2, WOOD: 3, STONE: 4, LATTICE: 5, POND: 6, LANTERN: 7, PAGODA: 8, GRAVEL: 9, PEBBLE: 10, BEACON: 11, LEAF: 12 };
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
@@ -57,6 +58,36 @@ export class GardenMesh {
     this.wquad(p[2], p[3], p[7], p[6], R(0, 1));
     this.wquad(p[3], p[0], p[4], p[7], R(-1, 0));
     if (top) this.wquad(p[4], p[5], p[6], p[7], [0, 1, 0]);
+  }
+  // surface of revolution around a vertical axis at c: profile [[r, y], ...] bottom to top, smooth normals
+  lathe(c, prof, sides = 14, cap = true) {
+    const ring = [];
+    for (let j = 0; j < prof.length; j++) {
+      const [r, y] = prof[j];
+      const pr = prof[Math.max(j - 1, 0)], nx = prof[Math.min(j + 1, prof.length - 1)];
+      const dr = nx[0] - pr[0], dy = nx[1] - pr[1];
+      const row = [];
+      for (let k = 0; k <= sides; k++) {
+        const a = (k / sides) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+        row.push(this.vtx([c[0] + ca * r, c[1] + y, c[2] + sa * r], norm([ca * dy, -dr, sa * dy]), [k / sides * 6.28 * r, y]));
+      }
+      ring.push(row);
+    }
+    for (let j = 0; j < prof.length - 1; j++) for (let k = 0; k < sides; k++) {
+      const a = ring[j][k], b = ring[j][k + 1], d = ring[j + 1][k + 1], e = ring[j + 1][k];
+      const am = ((k + 0.5) / sides) * Math.PI * 2;
+      const o = [Math.cos(am), 0, Math.sin(am)];
+      this.tri(a, b, d, o); this.tri(a, d, e, o);
+    }
+    if (cap) {
+      const [r, y] = prof[prof.length - 1];
+      if (r > 1e-3) {
+        const ctr = this.vtx([c[0], c[1] + y, c[2]], [0, 1, 0], [0, 0]);
+        const rim = [];
+        for (let k = 0; k <= sides; k++) { const a = (k / sides) * Math.PI * 2; rim.push(this.vtx([c[0] + Math.cos(a) * r, c[1] + y, c[2] + Math.sin(a) * r], [0, 1, 0], [0, 0])); }
+        for (let k = 0; k < sides; k++) this.tri(ctr, rim[k], rim[k + 1], [0, 1, 0]);
+      }
+    }
   }
   // vertical prism (polygon with `sides`), radius r, from y0 to y1, rotation a
   prism(c, r, sides, y0, y1, a = 0, cap = true, r1 = r) {

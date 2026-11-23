@@ -41,14 +41,18 @@ export const MIST_WGSL = /* wgsl */ `
 const MIST_O = vec2f(700.0, 4560.0);
 const MIST_D = vec2f(0.188, 0.9822);
 fn valleyMist(p: vec3f, dist: f32, nse: f32) -> f32 {
+  if (dist < 200.0) { return 0.0; }
+  // thin mist on the lower slopes of the hills around West Lake
+  let lk = length((p.xz - vec2f(-1990.0, 2330.0)) * vec2f(1.0, 1.2));
+  let lake = (1.0 - smoothstep(1100.0, 1800.0, lk)) * (1.0 - smoothstep(4.0, 40.0 + nse * 30.0, p.y)) * smoothstep(250.0, 700.0, dist) * 0.45;
   let q = p.xz - MIST_O;
   let s = dot(q, MIST_D);
-  if (s < -300.0 || dist < 200.0) { return 0.0; }
+  if (s < -300.0) { return lake; }
   let c = abs(dot(q, vec2f(MIST_D.y, -MIST_D.x)));
   // the valley floor climbs about 75 m per km; the mist top follows it, with soft billows
   let top = 120.0 + 0.08 * max(s, 0.0) + (nse - 0.5) * 70.0;
   let m = 1.0 - smoothstep(top - 110.0, top, p.y);
-  return m * smoothstep(-300.0, 500.0, s) * smoothstep(200.0, 900.0, dist) * (1.0 - smoothstep(4000.0, 6500.0, c)) * 0.88;
+  return max(lake, m * smoothstep(-300.0, 500.0, s) * smoothstep(200.0, 900.0, dist) * (1.0 - smoothstep(4000.0, 6500.0, c)) * 0.88);
 }
 fn mistColor(dir: vec3f) -> vec3f {
   return skyHorizon(normalize(vec3f(dir.x, 0.02, dir.z))) * 1.35 + SKY_MOON_COL * F.moon.w * 0.01;
@@ -263,14 +267,19 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     // tree crowns (baked dome texture, mip-filtered so it fades into the canopy colour far away)
     var C = vec4f(0.5, 0.5, 0.42, 0.5);   // mip average of the crown texture
     if (px < 10.0) { C = textureSampleGrad(tCanopy, sRep, p.xz / 104.0, dX / 104.0, dY / 104.0); }
-    let cf = forest * (1.0 - smoothstep(4.0, 12.0, px));
+    // Close up (where real trees stand on it) the ground is a dark, matte forest floor: the baked crown
+    // domes there read as a field of bulging scales. The dome relief fades in only at a distance.
+    let domeK = smoothstep(220.0, 650.0, dist);
+    let cf = forest * (1.0 - smoothstep(4.0, 12.0, px)) * domeK;
     let dn = (C.rg * 2.0 - 1.0) * 1.6 * cf;
     n = normalize(n + vec3f(dn.x, 0.0, dn.y));
     let tint = mix(vec3f(0.85, 1.0, 0.78), vec3f(1.2, 1.08, 0.72), C.a);
-    albedo *= mix(vec3f(1.0), tint * (0.35 + 0.95 * C.b), forest);
-    ao *= mix(1.0, 0.45 + 0.55 * C.b, forest);
-    rough = mix(rough, 0.72, forest);
-    wet = mix(wet, 0.5, forest);
+    let crowns = tint * (0.35 + 0.95 * C.b);
+    let floorC = vec3f(0.17, 0.23, 0.14) * (0.75 + 0.5 * N1.g);
+    albedo *= mix(vec3f(1.0), mix(floorC, crowns, domeK), forest);
+    ao *= mix(1.0, mix(0.7, 0.45 + 0.55 * C.b, domeK), forest);
+    rough = mix(rough, mix(0.92, 0.72, domeK), forest);
+    wet = mix(wet, mix(0.15, 0.4, domeK), forest);
     if (forest > 0.5) { mat = 1.0; }
   }
   let rockW = smoothstep(0.30, 0.52, slope) * (1.0 - forest);
@@ -284,14 +293,17 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     n = normalize(n + vec3f(nn.x, 0.0, nn.y) * 0.4 * f * rockW - vec3f(0.0, (lg - 0.5) * 0.35 * f * rockW, 0.0));
     albedo *= 1.0 + (hash21(vec2f(floor(band), 3.0)) - 0.5) * 0.5 * f * rockW;
     albedo = mix(albedo, vec3f(0.035, 0.05, 0.025), smoothstep(0.55, 0.7, N1.g) * rockW * 0.7); // moss
-    rough = mix(rough, mix(0.5, 0.8, smoothstep(300.0, 1500.0, dist)), rockW);
-    wet = mix(wet, mix(0.8, 0.35, smoothstep(300.0, 1500.0, dist)), rockW);
+    // dark, mostly matte stone with moss (wet sheen on whole slopes reflected the sky as pale sheets)
+    albedo *= mix(1.0, 0.6, rockW);
+    albedo = mix(albedo, vec3f(0.03, 0.045, 0.022), smoothstep(0.35, 0.6, N1.b) * rockW * 0.5);
+    rough = mix(rough, 0.85, rockW);
+    wet = mix(wet, 0.3, rockW);
   }
   // lake gardens: lawns and a stone-edged shore instead of field terraces
   let gardenK = 1.0 - smoothstep(1050.0, 1350.0, length((p.xz - vec2f(-1990.0, 2330.0)) * vec2f(1.0, 1.2)));
   // far rock faces: dark ledges and gullies at a scale that survives distance, so steep mountain sides read
   // as cliffs rather than smooth pale blobs
-  let rockF = smoothstep(0.22, 0.45, slope) * (1.0 - 0.7 * forest) * smoothstep(0.25, 1.0, px);
+  let rockF = smoothstep(0.22, 0.45, slope) * (1.0 - 0.7 * forest) * smoothstep(0.25, 1.0, px) * (1.0 - smoothstep(1800.0, 3000.0, dist));
   // bare high ground far away stays dark (it read as pale snow under the moon)
   albedo *= mix(1.0, 0.5, smoothstep(380.0, 900.0, p.y) * (1.0 - forest) * smoothstep(400.0, 1200.0, dist));
   if (rockF > 0.01) {
@@ -474,7 +486,8 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   let crest = smoothstep(0.6, 0.7, Nt.b) * saturate(dot(n, F.moon.xyz) * 1.5) * smoothstep(800.0, 3500.0, dist) * (1.0 - wN * urbanAll);
   emis += vec3f(0.55, 0.62, 0.85) * F.moon.w * crest * 0.045;
   // silver skyline: crests seen at grazing angles catch the moonlit sky behind them
-  let skyl = pow(1.0 - saturate(dot(nPre, v)), 5.0) * smoothstep(0.35, 0.7, nPre.y) * smoothstep(500.0, 2500.0, dist) * (1.0 - urbanAll);
+  // (only out in the southern mountains: seen from the city the many small crests read as contour stripes)
+  let skyl = pow(1.0 - saturate(dot(nPre, v)), 5.0) * smoothstep(0.35, 0.7, nPre.y) * smoothstep(500.0, 2500.0, dist) * (1.0 - urbanAll) * smoothstep(3600.0, 4600.0, F.camPos.z);
   emis += SKY_MOON_COL * F.moon.w * skyl * 0.07;
 
   // far natural slopes are dark masses (lit only by the faint moon), so the ranges read as layered silhouettes
@@ -490,7 +503,10 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
 
   // ---- aerial perspective for the far ranges: fade toward the horizon haze; thicker low down, so each
   // range stands out as a layer against the haze in the valley behind it
-  let hz = min((1.0 - exp(-max(dist - 2000.0, 0.0) / 11000.0)) * mix(1.5, 0.7, smoothstep(200.0, 1800.0, p.y)), 0.96);
+  // out in nature the haze starts sooner and builds faster, so successive ridges step back in tone
+  let hzS = mix(2000.0, 900.0, 1.0 - urbanAll);
+  let hzL = mix(11000.0, 7000.0, 1.0 - urbanAll);
+  let hz = min((1.0 - exp(-max(dist - hzS, 0.0) / hzL)) * mix(1.5, 0.7, smoothstep(200.0, 1800.0, p.y)), 0.96);
   if (hz > 0.0) {
     let dir = -v;
     let sky = skyHorizon(normalize(vec3f(dir.x, max(dir.y, 0.0) * 0.5 + 0.02, dir.z)));
