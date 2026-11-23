@@ -178,10 +178,34 @@ function crown(B, R, o) {
     return top + 6;
   }
   if (type === 'lit') {
-    const h = 8 + R() * Math.min(25, m * 0.8);
-    B.part({ x, y0: top, z, a, hw: hw * 0.94, hd: hd * 0.94, h, kind, prm, taper: 0.8 + R() * 0.15, mat: MAT.CROWN, col: pick(R, PAL.crown), param: 1.1 + R() * 1.2, flags: FLAG.NOTOP });
-    B.part({ x, y0: top + 0.5, z, a, hw: hw * 0.8, hd: hd * 0.8, h: h - 1, kind, prm, mat: MAT.CONCRETE, col: [0.1, 0.1, 0.1] });
-    return top + h;
+    // stepped, up-lit crown: 2-3 setback tiers, each a glowing core ringed by dark fins leaning inward
+    const col = pick(R, PAL.crown);
+    const tiers = 2 + (R() < 0.45 ? 1 : 0);
+    const H = 10 + R() * Math.min(26, m * 0.9);
+    let y = top, s = 0.94;
+    const c = Math.cos(a), sn = Math.sin(a);
+    for (let t = 0; t < tiers; t++) {
+      const th = H * (t === 0 ? 0.45 : t === 1 ? 0.33 : 0.22);
+      const thw = hw * s, thd = hd * s;
+      B.part({ x, y0: y, z, a, hw: thw * 0.86, hd: thd * 0.86, h: th, kind, prm, taper: 0.92, mat: MAT.CROWN, col, param: 1.0 + R() * 0.8, seed: R() * 999 });
+      // ledge with a lit lip
+      B.part({ x, y0: y - 0.4, z, a, hw: thw + 0.4, hd: thd + 0.4, h: 0.5, kind, prm, mat: MAT.EMIT, col, param: 2.2, flags: FLAG.BOTTOM });
+      // fins around the perimeter (only on box-like plans, max ~20 per tier)
+      if (kind !== 2 || prm <= 8) {
+        const nx = Math.max(2, Math.min(6, Math.round(thw / 3.5))), nz = Math.max(2, Math.min(5, Math.round(thd / 3.5)));
+        const fins = [];
+        for (let i = 0; i < nx; i++) { const u = -thw + (i + 0.5) * 2 * thw / nx; fins.push([u, thd], [u, -thd]); }
+        for (let i = 0; i < nz; i++) { const v = -thd + (i + 0.5) * 2 * thd / nz; fins.push([thw, v], [-thw, v]); }
+        for (const [lx, lz] of fins) {
+          const wx = x + lx * c - lz * sn, wz = z + lx * sn + lz * c;
+          const ins = 0.16;   // lean toward the centre
+          B.prop({ x: wx, y0: y, z: wz, a: Math.atan2(-(wx - x), wz - z), hw: 0.25, hd: 0.9, h: th * 1.15, taper: 0.6, lx: -(wx - x) * ins, lz: -(wz - z) * ins, mat: MAT.METAL, col: [0.16, 0.16, 0.18] });
+        }
+      }
+      y += th; s *= 0.74;
+    }
+    B.part({ x, y0: y, z, hw: Math.max(0.6, m * 0.05), h: 6 + R() * 10, kind: 2, prm: 8, taper: 0.1, mat: MAT.EMIT, col, param: 3 });
+    return y;
   }
   if (type === 'pagoda') {
     let y = top, s = 0.82;
@@ -272,6 +296,112 @@ function podium(B, R, L, opts) {
   const top = L.gMax + opts.h;
   B.part({ x: L.x, y0, z: L.z, a: L.angle, hw, hd, h: top - y0, mat: opts.mat, col: opts.col, floorH: opts.floorH || 4.2, winW: opts.winW || 3.4, baseY: L.gMin, param: opts.lit || 0.45, flags: opts.flags || 0, seed: R() * 999, solid: true });
   return top;
+}
+
+// Podium that steps down a slope: on steep lots it is split along the fall line into 2-4 strips, each covering
+// its part of the lot and standing at least opts.h above its own highest ground (sign contract still holds).
+// Lit rails mark the terrace edges, and a stair flight runs down a side gap. Returns { top, minTop }.
+function terracedPodium(B, R, L, opts) {
+  const W = B.world;
+  const diff = L.gMax - L.gMin;
+  if (diff < 7) { const top = podium(B, R, L, opts); return { top, minTop: top }; }
+  const hw = L.w / 2 - 0.5, hd = L.d / 2 - 0.5;
+  const hAt = (lx, lz) => { const [x, z] = Builder.tw(L.x, L.z, L.angle, lx, lz); return W.heightAt(x, z); };
+  const sx = (hAt(hw, 0) - hAt(-hw, 0)) / (2 * hw), sz = (hAt(0, hd) - hAt(0, -hd)) / (2 * hd);
+  const alongX = Math.abs(sx) * hw >= Math.abs(sz) * hd;
+  const n = Math.min(4, Math.ceil(diff / 6));
+  const len = alongX ? hw : hd, wid = alongX ? hd : hw;
+  const seed = R() * 999;
+  let top = -1e9, minTop = 1e9;
+  const strips = [];
+  for (let i = 0; i < n; i++) {
+    const c0 = -len + (2 * len) * i / n, c1 = -len + (2 * len) * (i + 1) / n;
+    const mid = (c0 + c1) / 2, half = (c1 - c0) / 2;
+    let smin = 1e9, smax = -1e9;
+    for (const u of [c0, mid, c1]) for (const v of [-wid, 0, wid]) {
+      const h = alongX ? hAt(u, v) : hAt(v, u);
+      smin = Math.min(smin, h); smax = Math.max(smax, h);
+    }
+    const t = smax + opts.h;
+    const [cx, cz] = Builder.tw(L.x, L.z, L.angle, alongX ? mid : 0, alongX ? 0 : mid);
+    B.part({ x: cx, y0: smin - 4, z: cz, a: L.angle, hw: alongX ? half : hw, hd: alongX ? hd : half, h: t - smin + 4, mat: opts.mat, col: opts.col, floorH: opts.floorH || 4.2, winW: opts.winW || 3.4, baseY: L.gMin, param: opts.lit || 0.45, flags: opts.flags || 0, seed, solid: true });
+    strips.push({ mid, half, t });
+    top = Math.max(top, t); minTop = Math.min(minTop, t);
+  }
+  // lit guard rail along each terrace edge that drops to a lower neighbour
+  const railC = R() < 0.5 ? [1, 0.7, 0.35] : pick(R, PAL.neon);
+  for (let i = 0; i < n; i++) for (const j of [i - 1, i + 1]) {
+    if (j < 0 || j >= n || strips[j].t >= strips[i].t - 1) continue;
+    const edge = strips[i].mid + Math.sign(strips[j].mid - strips[i].mid) * strips[i].half;
+    const [ex, ez] = Builder.tw(L.x, L.z, L.angle, alongX ? edge : 0, alongX ? 0 : edge);
+    B.prop({ x: ex, y0: strips[i].t + 0.9, z: ez, a: L.angle, hw: alongX ? 0.06 : hw, hd: alongX ? hd : 0.06, h: 0.12, mat: MAT.EMIT, col: railC, param: 2.5, flags: FLAG.BOTTOM });
+  }
+  // stair street down one side gap (not on a road side)
+  const street = streetFaces(L);
+  const sides = alongX ? [[0, 1], [2, -1]] : [[3, 1], [1, -1]];   // faces parallel to the fall line: [faceIndex, sign of offset]
+  const free = sides.filter(([fi]) => !street[fi]);
+  if (diff > 9 && free.length && R() < 0.45) {
+    const sgn = free[0][1];
+    const off = (alongX ? hd : hw) + 2.5;
+    const steps = Math.min(60, Math.round(2 * len / 1.1));
+    for (let k = 0; k < steps; k++) {
+      const u = -len + (k + 0.5) * 2 * len / steps;
+      const lx = alongX ? u : sgn * off, lz = alongX ? sgn * off : u;
+      const [x, z] = Builder.tw(L.x, L.z, L.angle, lx, lz);
+      const g = W.heightAt(x, z);
+      const yt = Math.round((g + 0.2) / 0.3) * 0.3;
+      B.prop({ x, y0: g - 1.5, z, a: L.angle, hw: alongX ? 2 * len / steps / 2 + 0.02 : 1.6, hd: alongX ? 1.6 : 2 * len / steps / 2 + 0.02, h: yt - g + 1.5, mat: MAT.CONCRETE, col: [0.3, 0.29, 0.27] });
+      if (k % 8 === 4) {
+        const [px, pz] = Builder.tw(L.x, L.z, L.angle, alongX ? u : sgn * (off + 1.5), alongX ? sgn * (off + 1.5) : u);
+        B.prop({ x: px, y0: yt, z: pz, hw: 0.06, h: 3, kind: 2, prm: 8, mat: MAT.METAL, col: [0.2, 0.2, 0.22] });
+        B.prop({ x: px, y0: yt + 3, z: pz, hw: 0.18, h: 0.3, kind: 2, prm: 8, mat: MAT.EMIT, col: [1, 0.72, 0.4], param: 4, flags: FLAG.BOTTOM });
+      }
+    }
+  }
+  B.hillPods.push({ L, top, minTop });
+  return { top, minTop };
+}
+
+// Elevated pedestrian walkways between facing hillside podiums across a road.
+export function walkways(B, R) {
+  const pods = B.hillPods;
+  const cell = new Map();
+  const key = (x, z) => Math.floor(x / 50) * 7919 + Math.floor(z / 50);
+  pods.forEach((p, i) => { const k = key(p.L.x, p.L.z); if (!cell.has(k)) cell.set(k, []); cell.get(k).push(i); });
+  let n = 0;
+  for (let i = 0; i < pods.length; i++) {
+    const A = pods[i], LA = A.L;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const list = cell.get(key(LA.x + dx * 50, LA.z + dz * 50));
+      if (!list) continue;
+      for (const j of list) {
+        if (j <= i || R() > 0.22) continue;
+        const LB = pods[j].L;
+        if (LB.district !== LA.district) continue;
+        const c = Math.cos(LA.angle), s = Math.sin(LA.angle);
+        const ox = LB.x - LA.x, oz = LB.z - LA.z;
+        const lx = ox * c + oz * s, lz = -ox * s + oz * c;
+        const alongX = Math.abs(lx) > Math.abs(lz);
+        if (Math.abs(alongX ? lz : lx) > 4) continue;
+        const gap = Math.abs(alongX ? lx : lz) - (alongX ? (LA.w + LB.w) / 2 : (LA.d + LB.d) / 2);
+        if (gap < 9 || gap > 24) continue;    // across a road, not across an alley
+        const y = Math.min(A.minTop, pods[j].minTop) - 0.3;
+        if (y - Math.max(LA.gMax, LB.gMax) < 6) continue;
+        const mx = LA.x + ox / 2, mz = LA.z + oz / 2;
+        const ang = Math.atan2(oz, ox);
+        const half = Math.hypot(ox, oz) / 2;
+        B.part({ x: mx, y0: y - 0.8, z: mz, a: ang, hw: half, hd: 1.6, h: 0.8, mat: MAT.CONCRETE, col: [0.28, 0.28, 0.3], flags: FLAG.BOTTOM, solid: true });
+        for (const side of [-1, 1]) {
+          const [rx, rz] = Builder.tw(mx, mz, ang, 0, side * 1.55);
+          B.part({ x: rx, y0: y, z: rz, a: ang, hw: half, hd: 0.05, h: 1.05, mat: MAT.METAL, col: [0.25, 0.25, 0.27] });
+          B.prop({ x: rx, y0: y + 1.0, z: rz, a: ang, hw: half, hd: 0.07, h: 0.08, mat: MAT.EMIT, col: [0.4, 0.9, 1], param: 3, flags: FLAG.BOTTOM });
+        }
+        B.part({ x: mx, y0: y - 0.85, z: mz, a: ang, hw: half, hd: 1.0, h: 0.06, mat: MAT.EMIT, col: [1, 0.75, 0.45], param: 2, flags: FLAG.BOTTOM });
+        n++;
+      }
+    }
+  }
+  return n;
 }
 
 // Shop spill light at a street face.

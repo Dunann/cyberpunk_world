@@ -335,12 +335,18 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
     let inArch = select(1.0, 1.0 - smoothstep(rm - fw.x, rm + fw.x, length(vec2f(pxm, pym - cyc))), pym > cyc);
     mask *= mix(1.0, inArch, det);
   }
-  // lit state: offices light whole bays, homes per window
+  // lit state: offices light whole floors / bays; homes light whole apartments (2-3 windows) with
+  // per-floor activity so lit and dark storeys read as coherent bands instead of noise
   var lid = id;
   var lf = litFrac;
-  // offices: whole floors tend to be on or off
   let floorOn = step(hash21(vec2f(id.y + f32(fid) * 0.0, seed * 1.31 + 5.0)), litFrac * 1.1);
   if (mode == 1u) { lid = vec2f(floor(id.x / 3.0), id.y); lf = mix(0.05, 0.85, floorOn); }
+  if (mode == 0u) {
+    let uw = 2.0 + floor(hs * 1.99);
+    lid = vec2f(floor(id.x / uw), id.y);
+    let fa = hash21(vec2f(id.y * 0.37, seed + 9.0));
+    lf = clamp(litFrac * (0.3 + 1.4 * fa), 0.03, 0.95);
+  }
   let L0 = winLit(lid, seed, lf);
   let offC = mix(vec3f(0.8, 0.9, 1.0), vec3f(1.0, 0.84, 0.62), step(0.62, fract(seed * 0.37 + lid.y * 0.0137)));
   let warmOnly = style == 2u || style == 3u || style == 4u;
@@ -349,12 +355,31 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   if (det > 0.01 && L.a > 0.5 && mask > 0.0 && F.params.w > 0.5) {
     let fr = vec2f((f.x - x0) / ww, (f.y - y0) / wh);
     room = interior(fr, vt, vec3f(cw * ww * scale, floorH * wh, select(4.5, 8.0, mode == 1u)), hash21(id + seed), mode);
-    // curtains on some homes
-    let hc = hash21(id * 1.3 + seed * 3.0);
-    if (mode == 0u && hc < 0.45) {
-      let cl = select(0.32, 0.5, hc < 0.12);
-      let cur = 1.0 - pulse(cl, 1.0 - cl, fr.x, fwc.x / ww);
-      room = mix(room, hsv(fract(hc * 7.0), 0.3, 0.7), cur * 0.9);
+    if (mode == 0u) {
+      // per-apartment furnishing: curtains (muted fabric palette), blinds or a TV glow
+      let hc = hash21(lid * 1.3 + seed * 3.0);
+      var fabric = array<vec3f, 5>(vec3f(0.85, 0.74, 0.58), vec3f(0.7, 0.58, 0.42), vec3f(0.62, 0.28, 0.22), vec3f(0.46, 0.46, 0.32), vec3f(0.38, 0.42, 0.52));
+      let fc = fabric[u32(fract(hc * 11.0) * 4.99)];
+      if (hc < 0.42) {
+        let cl = select(0.3, 0.5, hc < 0.12);
+        let cur = 1.0 - pulse(cl, 1.0 - cl, fr.x, fwc.x / ww);
+        room = mix(room, fc * (0.6 + 0.25 * sin(fr.x * 60.0)), cur * 0.92);
+      } else if (hc < 0.6) {
+        let slat = step(0.45, fract(fr.y * 14.0));
+        room = mix(room, room * 0.25 + fc * 0.25, slat * mix(1.0, 0.4, step(0.55, fr.y)));
+      } else if (hc > 0.95) {
+        room = mix(room, vec3f(0.35, 0.45, 1.0) * (0.6 + 0.4 * sin(time() * 9.0 + hc * 40.0)), 0.55);
+      }
+    }
+  }
+  // security cages on low floors (Chongqing/HK style) and on some upper flats
+  if (mode == 0u && det > 0.01) {
+    let pc = select(0.12, 0.6, id.y < 6.0);
+    if (hash21(lid + vec2f(77.0, seed)) < pc) {
+      let fr2 = vec2f((f.x - x0) / ww, (f.y - y0) / wh);
+      let bars = max(1.0 - pulse(0.1, 0.9, fract(fr2.x * 6.0), fwc.x * 6.0 / ww), 1.0 - pulse(0.08, 0.92, fract(fr2.y * 4.0), fwc.y * 4.0 / wh));
+      let inWin = pulse(-0.06, 1.06, fr2.x, fwc.x / ww) * pulse(-0.06, 1.06, fr2.y, fwc.y / wh);
+      G.g.z = bars * inWin * det;
     }
   }
   let nearE = room * L.rgb * L.a * mask * inten;
@@ -368,8 +393,34 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   G.e = mix(farE, nearE, det);
   G.cov = mix(ww * wh, mask, det);
   G.det = det; G.f = f; G.id = id; G.cw = cw;
-  G.g = vec3f(L.a, mask, 0.0);
+  G.g = vec3f(L.a, mask, G.g.z);
   return G;
+}
+
+// Procedural "reflected city" for glass: a skyline band of reflected towers (lit window dots, a few neon strips)
+// below a height-dependent horizon, street glow further down. R = reflection vector, blur = its screen derivative.
+fn cityRefl(R: vec3f, wpy: f32, blur: f32) -> vec3f {
+  let az = atan2(R.x, R.z) / TAU + 0.5;   // 0..1 around
+  let el = R.y;
+  let hz = clamp(0.22 - wpy * 0.00045, -0.08, 0.22);
+  let colI = floor(az * 360.0);
+  let hb = hash11u(u32(colI) + 1000u);
+  let top = hz * (0.25 + 1.3 * hb) - 0.01;
+  let soft = 0.006 + blur * 2.0;
+  let inB = 1.0 - smoothstep(top - soft, top + soft, el);
+  let detail = 1.0 - smoothstep(0.004, 0.02, blur);
+  let wu = fract(az * 360.0 * 7.0); let wv = fract(el * 160.0);
+  let win = pulse(0.3, 0.75, wu, blur * 2520.0) * pulse(0.35, 0.8, wv, blur * 160.0);
+  let litw = step(0.55, hash21(vec2f(floor(az * 2520.0), floor(el * 160.0) + 50.0)));
+  let wcol = mix(vec3f(1.0, 0.66, 0.36), vec3f(0.7, 0.85, 1.0), step(0.6, hb));
+  var c = mix(wcol * 0.16, wcol * win * litw * 0.9, detail) * inB;
+  // neon strips on some reflected towers
+  let ns = hash11u(u32(floor(az * 150.0)) + 500u);
+  let strip = pulse(0.42, 0.58, fract(az * 150.0), blur * 150.0 + 0.02);
+  c += hsv(fract(ns * 7.31), 0.8, 1.0) * step(0.78, ns) * strip * inB * 1.4;
+  // street glow far below
+  c += vec3f(0.55, 0.28, 0.32) * smoothstep(-0.1, -0.45, el) * 0.35;
+  return c;
 }
 
 fn ledColor(wp: vec3f, seedB: f32, hf: f32) -> vec3f {
@@ -449,6 +500,8 @@ fn carpet(p: vec2f) -> vec3f {
   let col = P.f.rgb;
   let prm = P.f.w;
   let vt = tangentView(n, V);
+  let Rv = reflect(-V, n);
+  let dR = length(fwidth(Rv));
 
   var S: Surf;
   S.alb = col; S.rough = 0.8; S.metal = 0.0; S.emis = vec3f(0.0); S.mid = 0.0; S.wet = 0.6; S.n = n; S.ao = 1.0;
@@ -492,16 +545,36 @@ fn carpet(p: vec2f) -> vec3f {
       // floor slab lines and balconies
       let slab = pulse(0.0, 0.07, G.f.y, fw.y / floorH) * G.det;
       S.alb = mix(S.alb, S.alb * 0.6, slab);
+      var laundry = 0.0;
+      var lcol = vec3f(0.0);
+      var bal = 0.0;
       if ((flags & 1024u) != 0u) {
-        let bal = step(0.5, fract(G.id.x * 0.5 + 0.25 * hash11u(u32(seed))));
+        bal = step(0.5, fract(G.id.x * 0.5 + 0.25 * hash11u(u32(seed))));
         let rail = pulse(0.0, 0.33, G.f.y, fw.y / floorH) * bal * G.det;
-        S.alb = mix(S.alb, vec3f(0.35, 0.36, 0.38), rail * 0.8);
+        // railing balusters
+        let balu = pulse(0.0, 0.25, fract(G.f.x * 14.0), fw.x * 14.0 / G.cw) * pulse(0.04, 0.3, G.f.y, fw.y / floorH);
+        S.alb = mix(S.alb, vec3f(0.35, 0.36, 0.38), rail * mix(0.55, 0.9, balu));
         S.ao *= 1.0 - 0.3 * bal * G.det;
+        // laundry hanging in some balconies
+        let hl = hash21(G.id + vec2f(seed, 31.0));
+        if (bal > 0.5 && hl < 0.38 && G.det > 0.01) {
+          let gx = fract(G.f.x * 5.0 + hl * 3.0);
+          laundry = step(0.36, G.f.y) * step(G.f.y, 0.36 + 0.14 + 0.12 * fract(hl * 17.0 + floor(G.f.x * 5.0) * 0.3)) * step(gx, 0.62) * G.det;
+          lcol = hsv(fract(hl * 13.0 + floor(G.f.x * 5.0) * 0.27), 0.45, 0.75);
+        }
       }
       S.alb = mix(S.alb, vec3f(0.02, 0.025, 0.03), G.cov);
-      S.emis = G.e * (1.0 - select(0.0, pulse(0.0, 0.33, G.f.y, fw.y / floorH) * 0.85, (flags & 1024u) != 0u));
+      S.emis = G.e * (1.0 - select(0.0, pulse(0.0, 0.33, G.f.y, fw.y / floorH) * 0.85, bal > 0.5));
       S.rough = mix(S.rough, 0.1, G.cov);
       if (G.cov > 0.5 && G.det > 0.5 && G.g.x < 0.5) { S.mid = 2.0; }
+      // security cage bars and laundry over the window
+      S.alb = mix(S.alb, vec3f(0.1, 0.1, 0.11), G.g.z);
+      S.emis *= 1.0 - 0.85 * G.g.z;
+      if (G.g.z > 0.5) { S.mid = 0.0; S.metal = 0.5; S.rough = 0.45; }
+      S.alb = mix(S.alb, lcol, laundry);
+      S.emis = mix(S.emis, lcol * G.e * 0.6 + lcol * 0.02, laundry);
+      // far facades: darker walls so the averaged window light carries the read
+      S.alb *= mix(0.5, 1.0, G.det);
     }
   } else if (mat == 3u || mat == 16u || mat == 18u) {
     // ---------------- glass curtain wall
@@ -514,6 +587,12 @@ fn carpet(p: vec2f) -> vec3f {
     S.rough = mix(S.rough, 0.35, frame);
     S.emis = G.e * (1.0 - frame);
     if (frame > 0.5) { S.mid = 0.0; }
+    // glossy reflection of the surrounding city (fresnel weighted, weaker on lit office glass and frames)
+    let NdV = saturate(dot(n, V));
+    let fres = 0.06 + 0.94 * pow(1.0 - NdV, 4.0);
+    let refl = cityRefl(Rv, wp.y, dR) * fres * (1.0 - frame * 0.7) * (1.0 - 0.6 * G.g.x * G.det);
+    S.emis += refl * 0.9;
+    S.ao = mix(0.55, 0.9, fres);
     if (mat == 16u) {
       // diagonal truss lattice
       let L = max(fl, 10.0);
@@ -686,7 +765,10 @@ fn carpet(p: vec2f) -> vec3f {
     let wood = col * (0.7 + 0.3 * vnoise2(vec2f(fd * 3.0, wp.y * 0.3)));
     S.alb = mix(wood, vec3f(0.1, 0.06, 0.02), G.cov);
     let gold = vec3f(1.0, 0.62, 0.22);
-    S.emis = mix(gold * prm * 0.4, gold * prm * (0.12 + 0.88 * G.g.x) * lat, G.det) * G.cov;
+    // lit rooms behind the lattice (parallax interiors), each window a slightly different warmth
+    let wv = 0.75 + 0.5 * hash21(G.id + vec2f(seed, 3.0));
+    let behind = G.e * vec3f(1.0, 0.78, 0.5) * 1.6 + gold * 0.1 * G.g.x;
+    S.emis = mix(gold * prm * 0.4 * G.cov, behind * mix(0.35, 1.0, lat) * wv, G.det);
     // beam lines glow
     S.emis += gold * 0.9 * pulse(0.0, 0.05, G.f.y, fw.y / floorH) * G.det;
     S.rough = 0.6;
@@ -734,7 +816,9 @@ fn carpet(p: vec2f) -> vec3f {
     let slat = mix(0.6, sl, 1.0 - smoothstep(0.15, 0.4, fw.x / 1.4));
     let pulseK = 0.85 + 0.15 * sin(time() * 0.7 + seed);
     S.alb = col * 0.2; S.rough = 0.2;
-    S.emis = col * prm * (0.35 + 0.65 * hf) * (0.25 + 0.75 * slat) * pulseK;
+    // up-lighting: bright at the foot of each crown tier, fading upward, with a hot rim at the base
+    let up = 0.25 + 1.1 * exp(-hf * 3.2) + 1.2 * (1.0 - smoothstep(0.0, 0.05, hf));
+    S.emis = col * prm * up * 0.55 * (0.2 + 0.8 * slat) * pulseK;
   } else if (mat == 15u) {
     S.alb = vec3f(0.2); S.metal = 0.6; S.rough = 0.4;
     S.emis = vec3f(1.0, 0.85, 0.3) * 2.0 * pulse(0.0, 0.3, fract(fd / 2.0), fw.x / 2.0);
