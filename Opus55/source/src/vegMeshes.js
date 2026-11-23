@@ -193,13 +193,18 @@ function willow(lod) {
     M.tube([0.4, 4.6, 0.2], [2.4, 7.5, 0.8], 0.18, 0.08, 4, 0, sw(4.6), sw(7.5));
     M.tube([0.4, 4.8, 0.2], [-1.6, 7.8, -1.2], 0.18, 0.08, 4, 0, sw(4.8), sw(7.8));
   }
-  // crown: a dome with a clear outline, then a curtain of thin hanging strands
-  M.blob([0.2, 7.9, 0], 2.9, 1.5, 2.9, lod ? 1 : 2, R, 1, sw, 0.18);
-  M.crown(cc, [2.9, 1.6, 2.9], lod ? 5 : 12, 1.1, R, sw);
-  const n = lod ? 46 : 150;
-  for (let k = 0; k < n; k++) {
-    const a = (k / n) * Math.PI * 2 * 3.0 + R() * 0.4, r = 1.0 + Math.sqrt(R()) * 2.2;
-    M.strand([Math.cos(a) * r, 8.4 - r * 0.45 + R() * 0.4, Math.sin(a) * r], 3.8 + R() * 3.2 + (r - 1) * 0.6, lod ? 0.075 : 0.04, sw, lod ? 3 : 6);
+  // crown: a few small leafy lumps at the branch tips (not one dome), then the strands hang in separate
+  // curtains from the branches, with open gaps between them so the tree reads as a weeping willow
+  const tips = [[1.8, 8.0, 0.7], [-1.4, 8.2, -1.0], [0.3, 8.6, 1.6], [-0.6, 8.3, 1.2], [1.0, 8.4, -1.5]];
+  for (const t of tips) M.blob(t, 1.2, 0.7, 1.2, lod ? 0 : 1, R, 1, sw, 0.25);
+  M.crown(cc, [2.6, 1.3, 2.6], lod ? 4 : 8, 0.9, R, sw);
+  const clumps = lod ? 7 : 9, per = lod ? 6 : 12;
+  for (let c = 0; c < clumps; c++) {
+    const ac = (c / clumps) * Math.PI * 2 + R() * 0.3, rc = 1.6 + R() * 1.4;
+    for (let k = 0; k < per; k++) {
+      const a = ac + (R() - 0.5) * 0.35, r = rc + (R() - 0.5) * 0.7;
+      M.strand([Math.cos(a) * r, 8.3 - r * 0.4 + R() * 0.4, Math.sin(a) * r], 3.6 + R() * 3.4 + (r - 1) * 0.5, lod ? 0.07 : 0.04, sw, lod ? 3 : 6);
+    }
   }
   return M;
 }

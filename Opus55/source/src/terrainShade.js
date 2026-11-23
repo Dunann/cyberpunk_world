@@ -41,14 +41,18 @@ export const MIST_WGSL = /* wgsl */ `
 const MIST_O = vec2f(700.0, 4560.0);
 const MIST_D = vec2f(0.188, 0.9822);
 fn valleyMist(p: vec3f, dist: f32, nse: f32) -> f32 {
+  if (dist < 200.0) { return 0.0; }
+  // thin mist on the lower slopes of the hills around West Lake
+  let lk = length((p.xz - vec2f(-1990.0, 2330.0)) * vec2f(1.0, 1.2));
+  let lake = (1.0 - smoothstep(1100.0, 1800.0, lk)) * (1.0 - smoothstep(4.0, 40.0 + nse * 30.0, p.y)) * smoothstep(250.0, 700.0, dist) * 0.45;
   let q = p.xz - MIST_O;
   let s = dot(q, MIST_D);
-  if (s < -300.0 || dist < 200.0) { return 0.0; }
+  if (s < -300.0) { return lake; }
   let c = abs(dot(q, vec2f(MIST_D.y, -MIST_D.x)));
   // the valley floor climbs about 75 m per km; the mist top follows it, with soft billows
   let top = 120.0 + 0.08 * max(s, 0.0) + (nse - 0.5) * 70.0;
   let m = 1.0 - smoothstep(top - 110.0, top, p.y);
-  return m * smoothstep(-300.0, 500.0, s) * smoothstep(200.0, 900.0, dist) * (1.0 - smoothstep(4000.0, 6500.0, c)) * 0.88;
+  return max(lake, m * smoothstep(-300.0, 500.0, s) * smoothstep(200.0, 900.0, dist) * (1.0 - smoothstep(4000.0, 6500.0, c)) * 0.88);
 }
 fn mistColor(dir: vec3f) -> vec3f {
   return skyHorizon(normalize(vec3f(dir.x, 0.02, dir.z))) * 1.35 + SKY_MOON_COL * F.moon.w * 0.01;
@@ -271,7 +275,7 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     n = normalize(n + vec3f(dn.x, 0.0, dn.y));
     let tint = mix(vec3f(0.85, 1.0, 0.78), vec3f(1.2, 1.08, 0.72), C.a);
     let crowns = tint * (0.35 + 0.95 * C.b);
-    let floorC = vec3f(0.32, 0.4, 0.27) * (0.75 + 0.5 * N1.g);
+    let floorC = vec3f(0.17, 0.23, 0.14) * (0.75 + 0.5 * N1.g);
     albedo *= mix(vec3f(1.0), mix(floorC, crowns, domeK), forest);
     ao *= mix(1.0, mix(0.7, 0.45 + 0.55 * C.b, domeK), forest);
     rough = mix(rough, mix(0.92, 0.72, domeK), forest);
@@ -482,7 +486,8 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   let crest = smoothstep(0.6, 0.7, Nt.b) * saturate(dot(n, F.moon.xyz) * 1.5) * smoothstep(800.0, 3500.0, dist) * (1.0 - wN * urbanAll);
   emis += vec3f(0.55, 0.62, 0.85) * F.moon.w * crest * 0.045;
   // silver skyline: crests seen at grazing angles catch the moonlit sky behind them
-  let skyl = pow(1.0 - saturate(dot(nPre, v)), 5.0) * smoothstep(0.35, 0.7, nPre.y) * smoothstep(500.0, 2500.0, dist) * (1.0 - urbanAll);
+  // (only out in the southern mountains: seen from the city the many small crests read as contour stripes)
+  let skyl = pow(1.0 - saturate(dot(nPre, v)), 5.0) * smoothstep(0.35, 0.7, nPre.y) * smoothstep(500.0, 2500.0, dist) * (1.0 - urbanAll) * smoothstep(3600.0, 4600.0, F.camPos.z);
   emis += SKY_MOON_COL * F.moon.w * skyl * 0.07;
 
   // far natural slopes are dark masses (lit only by the faint moon), so the ranges read as layered silhouettes

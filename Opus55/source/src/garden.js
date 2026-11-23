@@ -12,7 +12,7 @@ import { GardenMesh, PAT, STRIDE, V3 } from './gardenMesh.js';
 import { CAUSEWAYS, ISLANDS, BRIDGE_GAP, CAUSEWAY_TOP, lakeToWorld } from './terrainLand.js';
 import { LANDMARKS } from './world.js';
 import { rng } from './math.js';
-import { lookoutTower, lakesideVignette, cragLookout, riverbankLife, hillsideLife } from './gardenViews.js';
+import { lookoutTower, lakesideVignette, cragLookout, riverbankLife, distantLights, hillsideLife } from './gardenViews.js';
 
 const C = {
   plaster: [0.58, 0.56, 0.52], tile: [0.03, 0.032, 0.036], wood: [0.17, 0.035, 0.022], dwood: [0.06, 0.035, 0.025],
@@ -52,9 +52,12 @@ fn blk(u: vec2f, size: vec2f) -> vec2f {
   let pat = i.pe.x; let em = i.pe.y;
   var albedo = i.col; var rough = 0.6; var emis = vec3f(0.0); var wet = 0.7; var mat = 0.0; var metal = 0.0;
   let uv = i.uv;
-  if (pat == 1.0) {          // plaster: soft mottling, rain grime toward the base
+  if (pat == 1.0) {          // plaster: soft mottling, rain grime toward the base, streaks below the coping
     albedo *= 0.82 + 0.25 * N.r;
     albedo *= mix(0.55, 1.0, smoothstep(0.0, 1.2, uv.y));
+    let sx = uv.x * 2.2;
+    let streak = smoothstep(0.55, 0.95, hash21(vec2f(floor(sx), 7.0))) * (1.0 - smoothstep(0.15, 0.5, abs(fract(sx) - 0.5)));
+    albedo *= 1.0 - 0.35 * streak * smoothstep(0.3, 2.5, uv.y) * (0.6 + 0.4 * N.g);
     rough = 0.85; wet = 0.5;
   } else if (pat == 2.0) {   // grey roof tiles: rolls of tiles down the slope, broken into overlapping courses
     let r = fract(uv.x * 3.2);
@@ -124,7 +127,7 @@ fn blk(u: vec2f, size: vec2f) -> vec2f {
     if (dot(n, F.camPos.xyz - i.wp) < 0.0) { n = -n; }
     let vein = smoothstep(0.92, 1.0, abs(sin(uv.x * 9.0 + abs(uv.y) * 4.0))) * 0.25 + smoothstep(0.04, 0.0, abs(uv.y)) * 0.35;
     albedo *= (0.8 + 0.3 * N.g) * (1.0 + vein);
-    rough = 0.55; wet = 0.7; mat = 1.0;
+    rough = 0.8; wet = 0.3; mat = 1.0;
   } else {
     albedo *= 0.9 + 0.2 * N.g;
     emis = i.col * em;
@@ -307,6 +310,7 @@ export default {
     M.begin(); lakesideVignette(env);
     M.begin(); this.valleyGlows = cragLookout(env);
     this.bankLife = riverbankLife(env, world);
+    M.begin(); this.distantGlows = distantLights(env);
     this.hamlets = hillsideLife(env, world);
     M.begin();
 
