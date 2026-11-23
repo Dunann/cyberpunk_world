@@ -142,9 +142,9 @@ fn fogT(p: vec3f, dist: f32) -> f32 {
   var corners = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = corners[vi % 6u];
   // per type: half span, lamp radius, min pixel radius
-  var span = 2.4; var r = 0.22; var pxMin = 1.0;
-  if (ty > 0.5 && ty < 1.5) { span = 0.5; r = 0.12; pxMin = 0.8; }
-  if (ty > 1.5 && ty < 2.5) { span = 1.3; r = 0.3; pxMin = 1.2; }
+  var span = 2.4; var r = 0.3; var pxMin = 1.5;
+  if (ty > 0.5 && ty < 1.5) { span = 0.5; r = 0.15; pxMin = 1.1; }
+  if (ty > 1.5 && ty < 2.5) { span = 1.3; r = 0.35; pxMin = 1.5; }
   if (ty > 2.5 && ty < 3.5) { span = 18.0; r = 0.9; pxMin = 1.3; }
   if (ty > 3.5) { span = 1.6; r = 0.3; pxMin = 1.1; }
   let u = cross(st.f, st.l);
@@ -158,7 +158,7 @@ fn fogT(p: vec3f, dist: f32) -> f32 {
   else {
     // special lamp: taxi underglow, police beacon, airliner/heli red beacon
     pos -= u * 0.5;
-    if (ty < 0.5) { col = select(vec3f(0.1, 0.9, 1.0), vec3f(1.0, 0.15, 0.6), seed > 0.5) * 5.0; }
+    if (ty < 0.5) { col = select(vec3f(0.1, 0.9, 1.0), vec3f(1.0, 0.15, 0.6), seed > 0.5) * 12.0; }
     else if (ty < 1.5) { col = vec3f(1.0, 0.9, 0.7) * 3.0; }
     else if (ty < 2.5) { col = vec3f(0.0); }
     else { col = vec3f(1.0, 0.05, 0.02) * 22.0 * smoothstep(0.6, 1.0, sin(t * 6.0 + seed * 9.0)); pos += u * 2.0; }
@@ -175,7 +175,7 @@ fn fogT(p: vec3f, dist: f32) -> f32 {
   let dist = length(toCam);
   let px = dist * 2.0 * F.camRight.w * F.res.w;
   let rr = max(r, pxMin * px);
-  col *= pow(r / rr, 1.4);
+  col *= pow(r / rr, 1.2);
   if (dot(col, col) < 1e-6) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
   col *= fogT(pos, dist);
   let p = pos + (toCam / dist) * 0.5 + (F.camRight.xyz * c.x + F.camUp.xyz * c.y) * rr * 1.7;
@@ -335,7 +335,7 @@ export class Air {
     for (const A of AIRLINERS) paths.push([A[0], A[1], A[2], A[3], A[4], 0, Math.hypot(A[2] - A[0], A[3] - A[1]), 0]);
     this.paths = paths;
     const mesh = [], other = [];
-    const nTaxi = [90, 150, 220][q], nDrone = [160, 260, 380][q];
+    const nTaxi = [120, 200, 320][q], nDrone = [160, 260, 380][q];
     for (let i = 0; i < nTaxi; i++) {
       const onCircle = rnd() < 0.3;
       const p = onCircle ? circ.taxi[(rnd() * circ.taxi.length) | 0] : (rnd() * LANES.length) | 0;

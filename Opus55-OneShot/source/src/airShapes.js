@@ -75,15 +75,15 @@ function lotus(N, R, open) {
 // Galloping horse: rigid parts sampled once in part-local coordinates, then posed per frame.
 function horseFrames(N, R, frames) {
   const parts = [
-    { name: 'torso', type: 'ell', a: 38, b: 15, w: 0.34 },
+    { name: 'torso', type: 'ell', a: 35, b: 13, w: 0.3 },
     { name: 'neck', type: 'cap', len: 34, r: 8, w: 0.12 },
     { name: 'head', type: 'cap', len: 22, r: 6, w: 0.07 },
     { name: 'tail', type: 'cap', len: 34, r: 4, w: 0.07 },
     { name: 'mane', type: 'cap', len: 30, r: 3, w: 0.06 },
-    { name: 'flu', type: 'cap', len: 22, r: 4.2, w: 0.045 }, { name: 'fll', type: 'cap', len: 24, r: 2.8, w: 0.045 },
-    { name: 'fru', type: 'cap', len: 22, r: 4.2, w: 0.045 }, { name: 'frl', type: 'cap', len: 24, r: 2.8, w: 0.045 },
-    { name: 'blu', type: 'cap', len: 24, r: 5, w: 0.045 }, { name: 'bll', type: 'cap', len: 24, r: 2.8, w: 0.045 },
-    { name: 'bru', type: 'cap', len: 24, r: 5, w: 0.045 }, { name: 'brl', type: 'cap', len: 24, r: 2.8, w: 0.045 },
+    { name: 'flu', type: 'cap', len: 25, r: 4.0, w: 0.05 }, { name: 'fll', type: 'cap', len: 28, r: 2.6, w: 0.05 },
+    { name: 'fru', type: 'cap', len: 25, r: 4.0, w: 0.05 }, { name: 'frl', type: 'cap', len: 28, r: 2.6, w: 0.05 },
+    { name: 'blu', type: 'cap', len: 26, r: 5, w: 0.05 }, { name: 'bll', type: 'cap', len: 28, r: 2.6, w: 0.05 },
+    { name: 'bru', type: 'cap', len: 26, r: 5, w: 0.05 }, { name: 'brl', type: 'cap', len: 28, r: 2.6, w: 0.05 },
   ];
   const tot = parts.reduce((s, p) => s + p.w, 0);
   const pts = [];
@@ -114,7 +114,7 @@ function horseFrames(N, R, frames) {
     T.tail = [tailBase[0], tailBase[1], Math.PI + 0.55 + Math.sin(ph * 2) * 0.18];
     const leg = (name, hip, a1, a2) => {
       T[name + 'u'] = [hip[0], hip[1], -Math.PI / 2 + a1];
-      const knee = [hip[0] + Math.cos(-Math.PI / 2 + a1) * 22, hip[1] + Math.sin(-Math.PI / 2 + a1) * 22];
+      const knee = [hip[0] + Math.cos(-Math.PI / 2 + a1) * 25, hip[1] + Math.sin(-Math.PI / 2 + a1) * 25];
       T[name + 'l'] = [knee[0], knee[1], -Math.PI / 2 + a1 + a2];
     };
     // transverse gallop: front pair and hind pair swing in opposition with a small left/right lag
@@ -128,8 +128,8 @@ function horseFrames(N, R, frames) {
       const [x, y] = rot(p.x, p.y, t[2]);
       const u = x + t[0], v = y + t[1];
       const mane = p.part === 'mane' || p.part === 'tail';
-      const c = mane ? hsv(0.55 + 0.1 * Math.sin(p.x * 0.2), 0.7, 1) : [1.0, 0.92, 0.8];
-      return [u * 1.15 + 10, v * 1.15 - 5, p.z, 0, c[0], c[1], c[2], 0];
+      const c = mane ? hsv(0.55 + 0.1 * Math.sin(p.x * 0.2), 0.75, 0.9) : hsv(0.1 - 0.03 * (p.y / 15), 0.45, 0.62);
+      return [u * 1.15 + 5, v * 1.15 + 5, p.z, 0, c[0], c[1], c[2], 0];
     });
     // keep identical point order for all frames (no shuffle): pad manually
     const arr = new Float32Array(N * 8);
@@ -144,8 +144,8 @@ function horseFrames(N, R, frames) {
 
 function dragon(N, R) {
   const list = [];
-  const nBody = Math.floor(N * 0.62), nHead = Math.floor(N * 0.12), nLegs = Math.floor(N * 0.1), nSpike = Math.floor(N * 0.08);
-  const nWh = N - nBody - nHead - nLegs - nSpike;
+  const nBody = Math.floor(N * 0.56), nHead = Math.floor(N * 0.12), nLegs = Math.floor(N * 0.1), nSpike = Math.floor(N * 0.07), nPearl = Math.floor(N * 0.06);
+  const nWh = N - nBody - nHead - nLegs - nSpike - nPearl;
   const rad = (p) => 9 * (0.25 + 0.75 * Math.sin(Math.PI * Math.min(Math.pow(p, 0.75), 1) * 0.92 + 0.08));
   for (let i = 0; i < nBody; i++) {
     const p = Math.pow(R(), 0.9);
@@ -169,14 +169,29 @@ function dragon(N, R) {
   for (let i = 0; i < nLegs; i++) {
     const li = i % 4, s = R();
     const side = li % 2 ? 1 : -1;
-    const o = [s * 6 - 3 + (s > 0.85 ? (R() - 0.5) * 8 : 0), -rad(legP[li]) - s * 18, side * (6 + s * 6)];
-    list.push([o[0], o[1], o[2], 1, 1.0, 0.6, 0.12, legP[li]]);
+    if (s > 0.8) {
+      // three-toed claw
+      const toe = ((R() * 3) | 0) - 1, l = R();
+      const o = [3 + toe * 2.5 + l * 5, -rad(legP[li]) - 18 - l * 3, side * (12 + toe * 2)];
+      list.push([o[0], o[1], o[2], 1, 1.0, 0.85, 0.4, legP[li]]);
+    } else {
+      const o = [s * 6 - 3, -rad(legP[li]) - s * 22, side * (6 + s * 7)];
+      list.push([o[0], o[1], o[2], 1, 1.0, 0.6, 0.12, legP[li]]);
+    }
   }
   for (let i = 0; i < nSpike; i++) {
     const p = 0.05 + R() * 0.85;
     const s = R();
     const cyc = (p * 40) % 1;
     list.push([-cyc * 3, rad(p) + s * 6 * (1 - cyc), 0, 1, 1.0, 0.15, 0.1, p]);
+  }
+  for (let i = 0; i < nPearl; i++) {
+    // the flaming pearl the dragon chases
+    const z = R() * 2 - 1, a = R() * Math.PI * 2, r = 7 * Math.cbrt(R()), sq = Math.sqrt(1 - z * z);
+    const flame = R() < 0.3;
+    const fr = flame ? 7 + R() * 6 : r;
+    const c = flame ? [1.0, 0.35 + R() * 0.3, 0.05] : [1.0, 0.95, 0.75];
+    list.push([62 + Math.cos(a) * sq * fr, 6 + z * fr + (flame ? Math.abs(z) * 4 : 0), Math.sin(a) * sq * fr, 1, c[0], c[1], c[2], 1.0]);
   }
   for (let i = 0; i < nWh; i++) {
     const s = R(), side = R() < 0.5 ? -1 : 1;
@@ -187,7 +202,7 @@ function dragon(N, R) {
 
 function moonWaves(N, R) {
   const list = [];
-  const nMoon = Math.floor(N * 0.3), nStar = Math.floor(N * 0.07), nWave = N - nMoon - nStar;
+  const nMoon = Math.floor(N * 0.32), nStar = Math.floor(N * 0.025), nWave = N - nMoon - nStar;
   while (list.length < nMoon) {
     const u = (R() * 2 - 1) * 46, v = (R() * 2 - 1) * 46;
     if (u * u + v * v > 46 * 46) continue;
@@ -195,7 +210,7 @@ function moonWaves(N, R) {
     if (du * du + dv * dv < 40 * 40) continue;
     list.push([u + 40, v + 38, (R() - 0.5) * 4, 0, 1.0, 0.9, 0.62, 0]);
   }
-  for (let i = 0; i < nStar; i++) list.push([(R() * 2 - 1) * 140, 30 + R() * 50, (R() - 0.5) * 30, 4, 0.85, 0.9, 1.0, R() * 6.28]);
+  for (let i = 0; i < nStar; i++) { const u = (R() * 2 - 1) * 150, v = 20 + R() * 75; if (Math.hypot(u - 40, v - 38) < 55) { i--; continue; } list.push([u, v, (R() - 0.5) * 30, 4, 0.85, 0.9, 1.0, R() * 6.28]); }
   for (let i = 0; i < nWave; i++) {
     const row = (R() * 5) | 0;
     const u = (R() * 2 - 1) * 135;

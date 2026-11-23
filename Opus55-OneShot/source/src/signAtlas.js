@@ -82,7 +82,7 @@ export function buildSignAtlas(device) {
 
   const S = 72;
   BIG_WORDS.forEach((t, i) => { addH(t, CJK_FONTS[i % 2], 104); addV(t, CJK_FONTS[i % 2], 104); });
-  STATION_WORDS.forEach((t) => addH(t, CJK_FONTS[0], 80));
+  STATION_WORDS.forEach((t) => { addH(t, CJK_FONTS[0], 80); if ([...t].length > 1) addV(t, CJK_FONTS[0], 80); });
   LATIN_WORDS.forEach((t, i) => addH(t, LATIN_FONT, 70, i % 2 === 0));
   BUND_WORDS.forEach((t) => { addH(t, CJK_FONTS[2], S); addV(t, CJK_FONTS[2], S); });
   STEPPE_CN.forEach((t, i) => { addV(t, CJK_FONTS[i % 2], S); addH(t, CJK_FONTS[i % 2], S); });

@@ -119,8 +119,8 @@ fn concrete(p: vec3f, uv: vec2f) -> vec3f {
       albedo = vec3f(0.01, 0.012, 0.016); rough = 0.04; mat = 2.0;
       let g = 0.7 + 0.3 * vnoise2(uv * vec2f(0.15, 0.6));
       let ceilBand = smoothstep(6.6, 7.4, fy) * (1.0 - smoothstep(7.6, 8.1, fy));
-      let interior = mix(0.28, 0.5, smoothstep(1.0, 6.0, fy));
-      emis = vec3f(0.72, 0.86, 1.0) * (interior * g + ceilBand * 2.2);
+      let interior = mix(0.1, 0.22, smoothstep(1.0, 6.0, fy));
+      emis = vec3f(0.72, 0.86, 1.0) * (interior * g + ceilBand * 1.3);
     }
   } else if (m == 4) { // ceiling with light strips
     albedo = vec3f(0.5, 0.5, 0.52); rough = 0.6;
@@ -136,7 +136,7 @@ fn concrete(p: vec3f, uv: vec2f) -> vec3f {
   } else if (m == 6) { // LED strip
     albedo = vec3f(0.05); rough = 0.3;
     let pulse = 0.75 + 0.25 * sin(uv.x * 0.05 - time() * 2.0);
-    emis = ledColor(ex) * 5.0 * pulse;
+    emis = ledColor(ex) * 3.5 * pulse;
   } else if (m == 7) { // tunnel portal / shed doors: concrete with dark openings
     albedo = concrete(p, uv) * 0.9;
     let metroW = ex > 500.0;
@@ -426,7 +426,7 @@ function buildStation(mb, T, st, lights, signs, col) {
   }
   if (metro) {
     // concourse box under the platforms
-    mb.sweep(F, rect(-11, 11, -11.5, -4.2), M.STATIONFACADE, 0, true, (e) => (e === 1 || e === 3 ? M.STATIONFACADE : M.CONCRETE));
+    mb.sweep(F, rect(-11, 11, -11.5, -4.2), M.SHED, 0, true, (e) => (e === 1 || e === 3 ? M.SHED : M.CONCRETE), -11.5 - 1.0);
     for (const k of [i0, i1]) {
       const ang = Math.atan2(T.tz[k], T.tx[k]);
       mb.ybox(T.x[k], T.y[k] - 7.85, T.z[k], 0.2, 3.65, 11, ang, M.CONCRETE);
@@ -556,6 +556,9 @@ function buildLizibaTower(mb, world, T, lights, signs, col, R) {
     signs.push({ x, y: yU + 3.2, z, nx: ex[0] * e, nz: ex[1] * e, w: 15, h: 3.0, text: '李子坝站', kind: 'fascia', color: [0.15, 1.0, 0.6], offset: 0.6 });
     const [x2, z2] = W(e * (HX + 0.05), 10.2);
     signs.push({ x: x2, y: yb + 8.5, z: z2, nx: ex[0] * e, nz: ex[1] * e, w: 2.6, h: 2.6, text: '2', kind: 'fascia', color: [0.2, 0.95, 0.5], offset: 0 });
+    // tall vertical neon sign near the corner of each end face
+    const [xb, zb] = W(e * (HX + 0.05), -e * (HZ - 2.5));
+    signs.push({ x: xb, y: yU + 12, z: zb, nx: ex[0] * e, nz: ex[1] * e, w: 3.4, h: 13, text: '李子坝', kind: 'fascia', vertical: true, color: [1.0, 0.25, 0.4], offset: 0.35 });
     // light spill over the opening
     const [x3, z3] = W(e * (HX + 4), 0);
     lights.push([x3, yb + 4.5, z3, 16, 18, 24, 30, 0]);

@@ -409,7 +409,7 @@ export class Cars {
     this.lightBuf = mk(this.lampCap * 48, GPUBufferUsage.STORAGE, 'car-lamps');
     this.mesh = carMesh().upload(d, 'car');
     this.argsInit = new Uint32Array([this.mesh.count, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0]);
-    this.argsBuf = mk(48, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC, 'car-args');
+    this.argsBuf = mk(48, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC, 'car-args');
     this.params = new Float32Array([this.count, [260, 380, 520][q], [1800, 2600, 3600][q], this.nearCap]);
     this.paramBuf = mk(16, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, 'car-params');
     d.queue.writeBuffer(this.paramBuf, 0, this.params);
@@ -460,7 +460,7 @@ export class Cars {
     pass.setBindGroup(1, this.nearGroup);
     pass.setVertexBuffer(0, this.mesh.vb);
     pass.setIndexBuffer(this.mesh.ib, 'uint32');
-    pass.drawIndexed(this.mesh.count, this.nearDraw);
+    pass.drawIndexedIndirect(this.argsBuf, 0);
   }
 
   forward(ctx, pass) {

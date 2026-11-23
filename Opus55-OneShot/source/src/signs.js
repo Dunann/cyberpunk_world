@@ -26,20 +26,20 @@ struct VOut {
 };
 
 @vertex fn vs(v: VIn, @builtin(instance_index) ii: u32) -> VOut {
-  let S = signs[ii];
-  let w = S.b.z; let h = S.b.w;
-  let Z = vec3f(S.b.x, 0.0, S.b.y);
+  let Sa = signs[ii].a; let Sb = signs[ii].b; let Sf = signs[ii].f;
+  let w = Sb.z; let h = Sb.w;
+  let Z = vec3f(Sb.x, 0.0, Sb.y);
   let X = vec3f(Z.z, 0.0, -Z.x);
   let mat = v.me.x;
   var lp: vec3f;
   var o: VOut;
   if (mat > 2.5) {
-    if (S.f.z <= 0.0) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
-    lp = vec3f(w * 0.5 + v.pos.x * S.f.z, v.pos.y * h + v.me.y, v.pos.z);
+    if (Sf.z <= 0.0) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
+    lp = vec3f(w * 0.5 + v.pos.x * Sf.z, v.pos.y * h + v.me.y, v.pos.z);
   } else {
-    lp = vec3f(v.pos.x * w, v.pos.y * h, v.pos.z * S.f.x + S.f.y);
+    lp = vec3f(v.pos.x * w, v.pos.y * h, v.pos.z * Sf.x + Sf.y);
   }
-  o.wp = S.a.xyz + X * lp.x + vec3f(0.0, lp.y, 0.0) + Z * lp.z;
+  o.wp = Sa.xyz + X * lp.x + vec3f(0.0, lp.y, 0.0) + Z * lp.z;
   o.n = X * v.nrm.x + vec3f(0.0, v.nrm.y, 0.0) + Z * v.nrm.z;
   o.lp = vec2f(select(-lp.x, lp.x, mat < 0.5), lp.y);
   o.id = ii;
@@ -312,26 +312,28 @@ function lanternMesh() {
 
 // Spatial cells for CPU culling of instanced draws.
 class Cells {
-  constructor(rows, size, xi, zi, reach) {
-    const keyed = rows.map((r) => ({ r, k: Math.floor(r[xi] / size) * 4096 + Math.floor(r[zi] / size) }));
-    keyed.sort((a, b) => a.k - b.k);
+  // sizeOf(row) ranks rows inside a cell (largest first); rows with sizeOf >= big are drawn in the far tier.
+  constructor(rows, size, xi, zi, reach, sizeOf = () => 1, big = 0) {
+    const keyed = rows.map((r) => ({ r, k: Math.floor(r[xi] / size) * 4096 + Math.floor(r[zi] / size), s: sizeOf(r) }));
+    keyed.sort((a, b) => a.k - b.k || b.s - a.s);
     this.rows = keyed.map((o) => o.r);
     const cells = [];
     let cur = null;
     keyed.forEach((o, i) => {
-      if (!cur || cur.k !== o.k) { cur = { k: o.k, first: i, count: 0, x: 0, y: 0, z: 0, n: 0, x0: 1e9, x1: -1e9, z0: 1e9, z1: -1e9, y0: 1e9, y1: -1e9 }; cells.push(cur); }
+      if (!cur || cur.k !== o.k) { cur = { k: o.k, first: i, count: 0, big: 0, x0: 1e9, x1: -1e9, z0: 1e9, z1: -1e9, y0: 1e9, y1: -1e9 }; cells.push(cur); }
       cur.count++;
+      if (o.s >= big) cur.big++;
       const r = o.r;
       cur.x0 = Math.min(cur.x0, r[xi]); cur.x1 = Math.max(cur.x1, r[xi]);
       cur.z0 = Math.min(cur.z0, r[zi]); cur.z1 = Math.max(cur.z1, r[zi]);
       cur.y0 = Math.min(cur.y0, r[1]); cur.y1 = Math.max(cur.y1, r[1]);
     });
     this.cx = new Float32Array(cells.length); this.cy = new Float32Array(cells.length); this.cz = new Float32Array(cells.length);
-    this.cr = new Float32Array(cells.length); this.first = new Uint32Array(cells.length); this.count = new Uint32Array(cells.length);
+    this.cr = new Float32Array(cells.length); this.first = new Uint32Array(cells.length); this.count = new Uint32Array(cells.length); this.big = new Uint32Array(cells.length);
     cells.forEach((c, i) => {
       this.cx[i] = (c.x0 + c.x1) / 2; this.cz[i] = (c.z0 + c.z1) / 2; this.cy[i] = (c.y0 + c.y1) / 2;
       this.cr[i] = Math.hypot(c.x1 - c.x0, c.z1 - c.z0, c.y1 - c.y0) / 2 + reach;
-      this.first[i] = c.first; this.count[i] = c.count;
+      this.first[i] = c.first; this.count[i] = c.count; this.big[i] = c.big;
     });
     this.n = cells.length;
     this.drawFirst = new Uint32Array(cells.length + 1);
@@ -340,8 +342,9 @@ class Cells {
     this.farCount = new Uint32Array(cells.length + 1);
     this.draws = 0; this.farDraws = 0;
   }
-  // Visible cells closer than nearDist go to the near list, the rest (up to maxDist) to the far list.
-  cull(test, maxDist, nearDist = 1e9) {
+  // Visible cells closer than nearDist go to the near list; the rest go to the far list, and beyond midDist
+  // only the big rows of each cell are drawn.
+  cull(test, maxDist, nearDist = 1e9, midDist = 1e9) {
     let d = 0, fd = 0;
     for (let i = 0; i < this.n; i++) {
       const dist = test.dist(this.cx[i], this.cy[i], this.cz[i]) - this.cr[i];
@@ -350,8 +353,10 @@ class Cells {
         if (d > 0 && this.drawFirst[d - 1] + this.drawCount[d - 1] === this.first[i]) this.drawCount[d - 1] += this.count[i];
         else { this.drawFirst[d] = this.first[i]; this.drawCount[d] = this.count[i]; d++; }
       } else {
-        if (fd > 0 && this.farFirst[fd - 1] + this.farCount[fd - 1] === this.first[i]) this.farCount[fd - 1] += this.count[i];
-        else { this.farFirst[fd] = this.first[i]; this.farCount[fd] = this.count[i]; fd++; }
+        const n = dist < midDist ? this.count[i] : this.big[i];
+        if (n === 0) continue;
+        if (fd > 0 && this.farFirst[fd - 1] + this.farCount[fd - 1] === this.first[i]) this.farCount[fd - 1] += n;
+        else { this.farFirst[fd] = this.first[i]; this.farCount[fd] = n; fd++; }
       }
     }
     this.draws = d; this.farDraws = fd;
@@ -384,7 +389,8 @@ export default {
     const d = ctx.device;
     const q = ctx.quality.level;
     const res = placeSigns(ctx.world, this.atlas, q);
-    this.cells = new Cells(res.signs, 160, 0, 2, 12);
+    // rank by area (screens and billboards first); far away only signs of 6 m2 and more are drawn
+    this.cells = new Cells(res.signs, 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6);
     const arr = new Float32Array(Math.max(1, this.cells.rows.length) * SIGN_FLOATS);
     this.cells.rows.forEach((r, i) => arr.set(r, i * SIGN_FLOATS));
     this.buf = d.createBuffer({ label: 'signs', size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -402,7 +408,8 @@ export default {
     for (const L of lights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
     this.stats = { signs: res.signs.length, lanterns: res.lanterns.length, lights: lights.length };
     ctx.world.shared.signStats = this.stats;
-    this.maxDist = [700, 1100, 1600][q];
+    this.maxDist = [900, 1300, 1700][q];
+    this.midDist = [350, 450, 600][q];
     this.ready = true;
   },
 
@@ -414,7 +421,7 @@ export default {
     if (!this.ready) return;
     const r = ctx.renderer;
     this.test.set(ctx.cam, r.width / r.height);
-    this.cells.cull(this.test, this.maxDist, 170);
+    this.cells.cull(this.test, this.maxDist, 170, this.midDist);
     pass.setPipeline(this.pipe);
     pass.setBindGroup(1, this.group);
     const c = this.cells;

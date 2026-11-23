@@ -104,7 +104,8 @@ export class MeshBuilder {
 
   // Sweep a closed or open 2D profile [[lat, up], ...] along a path of frames.
   // frames: [{p:[x,y,z], l:[x,y,z] (lateral unit, left), s (arc length)}]; profile edges become flat-shaded quads.
-  sweep(frames, profile, mat, extra = 0, closed = true, matFn = null) {
+  // uv: u = arc length; v = height above vBase on steep edges, lateral position on flat edges.
+  sweep(frames, profile, mat, extra = 0, closed = true, matFn = null, vBase = 0) {
     const ne = closed ? profile.length : profile.length - 1;
     for (let e = 0; e < ne; e++) {
       const A = profile[e], B = profile[(e + 1) % profile.length];
@@ -113,15 +114,15 @@ export class MeshBuilder {
       const dl = B[0] - A[0], du = B[1] - A[1];
       const el = Math.hypot(dl, du) || 1;
       const nl = du / el, nu = -dl / el;
-      let vacc = 0;
+      const steep = Math.abs(du) > Math.abs(dl);
+      const va = steep ? A[1] - vBase : A[0], vb = steep ? B[1] - vBase : B[0];
       for (let i = 0; i < frames.length - 1; i++) {
         const f0 = frames[i], f1 = frames[i + 1];
         const pt = (f, q) => [f.p[0] + f.l[0] * q[0], f.p[1] + q[1], f.p[2] + f.l[2] * q[0]];
         const n0 = [f0.l[0] * nl, nu, f0.l[2] * nl];
         const a = pt(f0, A), b = pt(f0, B), c = pt(f1, B), d = pt(f1, A);
-        this.quad(a, b, c, d, norm(n0), [[f0.s, vacc], [f0.s, vacc + el], [f1.s, vacc + el], [f1.s, vacc]], m, extra);
+        this.quad(a, b, c, d, norm(n0), [[f0.s, va], [f0.s, vb], [f1.s, vb], [f1.s, va]], m, extra);
       }
-      vacc += el;
     }
   }
 

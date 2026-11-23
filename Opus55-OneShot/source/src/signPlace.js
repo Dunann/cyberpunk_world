@@ -233,7 +233,7 @@ export function placeSigns(world, atlas, quality) {
 
   // requested signage (station names etc.)
   for (const q of world.shared.signRequests || []) {
-    const e = atlas.find(q.text, q.kind === 'blade');
+    const e = atlas.find(q.text, q.kind === 'blade' || !!q.vertical);
     if (!e) continue;
     const nx = q.nx, nz = q.nz;
     const off = q.offset || 0;
@@ -244,7 +244,8 @@ export function placeSigns(world, atlas, quality) {
     const tw = (h - 2 * m) * e.aspect + 2 * m;
     if (tw < w) w = tw; else h = (w - 2 * m) / e.aspect + 2 * m;
     const c = q.color || [1, 1, 1];
-    if (q.kind === 'lightbox') emit(KIND.LIGHTBOX, x, q.y, z, nx, nz, w, h, e, c, [0.05, 0.25, 0.6], 0, 0, 0.3, 0.0, 0, m);
+    if (q.kind === 'blade') { const gap = 0.6; emit(KIND.BLADE, x + nx * (gap + w / 2), q.y, z + nz * (gap + w / 2), nz, -nx, w, h, e, c, q.color2 || c, 0, 1, 0.3, 0, gap + 0.6, m); }
+    else if (q.kind === 'lightbox') emit(KIND.LIGHTBOX, x, q.y, z, nx, nz, w, h, e, c, [0.05, 0.25, 0.6], 0, 0, 0.3, 0.0, 0, m);
     else if (q.both) emit(KIND.DOUBLE, x, q.y, z, nx, nz, w, h, e, c, c, 0, 1, 0.3, 0, 0, m);
     else emit(KIND.FASCIA, x, q.y, z, nx, nz, w, h, e, c, c, 0, 0, 0.6, 0.0, 0, m);
     if (w * h > 3) addLight(x + nx * 2, q.y - h, z + nz * 2, c, w * h, 0, 1e5);
