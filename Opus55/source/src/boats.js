@@ -110,13 +110,15 @@ fn band(y: f32, y0: f32, y1: f32, fw: f32) -> f32 {
       let fy = fract(sy);
       let row = floor(sy);
       let fu = fract(u / 1.5);
-      let win = smoothstep(0.08, 0.14, fu) * (1.0 - smoothstep(0.86, 0.92, fu)) * smoothstep(0.2, 0.26, fy) * (1.0 - smoothstep(0.78, 0.84, fy));
+      // window row with frames and a centre mullion; the wall between windows stays dark
+      let win = smoothstep(0.14, 0.18, fu) * (1.0 - smoothstep(0.82, 0.86, fu)) * smoothstep(0.3, 0.34, fy) * (1.0 - smoothstep(0.72, 0.76, fy))
+              * smoothstep(0.02, 0.04, abs(fu - 0.5));
       let h = hash21(vec2f(floor(u / 1.5), row) + seed * 13.0);
-      let lit = step(h, I.c.w);
+      let lit = step(h, I.c.w) * (0.55 + 0.45 * hash21(vec2f(floor(u / 1.5) + 7.0, row + seed)));
       let warm = mix(vec3f(1.0, 0.62, 0.3), vec3f(1.0, 0.85, 0.65), hash21(vec2f(row, seed)));
-      emis = warm * win * lit * 2.6;
-      albedo = mix(albedo, vec3f(0.02, 0.025, 0.03), win);
-      emis += led * band(fy, 0.9, 0.97, fwy / 2.4) * 0.8;
+      emis = warm * win * lit * 1.5;
+      albedo = mix(albedo * 0.35, vec3f(0.02, 0.025, 0.03), win);
+      emis += led * band(fy, 0.92, 0.96, fwy / 2.4) * 0.8;
     }
   } else if (k < 2.5) {
     // hull: LED band below the gunwale, dark boot-top at the waterline
@@ -132,7 +134,8 @@ fn band(y: f32, y0: f32, y1: f32, fw: f32) -> f32 {
   } else {
     // roof slab: LED edge band on its sides
     rough = 0.35;
-    if (side) { emis = led * 1.2; }
+    albedo *= 0.4;
+    if (side) { emis = led * 0.3; }
   }
   return gbuf(albedo, rough, n, metal, emis, 1.0, motionVector(i.wp, i.pwp), 0.0, 0.7);
 }
@@ -150,6 +153,11 @@ class Mesh {
     const cr = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
     if (cr[0] * n[0] + cr[1] * n[1] + cr[2] * n[2] > 0) this.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
     else this.i.push(base, base + 2, base + 1, base, base + 3, base + 2);
+  }
+  // deck railing: top rail and posts every 1.8 m along x at lateral z
+  rail(x0, x1, z, y, col) {
+    this.box(x0, y + 1.0, z - 0.04, x1, y + 1.06, z + 0.04, col, 0);
+    for (let x = x0; x <= x1; x += 1.8) this.box(x - 0.04, y, z - 0.04, x + 0.04, y + 1.0, z + 0.04, col, 0);
   }
   box(x0, y0, z0, x1, y1, z1, col, kind, top = true) {
     const P = (x, y, z) => [x, y, z];
@@ -191,7 +199,9 @@ function buildType(type) {
   const white = [0.55, 0.56, 0.58], dark = [0.06, 0.07, 0.08], deck = [0.16, 0.12, 0.09];
   const lampW = [1.0, 0.9, 0.75], red = [1.0, 0.05, 0.03], green = [0.05, 1.0, 0.2];
   if (type === 0) { // ferry
-    m.hull(36, 9, 1.4, 1.8, 6, [0.08, 0.22, 0.26], deck);
+    m.hull(36, 9, 1.4, 1.8, 6, [0.03, 0.05, 0.07], deck);
+    for (const z of [-4.3, 4.3]) m.rail(-16, 10, z, 1.4, dark);
+    for (const z of [-4.05, 4.05]) m.rail(-15, 10, z, 4.25, dark);
     m.box(-15, 1.4, -3.9, 10, 4.0, 3.9, white, 1);
     m.box(-15.3, 4.0, -4.2, 10.3, 4.25, 4.2, white, 4);
     m.box(-11, 4.25, -3.2, 6, 6.6, 3.2, white, 1);
@@ -203,7 +213,11 @@ function buildType(type) {
     m.box(3.5, 8.2, -2.25, 4.0, 8.6, -2.0, red, 3);
     m.box(3.5, 8.2, 2.0, 4.0, 8.6, 2.25, green, 3);
   } else if (type === 1) { // night-cruise tour boat
-    m.hull(58, 13, 1.6, 2.0, 10, [0.05, 0.05, 0.07], deck);
+    m.hull(58, 13, 1.6, 2.0, 10, [0.03, 0.03, 0.04], deck);
+    for (const z of [-6.2, 6.2]) m.rail(-26, 18, z, 4.5, dark);
+    for (const z of [-5.4, 5.4]) m.rail(-22, 13, z, 7.3, dark);
+    m.box(-20, 9.95, -1.1, -17.6, 13.2, 1.1, [0.12, 0.03, 0.03], 0);   // funnel
+    m.box(-20.1, 12.6, -1.2, -17.5, 12.9, 1.2, [0.9, 0.7, 0.2], 3);   // lit funnel band
     m.box(-26, 1.6, -5.8, 18, 4.2, 5.8, [0.35, 0.3, 0.26], 1);
     m.box(-26.6, 4.2, -6.4, 18.6, 4.5, 6.4, [0.5, 0.35, 0.12], 4);
     m.box(-22, 4.5, -5.0, 13, 7.0, 5.0, [0.35, 0.3, 0.26], 1);
@@ -238,7 +252,8 @@ function buildType(type) {
     m.box(-34, 7.0, 5.5, -33.5, 7.4, 5.75, green, 3);
     m.box(38, 2.0, -0.3, 38.6, 3.6, 0.3, lampW, 3);
   } else { // small sightseeing boat
-    m.hull(24, 6.5, 1.2, 1.2, 5, [0.85, 0.85, 0.88], deck);
+    m.hull(24, 6.5, 1.2, 1.2, 5, [0.06, 0.07, 0.09], deck);
+    for (const z of [-3.05, 3.05]) m.rail(-11, 7, z, 1.2, dark);
     m.box(-9, 1.2, -2.6, 6, 3.5, 2.6, [0.25, 0.3, 0.35], 1);
     m.box(-9.4, 3.5, -3.0, 6.4, 3.75, 3.0, [0.8, 0.8, 0.82], 4);
     m.box(4, 3.75, -0.1, 4.2, 5.5, 0.1, dark, 0);
@@ -333,8 +348,8 @@ export default {
         li++;
       }
       if (b.featured) {
-        b.sMid = nearestS(this.paths[0], -605, 590); b.Lh = 220; b.Rl = 30; b.base = -100; b.omega = 0.012;
-        b.theta0 = Math.PI / 2 - 60 * b.omega;
+        b.sMid = nearestS(this.paths[0], -605, 590); b.Lh = 220; b.Rl = 30; b.base = -60; b.omega = 0.012;
+        b.theta0 = Math.PI / 2 - 0.22 - 60 * b.omega;   // at the capture time it is ~45 m off the deck axis, clear of the pylon footing
       }
       const ca = palette[(R() * palette.length) | 0], cb = palette[(R() * palette.length) | 0];
       b.ledA = ca; b.ledB = cb;
