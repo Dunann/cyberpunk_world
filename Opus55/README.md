@@ -2,7 +2,7 @@
 
 A real-time, explorable cyberpunk river city that runs in the browser.
 
-**Play:** http://aidanduncan.me/cyberpunk_world/Opus55/
+**Play:** http://aidanduncan.me/neon-confluence/Opus55/
 
 You can also download `index.html` and open it directly; it works offline.
 
