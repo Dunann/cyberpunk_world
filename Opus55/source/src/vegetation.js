@@ -35,6 +35,7 @@ struct VegU { ringA: vec4f, ringB: vec4f, p: vec4f, lod: vec4f };
 @group(1) @binding(7) var<uniform> VU: VegU;
 @group(1) @binding(8) var lsamp: sampler;
 ${THEIGHT_WGSL}
+${STREET_WGSL}
 
 const CAP = ${CAP}u;
 
@@ -71,6 +72,10 @@ fn place(p: vec2f, h4: vec4f, far: bool) {
     let info = worldInfo(p);
     if (info.x < 6.0) { return; }
     if (roadMask(p) > 0.02) { return; }
+    let di = i32(info.y + 0.5);
+    if (di >= 0 && di < i32(W.count.x) && info.z > 0.16) {
+      if (W.d[di].b.y > 0.0) { let rd = roadLayout(p, di); if (abs(rd.across) < rd.hw + 3.5) { return; } }
+    }
   }
   let d = distance(vec3f(p.x, h, p.y), F.camPos.xyz);
   // species
@@ -264,10 +269,10 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
     // per-tree colour: several greens, some yellow-green and blue-green, a few reddish new-leaf camphors
     let hv = fract(hsh * 7.13);
     var c = vec3f(0.045, 0.078, 0.032);
-    if (hv > 0.35) { c = vec3f(0.07, 0.095, 0.032); }
-    if (hv > 0.6) { c = vec3f(0.032, 0.07, 0.052); }
-    if (hv > 0.82) { c = vec3f(0.058, 0.068, 0.036); }
-    if (hv > 0.94) { c = vec3f(0.085, 0.055, 0.038); }
+    if (hv > 0.4) { c = vec3f(0.058, 0.084, 0.033); }
+    if (hv > 0.65) { c = vec3f(0.036, 0.068, 0.048); }
+    if (hv > 0.85) { c = vec3f(0.055, 0.066, 0.038); }
+    if (hv > 0.97) { c = vec3f(0.07, 0.055, 0.04); }
     if (sp == 1.0) { c = vec3f(0.028, 0.055, 0.045); }
     if (sp == 2.0) { c = vec3f(0.075, 0.105, 0.036); }
     if (sp == 3.0) { c = vec3f(0.085, 0.11, 0.045); }

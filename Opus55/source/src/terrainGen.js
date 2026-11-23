@@ -79,6 +79,9 @@ fn natMaterial(p: vec2f, h: f32, n: vec3f, cav: f32, wd: f32, natural: f32, terr
   forest *= 1.0 - smoothstep(900.0, 1500.0, h + n1 * 300.0) * smoothstep(-0.1, 0.4, cav * 0.02 + 0.2); // bald crests
   forest *= smoothstep(4.0, 22.0, wd + n3 * 5.0);   // keep shores open
   forest *= 1.0 - terr;
+  // exposed rock outcrops and cliff bands on steeper forested slopes
+  let outcrop = smoothstep(0.62, 0.74, n2 * 0.5 + 0.5 + slope * 0.9 + n1 * 0.15) * smoothstep(0.14, 0.26, slope);
+  forest *= 1.0 - outcrop;
   // canopy colours: dark greens with olive / blue-green clumps at large scale
   var canopy = mix(vec3f(0.024, 0.044, 0.020), vec3f(0.040, 0.058, 0.024), smoothstep(-0.3, 0.4, n1));
   canopy = mix(canopy, vec3f(0.020, 0.040, 0.032), smoothstep(0.1, 0.5, n2) * 0.6);
@@ -91,7 +94,7 @@ fn natMaterial(p: vec2f, h: f32, n: vec3f, cav: f32, wd: f32, natural: f32, terr
   var rock = mix(vec3f(0.075, 0.072, 0.068), vec3f(0.125, 0.112, 0.092), strata);
   rock *= 0.8 + 0.35 * strata2;
   rock = mix(rock, vec3f(0.040, 0.056, 0.030), smoothstep(0.2, 0.7, n2 + cav * 0.01) * 0.6);  // moss in hollows
-  let rockW = smoothstep(0.32, 0.55, slope + n2 * 0.1);
+  let rockW = max(smoothstep(0.32, 0.55, slope + n2 * 0.1), outcrop);
   var col = mix(grass, canopy, forest);
   col = mix(col, rock, rockW * (1.0 - forest * 0.8));
   // terraces (tea / rice): fresh green

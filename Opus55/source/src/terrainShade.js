@@ -204,16 +204,19 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   let dist = length(toCam);
   let v = toCam / dist;
   let wN = nearWeight(p.xz);
+  // beyond ~1.5 km the material is sampled from blurrier mips: far ridges read as clean layered forms
+  let blur = 1.0 + 5.0 * smoothstep(1500.0, 5000.0, dist);
+  let gX = dX * blur; let gY = dY * blur;
   var A = vec4f(0.0); var Nt = vec4f(0.5, 0.5, 0.5, 0.0);
   if (wN > 0.0) {
     let uv = (p.xz - T_ORIGIN) / T_SIZE;
-    A = textureSampleGrad(nearA, tSamp, uv, dX / T_SIZE, dY / T_SIZE);
-    Nt = textureSampleGrad(nearN, tSamp, uv, dX / T_SIZE, dY / T_SIZE);
+    A = textureSampleGrad(nearA, tSamp, uv, gX / T_SIZE, gY / T_SIZE);
+    Nt = textureSampleGrad(nearN, tSamp, uv, gX / T_SIZE, gY / T_SIZE);
   }
   if (wN < 1.0) {
     let uv = (p.xz - FAR_ORIGIN) / FAR_SIZE;
-    let Af = textureSampleGrad(farA, tSamp, uv, dX / FAR_SIZE, dY / FAR_SIZE);
-    let Nf = textureSampleGrad(farN, tSamp, uv, dX / FAR_SIZE, dY / FAR_SIZE);
+    let Af = textureSampleGrad(farA, tSamp, uv, gX / FAR_SIZE, gY / FAR_SIZE);
+    let Nf = textureSampleGrad(farN, tSamp, uv, gX / FAR_SIZE, gY / FAR_SIZE);
     A = mix(Af, A, wN); Nt = mix(Nf, Nt, wN);
   }
   var albedo = A.rgb * A.rgb;
@@ -313,9 +316,11 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
   // ---- city ground: asphalt, markings, crosswalks, sidewalks with curbs, puddles, street-lamp pools
   let di = i32(info.y + 0.5);
   var urban = 0.0;
+  var urbanAll = 0.0;
   if (wN > 0.0 && di >= 0 && di < i32(W.count.x)) {
-    if (W.d[di].b.y > 0.0) { urban = smoothstep(0.35, 0.6, info.z) * smoothstep(6.0, 14.0, info.x) * (1.0 - smoothstep(0.35, 0.5, slope)); }
+    if (W.d[di].b.y > 0.0) { urban = smoothstep(0.16, 0.42, info.z) * smoothstep(6.0, 14.0, info.x) * (1.0 - smoothstep(0.35, 0.5, slope)) * (1.0 - forest * 0.85 * (1.0 - smoothstep(0.5, 0.65, info.z))); }
   }
+  urbanAll = urban;
   if (urban > 0.0) {
     let rd = roadLayout(p.xz, di);
     let hw = rd.hw;
@@ -359,7 +364,7 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     let gutter = (1.0 - smoothstep(0.0, 0.9, hw - a)) * onRoad;
     let rut = (1.0 - smoothstep(0.25, 0.6, abs(abs(a - hw * 0.5) - 0.9))) * onRoad * 0.12;
     let pn = N1.r * 0.75 + N2.b * 0.25;
-    let pud = smoothstep(0.64, 0.67, pn + gutter * 0.16 + rut - interior * 0.1) * (1.0 - curbW);
+    let pud = smoothstep(0.6, 0.71, pn + gutter * 0.16 + rut - interior * 0.1) * (1.0 - curbW);
     var un = normalize(nPre + vec3f(gn.x, 0.0, gn.y) * 0.03);
     // curb face tilts toward the road
     let cs = sign(rd.across);
@@ -369,8 +374,8 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     if (dist < 40.0) { rip = rainRipples(p.xz, time()) * F.params.x; }
     un = normalize(mix(un, normalize(vec3f(rip.x, 1.0, rip.y)), pud));
     var r = mix(mix(0.72, 0.62, 1.0 - onRoad), 0.45, mark) + (N2.g - 0.5) * 0.2;
-    r = mix(r, 0.015, pud);
-    col = mix(col, col * 0.6, pud);
+    r = mix(r, 0.02, pud * pud);
+    col = mix(col, col * 0.8, pud);
     albedo = mix(albedo, col, urban);
     rough = mix(rough, r, urban);
     n = normalize(mix(n, un, urban));
@@ -399,8 +404,17 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     }
   }
 
+  // ---- far slopes are matte: glossy wet highlights at distance read as crumpled noise behind the skyline
+  let farMatte = smoothstep(900.0, 2200.0, dist) * (1.0 - urbanAll);
+  wet = mix(wet, 0.0, farMatte);
+  rough = mix(rough, 0.92, farMatte);
+
+  // ---- moonlit crests: convex ridges facing the moon catch a soft silver edge at distance
+  let crest = smoothstep(0.52, 0.62, Nt.b) * saturate(dot(n, F.moon.xyz) * 1.5) * smoothstep(800.0, 3500.0, dist) * (1.0 - wN * urbanAll);
+  emis += vec3f(0.55, 0.62, 0.85) * F.moon.w * crest * 0.12;
+
   // ---- aerial perspective for the far ranges: fade toward the horizon haze
-  let hz = 1.0 - exp(-max(dist - 3500.0, 0.0) / 16000.0);
+  let hz = 1.0 - exp(-max(dist - 2000.0, 0.0) / 11000.0);
   if (hz > 0.0) {
     let dir = -v;
     let sky = skyHorizon(normalize(vec3f(dir.x, max(dir.y, 0.0) * 0.5 + 0.02, dir.z)));

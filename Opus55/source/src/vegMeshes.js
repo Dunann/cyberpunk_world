@@ -194,10 +194,10 @@ function willow(lod) {
   }
   M.blob(cc, 2.0, 1.6, 2.0, 0, R, 1, sw, 0.25);
   M.crown(cc, [2.9, 2.0, 2.9], lod ? 5 : 16, 1.3, R, sw);
-  const n = lod ? 10 : 44;
+  const n = lod ? 14 : 64;
   for (let k = 0; k < n; k++) {
     const a = (k / n) * Math.PI * 2 + R() * 0.3, r = 1.4 + R() * 2.0;
-    M.strand([Math.cos(a) * r, 8.2 - r * 0.35 + R() * 0.6, Math.sin(a) * r], 4.8 + R() * 2.6, lod ? 0.55 : 0.34, sw);
+    M.strand([Math.cos(a) * r, 8.2 - r * 0.35 + R() * 0.6, Math.sin(a) * r], 4.8 + R() * 2.6, lod ? 0.4 : 0.2, sw);
   }
   return M;
 }

@@ -12,6 +12,7 @@ import { GardenMesh, PAT, STRIDE, V3 } from './gardenMesh.js';
 import { CAUSEWAYS, ISLANDS, BRIDGE_GAP, CAUSEWAY_TOP, lakeToWorld } from './terrainLand.js';
 import { LANDMARKS } from './world.js';
 import { rng } from './math.js';
+import { lookoutTower, lakesideVignette, cragLookout, hillsideLife } from './gardenViews.js';
 
 const C = {
   plaster: [0.58, 0.56, 0.52], tile: [0.03, 0.032, 0.036], wood: [0.17, 0.035, 0.022], dwood: [0.06, 0.035, 0.025],
@@ -111,10 +112,12 @@ struct POut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1
   let P = pads[ii].a;
   let flower = floor(P.w / 10.0);
   let r = rot2(P.w - flower * 10.0);
-  let xz = r * p.xz * P.z;
+  // flower vertices (y > 0) have a fixed size and collapse on pads without a flower
+  let fl = select(P.z, select(0.0, 0.55, flower > 0.5), p.y > 0.0);
+  let xz = r * (p.xz + select(vec2f(0.0), vec2f(0.35, 0.0), p.y > 0.0)) * fl;
   var o: POut;
   let bob = sin(time() * 0.8 + P.x * 0.3 + P.y * 0.2) * 0.008;
-  o.wp = vec3f(P.x + xz.x, 0.03 + p.y * P.z + bob, P.y + xz.y);
+  o.wp = vec3f(P.x + xz.x, 0.03 + p.y * fl + bob, P.y + xz.y);
   o.lp = p.xz;
   o.f = vec2f(flower, p.y);
   o.pos = F.viewProj * vec4f(o.wp, 1.0);
@@ -123,16 +126,19 @@ struct POut { @builtin(position) pos: vec4f, @location(0) wp: vec3f, @location(1
 @fragment fn fsPad(i: POut) -> GOut {
   let r = length(i.lp);
   if (i.f.y > 0.01) {
-    // lotus flower petals
-    let c = mix(vec3f(0.6, 0.18, 0.3), vec3f(0.85, 0.6, 0.65), i.f.y * 3.0);
-    return gbuf(c, 0.5, vec3f(0.0, 1.0, 0.0), 0.0, c * 0.08, 1.0, vec2f(0.0), 1.0, 0.8);
+    // lotus flower: pink petals paling toward the tips, a faint glow so they read at night
+    let c = mix(vec3f(0.75, 0.22, 0.38), vec3f(0.95, 0.72, 0.78), saturate(i.f.y * 2.5));
+    return gbuf(c, 0.5, normalize(vec3f(i.lp.x, 0.6, i.lp.y)), 0.0, c * 0.35, 1.0, motionVector(i.wp, i.wp), 1.0, 0.6);
   }
   let a = atan2(i.lp.y, i.lp.x);
   let vein = smoothstep(0.85, 1.0, abs(cos(a * 9.0))) * smoothstep(0.1, 0.4, r);
-  var c = mix(vec3f(0.035, 0.07, 0.03), vec3f(0.06, 0.09, 0.035), r);
-  c = mix(c, vec3f(0.08, 0.11, 0.05), vein * 0.6);
-  let n = normalize(vec3f(i.lp.x * 0.25, 1.0, i.lp.y * 0.25));
-  return gbuf(c, 0.3, n, 0.0, vec3f(0.0), 1.0, motionVector(i.wp, i.wp), 1.0, 1.0);
+  var c = mix(vec3f(0.05, 0.11, 0.035), vec3f(0.08, 0.14, 0.045), r);
+  c = mix(c, vec3f(0.12, 0.17, 0.07), vein * 0.6);
+  let rim = smoothstep(0.82, 0.97, r);
+  c = mix(c, vec3f(0.16, 0.2, 0.08), rim);
+  let n = normalize(vec3f(i.lp.x * (0.25 + rim), 1.0, i.lp.y * (0.25 + rim)));
+  let emis = c * (0.25 + 0.6 * rim) * vec3f(0.6, 0.75, 1.0);
+  return gbuf(c, 0.3, n, 0.0, emis, 1.0, motionVector(i.wp, i.wp), 1.0, 1.0);
 }
 `.replace('C_DWOOD', 'vec3f(0.06, 0.035, 0.025)');
 
@@ -161,6 +167,7 @@ export default {
       if (light) lights.push([p[0], p[1] - 0.2, p[2], 9 * s, 7 * s, 2.6 * s, 0.9 * s]);
     };
 
+    M.begin();
     // ---------------- causeway hump bridges, willows, lanterns
     const along = (cw, s) => {
       const P = cw.pts; let acc = 0;
@@ -191,8 +198,8 @@ export default {
         const peach = R() < 0.22;
         trees.push([x, H(x, z), z, peach ? 0.42 + R() * 0.1 : 0.75 + R() * 0.25, peach ? 0 : 3]);
       }
-      for (let s = 20, k = 0; s < cw.length - 20; s += 26, k++) {
-        if (bs.some((b) => Math.abs(b - s) < 18)) continue;
+      for (let s = 20, k = 0; s < cw.length - 20; s += 13, k++) {
+        if (bs.some((b) => Math.abs(b - s) < 14)) continue;
         const a = along(cw, s);
         const side = k % 2 ? 1 : -1;
         const x = a.x - a.tz * side * 3.2, z = a.z + a.tx * side * 3.2, y = H(x, z);
@@ -200,7 +207,7 @@ export default {
         M.set(C.dwood, PAT.WOOD);
         M.box([x, y, z], 0.07, 0.07, 2.4);
         M.box([x - a.tz * side * -0.3, y + 2.3, z + a.tx * side * -0.3], 0.35, 0.04, 0.08, Math.atan2(a.tx * side, -a.tz * side));
-        lantern([x - a.tz * side * -0.55, y + 1.85, z + a.tx * side * -0.55], 0.9);
+        lantern([x - a.tz * side * -0.55, y + 1.85, z + a.tx * side * -0.55], 0.9, k % 3 === 0);
       }
     }
     this.bridgeCount = bridgeS.flat().length;
@@ -264,6 +271,16 @@ export default {
       if (k % 15 === 0) lights.push([x, 0.6, z, 6, 2.5, 1.3, 0.5]);
     }
 
+    // ---------------- viewpoint set pieces (poses 1, 5, 9)
+    const env = { M, H, Hf: (x, z) => T.heightAt(x, z), col, lantern, lights, trees, reserve, R,
+      pavilion: (c, sides, r, plat) => this._pavilion(M, c, sides, r, plat, col, lantern),
+      rock: (c, r, sq) => M.rock(c, r, R, sq) };
+    M.begin(); lookoutTower(env);
+    M.begin(); lakesideVignette(env);
+    M.begin(); this.valleyGlows = cragLookout(env);
+    this.hamlets = hillsideLife(env, world);
+    M.begin();
+
     // ---------------- pagoda
     const PG = LANDMARKS.find((l) => l.id === 'pagoda');
     this._pagoda(M, PG, H, col, lantern, lights);
@@ -281,7 +298,9 @@ export default {
         x += vx / l * 15; z += vz / l * 15;
       }
       const ang = Math.atan2(lc[1] - z, lc[0] - x);   // face the lake
+      M.begin();
       this._compound(M, x, z, w, dd, ang, H, R, col, lantern, trees, lights);
+      M.end(3500);
       reserve.push({ x, z, hw: w / 2 + 4, hd: dd / 2 + 4, angle: ang + Math.PI / 2 });
       this.compounds++;
       (this.sites ||= []).push([Math.round(x), Math.round(z), +ang.toFixed(2)]);
@@ -289,7 +308,7 @@ export default {
 
     // ---------------- lotus pads
     const padData = [];
-    const patches = [[0, -430, 160], [-30, 170, 140], [-460, 20, 130], [560, -120, 120], [250, 380, 120], [-600, -330, 100], [385, -280, 55], [470, -300, 40]];
+    const patches = [[0, -430, 160], [-30, 170, 140], [-460, 20, 130], [560, -120, 120], [250, 380, 120], [-600, -330, 100], [385, -280, 55], [470, -300, 40], [-575, 150, 70], [-520, 220, 50]];
     for (const [px, pz, pr] of patches) {
       for (let k = 0; k < 900; k++) {
         const a = R() * Math.PI * 2, rr = Math.sqrt(R()) * pr;
@@ -298,12 +317,15 @@ export default {
         const [x, z] = lakeToWorld([lx, lz]);
         const h = H(x, z);
         if (h > -1.2 || h < -5.2) continue;
-        const flower = R() < 0.06 ? 1 : 0;
+        const flower = R() < 0.12 ? 1 : 0;
         padData.push(x, z, 0.35 + R() * 0.55, R() * 6.2 + flower * 10);
       }
     }
     this.padCount = padData.length / 4;
 
+    M.end();
+    this.pieces = M.pieces;
+    this.visFirst = new Uint32Array(this.pieces.length); this.visCount = new Uint32Array(this.pieces.length); this.nVis = 0;
     // ---------------- buffers
     world.shared.gardenTrees = trees;
     world.shared.gardenReserve = reserve;
@@ -324,6 +346,14 @@ export default {
     pv.push(0, 0, 0);
     for (let k = 0; k <= seg; k++) { const a = 0.35 + (k / seg) * (Math.PI * 2 - 0.5); pv.push(Math.cos(a), 0, Math.sin(a)); }
     for (let k = 0; k < seg; k++) pi.push(0, k + 2, k + 1);
+    // flower: two rings of six petals (quads opening upward)
+    for (let ring = 0; ring < 2; ring++) for (let k = 0; k < 6; k++) {
+      const a = (k + ring * 0.5) / 6 * Math.PI * 2, w = 0.16, b = pv.length / 3;
+      const ca = Math.cos(a), sa = Math.sin(a), tx = -sa * w, tz = ca * w;
+      const rIn = 0.05, rOut = ring ? 0.32 : 0.24, h0 = 0.04, h1 = ring ? 0.28 : 0.42;
+      pv.push(ca * rIn - tx, h0, sa * rIn - tz, ca * rIn + tx, h0, sa * rIn + tz, ca * rOut + tx, h1, sa * rOut + tz, ca * rOut - tx, h1, sa * rOut - tz);
+      pi.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    }
     this.padIndexCount = pi.length;
     this.pvbuf = d.createBuffer({ size: pv.length * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.pvbuf, 0, new Float32Array(pv));
@@ -345,7 +375,7 @@ export default {
       { shaderLocation: 4, offset: 10 * f, format: 'float32' }, { shaderLocation: 5, offset: 11 * f, format: 'float32x2' }] }] });
     this.padPipe = r.gbufferPipeline({ label: 'lotus', code: GARDEN_WGSL, vs: 'vsPad', fs: 'fsPad', groups: [this.layout], cull: 'none',
       buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] });
-    world.shared.garden = { lights: this.lightCount, compounds: this.compounds };
+    world.shared.garden = { lights: this.lightCount, compounds: this.compounds, hamlets: this.hamlets };
   },
 
   // Stone hump bridge across a causeway gap. a = {x, z, tx, tz} at the bridge centre.
@@ -640,13 +670,27 @@ export default {
     trees.push([...P(w * 0.05, -d * 0.3, y0), 0.45, 0]);
   },
 
+  update(ctx) {
+    // cull pieces: distance and a generous view cone
+    const c = ctx.cam, cp = Math.cos(c.pitch);
+    const fx = -Math.sin(c.yaw) * cp, fy = Math.sin(c.pitch), fz = -Math.cos(c.yaw) * cp;
+    let n = 0;
+    for (const p of this.pieces) {
+      const dx = p.c[0] - c.x, dy = p.c[1] - c.y, dz = p.c[2] - c.z, d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d - p.r > p.maxDist) continue;
+      if (d > p.r && (dx * fx + dy * fy + dz * fz) / d < Math.cos(1.25) - p.r / d) continue;
+      this.visFirst[n] = p.first; this.visCount[n] = p.count; n++;
+    }
+    this.nVis = n;
+  },
+
   gbuffer(ctx, pass) {
     if (ctx.hideA > 1) return;   // dev: measure engineer-A cost (1 = hide trees, 2 = hide everything of A)
     pass.setPipeline(this.pipe);
     pass.setBindGroup(1, this.group);
     pass.setVertexBuffer(0, this.vbuf);
     pass.setIndexBuffer(this.ibuf, 'uint32');
-    pass.drawIndexed(this.indexCount);
+    for (let k = 0; k < this.nVis; k++) pass.drawIndexed(this.visCount[k], 1, this.visFirst[k]);
     if (this.padCount) {
       pass.setPipeline(this.padPipe);
       pass.setVertexBuffer(0, this.pvbuf);
