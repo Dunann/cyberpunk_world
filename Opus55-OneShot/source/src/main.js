@@ -111,6 +111,11 @@ async function main() {
   });
   stats.style.display = statsOn ? 'block' : 'none';
   ctx.prof.enabled = statsOn;
+  const hint = $('hint');
+  if (hint) {
+    hint.textContent = `GPU: ${gpu.adapterName}` + (/intel|qualcomm|arm/i.test(gpu.vendor) ? '  ·  For best performance set your browser to "High performance" in Windows Settings > Display > Graphics.' : '');
+    document.addEventListener('pointerlockchange', () => { hint.style.display = document.pointerLockElement ? 'none' : 'block'; });
+  }
   $('loading').classList.add('hidden');
   overlay.classList.remove('hidden');
   if (params.has('nooverlay')) overlay.classList.add('hidden');

@@ -1,7 +1,8 @@
 // First-person controller in the style of Minecraft creative mode.
 //  Walk: WASD, Space jumps, gravity, collision with terrain, water surface and building boxes.
 //  Fly : double-tap Space to toggle. Space rises, Shift descends. Landing on the ground ends flight.
-//  Ctrl (or Q) sprints. Mouse wheel changes flying speed.
+//  Double-tap W (or hold Q) sprints. Ctrl is avoided because Ctrl+W closes the browser tab.
+//  Mouse wheel changes flying speed.
 
 import { WORLD_BOUND } from './world.js';
 import { clamp } from './math.js';
@@ -20,6 +21,8 @@ export class Controls {
     this.flySpeed = 30;
     this.keys = new Set();
     this.lastSpace = 0;
+    this.lastW = 0;
+    this.sprintW = false;
     this.locked = false;
     this.enabled = true;
     this.sens = 0.0022;
@@ -29,15 +32,20 @@ export class Controls {
     addEventListener('keydown', (e) => {
       if (e.repeat) { if (e.code !== 'Space') return; }
       this.keys.add(e.code);
+      if (e.code === 'KeyW' && !e.repeat) {
+        const now = performance.now();
+        this.sprintW = now - this.lastW < 300;
+        this.lastW = now;
+      }
       if (e.code === 'Space' && !e.repeat) {
         const now = performance.now();
         if (now - this.lastSpace < 300) { this.flying = !this.flying; this.vy = 0; this.lastSpace = 0; }
         else this.lastSpace = now;
         if (!this.flying && this.onGround) this.vy = 7.2;
       }
-      if (['Space', 'ControlLeft', 'ControlRight', 'KeyW', 'KeyS', 'KeyA', 'KeyD'].includes(e.code) && this.locked) e.preventDefault();
+      if ((e.code === 'Space' || e.code === 'KeyQ') && this.locked) e.preventDefault();
     });
-    addEventListener('keyup', (e) => this.keys.delete(e.code));
+    addEventListener('keyup', (e) => { this.keys.delete(e.code); if (e.code === 'KeyW') this.sprintW = false; });
     addEventListener('blur', () => this.keys.clear());
     addEventListener('mousemove', (e) => {
       if (!this.locked) return;
@@ -98,7 +106,7 @@ export class Controls {
     const k = this.keys;
     const f = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
     const s = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
-    const sprint = k.has('ControlLeft') || k.has('ControlRight') || k.has('KeyQ');
+    const sprint = this.sprintW || k.has('KeyQ');
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     // horizontal movement ignores pitch (Minecraft style)
     let mx = -sy * f + cy * s, mz = -cy * f - sy * s;
@@ -129,6 +137,8 @@ export class Controls {
     if (this.y > 1600) { this.y = 1600; this.vy = Math.min(this.vy, 0); }
 
     const g = this.groundAt(this.x, this.z, this.y);
+    // walking down slopes and steps: stay glued to the ground instead of hopping
+    if (!this.flying && this.onGround && this.vy <= 0 && this.y > g && this.y - g < 0.8) this.y = g;
     if (this.y <= g) {
       this.y = g;
       if (this.vy < 0) this.vy = 0;

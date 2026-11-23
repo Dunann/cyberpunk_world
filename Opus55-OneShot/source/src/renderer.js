@@ -141,9 +141,9 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wg: ve
   // environment specular
   let R = reflect(-v, n);
   let Fe = fresnelR(f0, NdotV, rough);
-  let envSharp = skyRadiance(R);
-  let envRough = skyAmbient(R);
-  let env = mix(envSharp, envRough, smoothstep(0.1, 0.5, rough));
+  let roughMix = smoothstep(0.1, 0.5, rough);
+  var env = skyAmbient(R);
+  if (roughMix < 0.99) { env = mix(skyRadiance(R), env, roughMix); }
   col += env * Fe * ao * (1.0 - rough * 0.7);
 
   // moon light
@@ -238,29 +238,41 @@ fn sampleHist(uv: vec2f, size: vec2f) -> vec3f {
   return max(r / wsum, vec3f(0.0));
 }
 
-@compute @workgroup_size(8, 8)
-fn main(@builtin(global_invocation_id) gid: vec3u) {
+var<workgroup> tC: array<vec3f, 324>;
+var<workgroup> tD: array<f32, 324>;
+
+@compute @workgroup_size(16, 16)
+fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
   let dims = textureDimensions(curTex);
+  let maxp = vec2i(dims) - 1;
+  let origin = vec2i(wg.xy * 16u) - 1;
+  // cooperative load of the 18x18 neighborhood (tonemapped YCoCg color + depth)
+  for (var k = li; k < 324u; k += 256u) {
+    let q = clamp(origin + vec2i(i32(k % 18u), i32(k / 18u)), vec2i(0), maxp);
+    tC[k] = toYCoCg(tmw(textureLoad(curTex, q, 0).rgb));
+    tD[k] = textureLoad(depTex, q, 0);
+  }
+  workgroupBarrier();
   if (gid.x >= dims.x || gid.y >= dims.y) { return; }
   let px = vec2i(gid.xy);
   let size = vec2f(dims);
   let uv = (vec2f(px) + 0.5) / size;
-  let cur = textureLoad(curTex, px, 0).rgb;
-  if (taa.x > 0.5) { textureStore(outTex, px, vec4f(cur, 1.0)); return; }
+  let lp = vec2i(gid.xy - wg.xy * 16u) + 1;
+  let c = tC[u32(lp.y * 18 + lp.x)];
+  if (taa.x > 0.5) { textureStore(outTex, px, vec4f(itmw(fromYCoCg(c)), 1.0)); return; }
 
   var m1 = vec3f(0.0); var m2 = vec3f(0.0);
-  var bestD = -1.0; var bestP = px;
-  let maxp = vec2i(dims) - 1;
+  var bestD = -1.0; var bestO = vec2i(0);
   for (var y = -1; y <= 1; y++) {
     for (var x = -1; x <= 1; x++) {
-      let q = clamp(px + vec2i(x, y), vec2i(0), maxp);
-      let c = toYCoCg(tmw(textureLoad(curTex, q, 0).rgb));
-      m1 += c; m2 += c * c;
-      let dq = textureLoad(depTex, q, 0);
-      if (dq > bestD) { bestD = dq; bestP = q; }
+      let k = u32((lp.y + y) * 18 + lp.x + x);
+      let cc = tC[k];
+      m1 += cc; m2 += cc * cc;
+      let dq = tD[k];
+      if (dq > bestD) { bestD = dq; bestO = vec2i(x, y); }
     }
   }
-  var motion = textureLoad(motTex, bestP, 0).xy;
+  var motion = textureLoad(motTex, clamp(px + bestO, vec2i(0), maxp), 0).xy;
   if (bestD <= 0.0) {
     // sky: camera rotation only
     let dir = viewRay(uv);
@@ -285,7 +297,6 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
   var alpha = taa.y + saturate(speed / 40.0) * 0.15;
   if (any(prevUV < vec2f(0.0)) || any(prevUV > vec2f(1.0))) { alpha = 1.0; }
-  let c = toYCoCg(tmw(cur));
   let res = itmw(fromYCoCg(mix(hist, c, alpha)));
   textureStore(outTex, px, vec4f(max(res, vec3f(0.0)), 1.0));
 }
@@ -581,7 +592,7 @@ export class Renderer {
     cp.setPipeline(this.taaPipe);
     cp.setBindGroup(0, this.frameGroup);
     cp.setBindGroup(1, this.taaGroups[this.historyIndex]);
-    cp.dispatchWorkgroups(Math.ceil(this.width / 8), Math.ceil(this.height / 8));
+    cp.dispatchWorkgroups(Math.ceil(this.width / 16), Math.ceil(this.height / 16));
     cp.end();
     const taaOut = this.historyIndex === 0 ? this.views.hist0 : this.views.hist1;
     this.taaOutTex = this.historyIndex === 0 ? this.targets.hist0 : this.targets.hist1;
