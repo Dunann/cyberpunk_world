@@ -19,6 +19,10 @@ export const STEPPE_CN = ['蒙古包', '奶茶馆', '烤全羊', '手把肉', '�
 export const MONGOL_WORDS = ['ᠮᠣᠩᠭᠣᠯ', 'ᠬᠣᠭᠣᠯᠠ', 'ᠴᠠᠢ', 'ᠳᠡᠯᠭᠡᠭᠦᠷ', 'ᠨᠣᠮ', 'ᠠᠢᠷᠠᠭ', 'ᠭᠡᠷ', 'ᠮᠣᠷᠢ', 'ᠪᠠᠭᠤᠳᠠᠯ', 'ᠰᠠᠶᠢᠨ', 'ᠲᠠᠯᠠ', 'ᠵᠠᠬᠠ'];
 // Bilingual steppe signs: Mongolian column + Chinese column (as in Inner Mongolia)
 export const MONGOL_PAIRS = [['ᠮᠣᠩᠭᠣᠯ', '蒙古'], ['ᠬᠣᠭᠣᠯᠠ', '饭馆'], ['ᠴᠠᠢ', '奶茶'], ['ᠳᠡᠯᠭᠡᠭᠦᠷ', '商店'], ['ᠨᠣᠮ', '书店'], ['ᠠᠢᠷᠠᠭ', '马奶酒'], ['ᠭᠡᠷ', '蒙古包'], ['ᠮᠣᠷᠢ', '马具'], ['ᠪᠠᠭᠤᠳᠠᠯ', '宾馆'], ['ᠰᠠᠶᠢᠨ', '欢迎'], ['ᠲᠠᠯᠠ', '草原'], ['ᠵᠠᠬᠠ', '市场']];
+// Cyrillic Mongolian (as used in Mongolia): food, tea, shop, airag, khuushuur, buuz, market, book, ger, welcome
+export const CYRILLIC_MN = ['ХООЛ', 'ЦАЙ', 'ДЭЛГҮҮР', 'АЙРАГ', 'ХУУШУУР', 'БУУЗ', 'ЗАХ', 'НОМ', 'ГЭР', 'ТАВТАЙ МОРИЛ'];
+// Uyghur (Arabic script): kebab, nan bread, tea, lengmen noodles, bazaar, restaurant, polo, samsa
+export const UYGHUR_WORDS = ['كاۋاپ', 'نان', 'چاي', 'لەڭمەن', 'بازار', 'ئاشخانا', 'پولۇ', 'سامسا'];
 export const LATIN_WORDS = ['NOODLE', 'HOTEL', 'BAR', 'KTV', '24H', 'OPEN', 'CAFE', 'PAWN', 'MASSAGE', 'TEA', 'CYBER', 'RAMEN', 'KARAOKE', 'DRAGON', 'LOTUS', 'NEON', 'CLUB', 'LIVE'];
 export const BIG_WORDS = ['霓虹', '山城', '重庆', '不夜城', '龙', '福', '發', '囍', '江湖', '火锅', '好吃', '夜市', '欢迎光临', '营业中', '24小时'];
 export const STATION_WORDS = ['李子坝', '李子坝站', '佛图关', '大坪', '牛角沱', '较场口', '南坪', '上新街', '五里店', '江北城', '大剧院', '红土地', '2号线', '6号线', '2', '长江索道', '山城人家'];
@@ -26,6 +30,7 @@ export const STATION_WORDS = ['李子坝', '李子坝站', '佛图关', '大坪'
 const CJK_FONTS = ['bold {S}px "Microsoft YaHei", "SimHei", sans-serif', 'bold {S}px "SimHei", "Microsoft YaHei", sans-serif', '{S}px "KaiTi", "STKaiti", "Microsoft YaHei", serif', 'bold {S}px "FangSong", "Microsoft YaHei", serif'];
 const LATIN_FONT = 'bold {S}px "Segoe UI", "Arial", sans-serif';
 const MONGOL_FONT = '{S}px "Mongolian Baiti", "Noto Sans Mongolian", sans-serif';
+const UYGHUR_FONT = 'bold {S}px "Microsoft Uighur", "Segoe UI", "Arial", sans-serif';
 
 export function buildSignAtlas(device) {
   const cv = new OffscreenCanvas(W, H);
@@ -100,6 +105,8 @@ export function buildSignAtlas(device) {
   BIG_WORDS.forEach((t, i) => { addH(t, CJK_FONTS[i % 2], 104); addV(t, CJK_FONTS[i % 2], 104); });
   STATION_WORDS.forEach((t) => { addH(t, CJK_FONTS[0], 80); if ([...t].length > 1) addV(t, CJK_FONTS[0], 80); });
   LATIN_WORDS.forEach((t, i) => addH(t, LATIN_FONT, 70, i % 2 === 0));
+  CYRILLIC_MN.forEach((t) => addH(t, LATIN_FONT, 70, false));
+  UYGHUR_WORDS.forEach((t) => addH(t, UYGHUR_FONT, 80, false));
   BUND_WORDS.forEach((t) => { addH(t, CJK_FONTS[2], S); addV(t, CJK_FONTS[2], S); });
   STEPPE_CN.forEach((t, i) => { addV(t, CJK_FONTS[i % 2], S); addH(t, CJK_FONTS[i % 2], S); });
   MONGOL_WORDS.forEach((t) => addM(t, 130));
