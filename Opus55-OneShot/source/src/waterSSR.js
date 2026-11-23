@@ -67,25 +67,23 @@ fn trace(P: vec3f, R: vec3f, steps: i32, jit: f32, maxLen: f32, dims: vec2f) -> 
   if (tmax <= 0.0) { return vec3f(0.0); }
   var tPrev = 0.0;
   var zPrev = z0;
+  let inv = 1.0 / f32(steps);
   for (var i = 1; i <= steps; i++) {
-    let tt = pow((f32(i) - jit) / f32(steps), 1.6) * tmax;
-    let k = mix(k0, k1, tt);
-    let rayZ = 1.0 / k;
+    let tt = pow((f32(i) - jit) * inv, 1.6) * tmax;
+    let rayZ = 1.0 / mix(k0, k1, tt);
     let uv = (n0 + dn * tt) * vec2f(0.5, -0.5) + 0.5;
-    let sz = sceneLin(vec2i(uv * dims));
-    let dz = rayZ - sz;
+    let dz = rayZ - sceneLin(vec2i(uv * dims));
     let thick = max(abs(rayZ - zPrev) * 1.2, 0.8) + rayZ * 0.008;
     if (dz > 0.0 && dz < thick) {
       var lo = tPrev; var hi = tt;
-      for (var j = 0; j < 5; j++) {
+      for (var j = 0; j < 4; j++) {
         let m = 0.5 * (lo + hi);
         let uvm = (n0 + dn * m) * vec2f(0.5, -0.5) + 0.5;
         if (1.0 / mix(k0, k1, m) > sceneLin(vec2i(uvm * dims))) { hi = m; } else { lo = m; }
       }
       let uvh = (n0 + dn * hi) * vec2f(0.5, -0.5) + 0.5;
       let e = min(uvh, 1.0 - uvh);
-      let conf = smoothstep(0.0, 0.05, e.x) * smoothstep(0.0, 0.08, e.y);
-      return vec3f(uvh, conf);
+      return vec3f(uvh, smoothstep(0.0, 0.05, e.x) * smoothstep(0.0, 0.08, e.y));
     }
     tPrev = tt; zPrev = rayZ;
   }
@@ -117,88 +115,73 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let cam = F.camPos.xyz;
   let jit = ign(vec2f(gid.xy), F.params.y);
 
+  // classify: river surface (planar mirror) or wet reflective ground; one shared trace call keeps the shader small
   let tW = waterHit(dir, sz);
+  var P = vec3f(0.0); var R = vec3f(0.0); var n = vec3f(0.0, 1.0, 0.0);
+  var steps = STEPS_W; var maxLen = 8000.0; var g = 0.0;
   if (tW > 0.0) {
-    let P = cam + dir * tW;
-    let R = normalize(vec3f(dir.x, -dir.y, dir.z));
-    let h = trace(P, R, STEPS_W, jit, 8000.0, dims);
-    var col = waterFallback(R);
-    if (h.z > 0.0) { col = mix(col, textureSampleLevel(sTex, sampClamp, h.xy, 0.0).rgb, h.z); }
-    textureStore(outR, gid.xy, vec4f(min(col, vec3f(200.0)), 2.0 + h.z));
+    P = cam + dir * tW;
+    R = normalize(vec3f(dir.x, -dir.y, dir.z));
+  } else {
+    if (dRaw <= 0.0) { textureStore(outR, gid.xy, vec4f(0.0)); return; }
+    let N = textureLoad(nTex, px, 0);
+    let A = textureLoad(aTex, px, 0);
+    let M = textureLoad(mTex, px, 0);
+    n = normalize(N.xyz);
+    g = groundRefl(n, A, M);
+    if (g < 0.02) { textureStore(outR, gid.xy, vec4f(0.0)); return; }
+    P = worldFromDepth(uv, dRaw);
+    // blend weight: Fresnel (water film), wetness, puddles (mirror-like patches on flat ground); skip faint pixels
+    let fres = 0.02 + 0.98 * pow(1.0 - saturate(dot(n, -dir)), 5.0);
+    let puddle = smoothstep(0.55, 0.68, vnoise2(P.xz * 0.12)) * smoothstep(0.96, 0.995, n.y);
+    g *= mix(0.6, 1.0, puddle) * mix(fres, max(fres, 0.35), puddle);
+    if (g < 0.02) { textureStore(outR, gid.xy, vec4f(0.0)); return; }
+    // uneven wet surface: smooth world-space micro-normals (stable under TAA) plus a little temporal jitter;
+    // the composite then smears the result vertically into the streaks typical of wet streets
+    let rough = mix(A.a, 0.05, saturate(F.params.z * M.w));
+    let q = P.xz * 0.7;
+    let wn = vec2f(sin(q.x * 1.7 + sin(q.y * 1.3)), sin(q.y * 1.9 + sin(q.x * 1.1))) * (0.012 + rough * 0.1);
+    let hj = (vec2f(jit, fract(jit * 7.31)) - 0.5) * 0.01;
+    R = reflect(dir, normalize(n + vec3f(wn.x + hj.x, 0.0, wn.y + hj.y)));
+    if (R.y < 0.02) { R = normalize(vec3f(R.x, 0.02, R.z)); }
+    P += n * 0.05;
+    steps = STEPS_G; maxLen = 600.0;
+  }
+  let h = trace(P, R, steps, jit, maxLen, dims);
+  let hit = min(textureSampleLevel(sTex, sampClamp, h.xy, 0.0).rgb, vec3f(100.0));
+  if (tW > 0.0) {
+    let col = mix(waterFallback(R), hit, h.z);
+    textureStore(outR, gid.xy, vec4f(col, 2.0 + h.z));
     return;
   }
-  if (dRaw <= 0.0) { textureStore(outR, gid.xy, vec4f(0.0)); return; }
-  let N = textureLoad(nTex, px, 0);
-  let A = textureLoad(aTex, px, 0);
-  let M = textureLoad(mTex, px, 0);
-  let n = normalize(N.xyz);
-  let g = groundRefl(n, A, M);
-  if (g < 0.02) { textureStore(outR, gid.xy, vec4f(0.0)); return; }
-  let P = worldFromDepth(uv, dRaw);
-  let V = normalize(P - cam);
-  // uneven wet surface: smooth world-space micro-normals (stable under TAA) plus a little temporal jitter;
-  // the composite then smears the result vertically into the streaks typical of wet streets
-  let rough = mix(A.a, 0.05, saturate(F.params.z * M.w));
-  let wn = vec2f(gnoise2(P.xz * 0.7), gnoise2(P.xz * 0.7 + 17.3)) * (0.015 + rough * 0.12);
-  let hj = (vec2f(jit, fract(jit * 7.31)) - 0.5) * 0.01;
-  let nn = normalize(n + vec3f(wn.x + hj.x, 0.0, wn.y + hj.y));
-  var R = reflect(V, nn);
-  if (R.y < 0.02) { R = normalize(vec3f(R.x, 0.02, R.z)); }
-  let h = trace(P + n * 0.05, R, STEPS_G, jit, 600.0, dims);
-  if (h.z <= 0.0) { textureStore(outR, gid.xy, vec4f(0.0)); return; }
-  let c = min(textureSampleLevel(sTex, sampClamp, h.xy, 0.0).rgb, vec3f(100.0));
-  textureStore(outR, gid.xy, vec4f(c * h.z, h.z));
+  let k = g * h.z;
+  textureStore(outR, gid.xy, vec4f(hit * k, k));
 }
 `;
 
 const COMP_WGSL = /* wgsl */ `
 @group(1) @binding(0) var rTex: texture_2d<f32>;
-@group(1) @binding(1) var dTex: texture_depth_2d;
-@group(1) @binding(2) var nTex: texture_2d<f32>;
-@group(1) @binding(3) var aTex: texture_2d<f32>;
-@group(1) @binding(4) var mTex: texture_2d<f32>;
 
+// Premultiplied blend of the half-resolution wet-ground reflections, smeared vertically into streaks.
 @fragment fn fs(i: FsOut) -> @location(0) vec4f {
   let uv = i.pos.xy * F.res.zw;
   // early out: no wet-ground reflection data around this pixel
   let ga = textureGather(3, rTex, sampClamp, uv);
-  let gnd = (ga > vec4f(0.001)) & (ga < vec4f(1.5));
+  let gnd = (ga > vec4f(0.0005)) & (ga < vec4f(1.5));
   if (!any(gnd)) { discard; }
-  let px = vec2i(i.pos.xy);
-  let d = textureLoad(dTex, px, 0);
-  if (d <= 0.0) { discard; }
-  let z = linearDepth(d);
-  if (waterHit(viewRay(uv), z) > 0.0) { discard; }
-  let N = textureLoad(nTex, px, 0);
-  let A = textureLoad(aTex, px, 0);
-  let M = textureLoad(mTex, px, 0);
-  let n = normalize(N.xyz);
-  let g = groundRefl(n, A, M);
-  if (g < 0.02) { discard; }
-  let rough = mix(A.a, 0.05, saturate(F.params.z * M.w));
-  // vertical streak blur of the half-resolution trace (premultiplied, so empty texels fade the edges)
-  let len = (0.0025 + rough * 0.03) * (1.0 + F.params.x);
+  let len = 0.0045 * (1.0 + F.params.x);
   var acc = vec4f(0.0); var wsum = 0.0;
-  for (var k = -3; k <= 3; k++) {
-    let fk = f32(k);
+  for (var k = 0; k < 4; k++) {
+    let fk = f32(k) - 1.5;
     var s = textureSampleLevel(rTex, sampClamp, uv + vec2f(0.0, fk * len), 0.0);
     if (s.a > 1.5) { s = vec4f(0.0); }
-    let w = exp(-fk * fk * 0.18);
+    let w = exp(-fk * fk * 0.3);
     acc += s * w; wsum += w;
   }
   let r = acc / wsum;
-  if (r.a <= 0.001) { discard; }
-  let P = worldFromDepth(uv, d);
-  let V = normalize(F.camPos.xyz - P);
-  let NdotV = saturate(dot(n, V));
-  let fres = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
-  // puddles: mirror-like patches on flat ground
-  let pn = fbm2(P.xz * 0.11, 3);
-  let puddle = smoothstep(0.05, 0.2, pn) * smoothstep(0.96, 0.995, n.y);
-  let k = g * mix(0.6, 1.0, puddle) * mix(fres, max(fres, 0.35), puddle);
-  return vec4f(r.rgb * k, r.a * k);
+  if (r.a <= 0.0005) { discard; }
+  return r;
 }`;
-
 export class WaterSSR {
   init(ctx) {
     const d = ctx.device, r = ctx.renderer;
@@ -212,15 +195,11 @@ export class WaterSSR {
     ] });
     const q = ctx.quality.level;
     this.tracePipe = r.computePipeline({ label: 'ssr-trace', code: WGSL_SSR_COMMON + TRACE_WGSL, groups: [this.traceLayout],
-      constants: { STEPS_W: q >= 2 ? 24 : q === 1 ? 18 : 14, STEPS_G: q >= 2 ? 20 : q === 1 ? 14 : 10 } });
+      constants: { STEPS_W: q >= 2 ? 24 : q === 1 ? 16 : 12, STEPS_G: q >= 2 ? 12 : q === 1 ? 10 : 8 } });
 
     const F = GPUShaderStage.FRAGMENT;
     this.compLayout = d.createBindGroupLayout({ entries: [
       { binding: 0, visibility: F, texture: { sampleType: 'float' } },
-      { binding: 1, visibility: F, texture: { sampleType: 'depth' } },
-      { binding: 2, visibility: F, texture: { sampleType: 'unfilterable-float' } },
-      { binding: 3, visibility: F, texture: { sampleType: 'unfilterable-float' } },
-      { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float' } },
     ] });
     const mod = shader(d, WGSL_LIB + WGSL_FRAME + WGSL_FULLSCREEN + WGSL_SSR_COMMON + COMP_WGSL, 'ssr-composite');
     this.compPipe = d.createRenderPipeline({
@@ -249,8 +228,7 @@ export class WaterSSR {
       { binding: 0, resource: v.depth }, { binding: 1, resource: v.normal }, { binding: 2, resource: v.albedo },
       { binding: 3, resource: v.motion }, { binding: 4, resource: v.scene }, { binding: 5, resource: this.reflView }] });
     this.compGroup = d.createBindGroup({ layout: this.compLayout, entries: [
-      { binding: 0, resource: this.reflView }, { binding: 1, resource: v.depth }, { binding: 2, resource: v.normal },
-      { binding: 3, resource: v.albedo }, { binding: 4, resource: v.motion }] });
+      { binding: 0, resource: this.reflView }] });
     this.att[0].view = v.scene;
   }
 
@@ -258,8 +236,8 @@ export class WaterSSR {
     const r = ctx.renderer;
     this.computeDesc.timestampWrites = ctx.prof.ts('ssr');
     const p = enc.beginComputePass(this.computeDesc);
-    p.setPipeline(this.tracePipe);
     p.setBindGroup(0, r.frameGroup);
+    p.setPipeline(this.tracePipe);
     p.setBindGroup(1, this.traceGroup);
     p.dispatchWorkgroups(Math.ceil(this.hw / 8), Math.ceil(this.hh / 8));
     p.end();

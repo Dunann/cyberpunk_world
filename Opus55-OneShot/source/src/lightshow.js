@@ -124,6 +124,9 @@ struct FOut { @location(0) color: vec4f, @location(1) motion: vec4f };
 `;
 
 const PI = Math.PI;
+const LASER_COLORS = [[0.2, 1.0, 0.35], [0.15, 0.85, 1.0]];
+// pattern per 8 s section: rising fan, sweep, crossing, pillars, cones, wave fan, crossing, converging finale
+const SHOW_ORDER = [0, 1, 2, 3, 4, 5, 2, 6];
 const WEST = -PI / 2;
 const SECTION = 8;
 
@@ -179,7 +182,7 @@ export default {
     }
     this.laserFan = 6;
     this.ambient = sources.length ? [sources[0], sources[Math.min(2, sources.length - 1)], sources[sources.length - 1]] : [];
-    this.lightBase = ctx.lights.reserve(this.lasers.length + 2);
+    this.lightBase = ctx.lights.reserve(this.lasers.length);
 
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
     this.layout = d.createBindGroupLayout({ entries: [
@@ -224,8 +227,7 @@ export default {
       case 5: // wave fan
         az = WEST + ((j + 0.5) / n - 0.5) * 2.0; el = 0.8 + 0.35 * Math.sin(ts * 2.2 - j * 0.6); break;
       default: { // converge on a point high above the river, then open
-        const q = [2300, 650 + 120 * Math.sin(ts * 0.7), -1150];
-        const dx = q[0] - src.x, dy = q[1] - src.y, dz = q[2] - src.z, l = Math.hypot(dx, dy, dz);
+        const dx = 2300 - src.x, dy = 650 + 120 * Math.sin(ts * 0.7) - src.y, dz = -1150 - src.z, l = Math.hypot(dx, dy, dz);
         out[0] = dx / l; out[1] = dy / l; out[2] = dz / l;
         return out;
       }
@@ -267,9 +269,8 @@ export default {
     if (x > 0.001) {
       const sec = Math.floor(ts / SECTION);
       const local = ts - sec * SECTION;
-      const order = [0, 1, 2, 3, 4, 5, 2, 6];
-      const pA = order[Math.min(sec, order.length - 1)];
-      const pB = order[Math.min(sec + 1, order.length - 1)];
+      const pA = SHOW_ORDER[Math.min(sec, SHOW_ORDER.length - 1)];
+      const pB = SHOW_ORDER[Math.min(sec + 1, SHOW_ORDER.length - 1)];
       const blend = smooth(SECTION - 1.2, SECTION, local);
       const pal = PALETTES[(sec + 1) % PALETTES.length];
       const n = this.nSearch;
@@ -302,7 +303,7 @@ export default {
             const el = 0.012 + 0.03 * Math.sin(ts * 2.0 + j * 0.7 + e) + 0.02 * (1 - Math.abs(f) * 2);
             const ce = Math.cos(el);
             const on = (show.beat + j) % 4 === 0 ? 1.6 : 1.0;
-            const g = e === 0 ? [0.2, 1.0, 0.35] : [0.15, 0.85, 1.0];
+            const g = LASER_COLORS[e % 2];
             const kk = lk * on * 5;
             this._write(count++, L.x, L.y, L.z, 1500, Math.sin(az) * ce, Math.sin(el), -Math.cos(az) * ce, 0.12,
               g[0] * kk, g[1] * kk, g[2] * kk, 0.0006);

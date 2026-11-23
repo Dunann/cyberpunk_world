@@ -308,8 +308,8 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
       mesh.beam(a, b, up, 0.06, 0.05, 3, bid, S[i]);
     }
   }
-  // ---- street lights every 34 m on both sides (staggered)
-  for (let s = 18, k = 0; s < len - 10; s += 34, k++) {
+  // ---- street lights on both sides (staggered, 20 m apart)
+  for (let s = 12, k = 0; s < len - 8; s += 20, k++) {
     const sd = k % 2 ? 1 : -1;
     const base = P(s, sd * (hw - 0.6), 0.22);
     const top = add(base, [0, 9, 0]);
@@ -351,6 +351,11 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
     }
     const c0 = P(s, -hw * 0.6, -3.2), c1 = P(s, hw * 0.6, -3.2);
     mesh.beam(add(c0, [0, -1.2, 0]), add(c1, [0, -1.2, 0]), along, 1.2, 1.2, 0, bid, s);
+    // accent light washing the pier and the deck underside
+    if (y - Math.max(g, 0) > 9) {
+      const pl = P(s, 0, -6);
+      lightsOut.push([pl[0], pl[1], pl[2], 24, style.a[0] * 14, style.a[1] * 14, style.a[2] * 14]);
+    }
   }
 
   // ---- type specific superstructure

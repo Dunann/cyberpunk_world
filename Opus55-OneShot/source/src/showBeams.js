@@ -59,7 +59,7 @@ fn beamGlow(ro: vec3f, rd: vec3f, maxT: f32, bm: Beam, pixAng: f32, t: f32) -> v
   if (so > 0.0 && so < maxT + bm.d.w * 4.0) {
     let dO = length(O - ro - rd * so);
     let rf = max(bm.d.w * 1.5, pixAng * so * 1.5);
-    let a = bm.d.w * 3.0;
+    let a = bm.d.w * 2.0;
     // falls to exactly zero at 8 rf (inside the quad drawn around the lamp)
     let g = max((a * a) / (dO * dO + rf * rf) - (a * a) / (65.0 * rf * rf), 0.0);
     c += bm.c.rgb * 1.0 * g;

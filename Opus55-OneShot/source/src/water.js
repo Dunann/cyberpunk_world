@@ -56,13 +56,13 @@ fn wakes(p: vec2f, t: f32) -> vec3f {
     let decay = exp(-bk / (60.0 + spd * 18.0)) * saturate(spd * 0.35);
     // diverging waves on the arms (tan 19.5 deg = 0.354)
     let armD = al - bk * 0.354 - hb * 0.8;
-    let arm = exp(-armD * armD / (4.0 + bk * 0.25)) * smoothstep(-hl, 4.0, back);
+    let arm = exp(-armD * armD / (8.0 + bk * 0.9)) * smoothstep(-hl, 4.0, back) * (1.0 - smoothstep(120.0, 260.0, bk));
     let ph = armD * 1.1 - bk * 0.35 - t * 2.2;
     let armN = side * sign(lat) + fwd * 0.354;
-    s += armN * cos(ph) * arm * decay * 0.22;
+    s += armN * cos(ph) * arm * decay * 0.28;
     // transverse waves inside the wedge
     let inside = smoothstep(0.0, -6.0, armD) * smoothstep(-hl, 6.0, back);
-    s += -fwd * cos(bk * 0.55 - t * 3.0) * inside * decay * 0.12;
+    s += -fwd * cos(bk * 0.55 - t * 3.0) * inside * decay * 0.18;
     // turbulent trail
     let tw = hb * (1.0 + bk * 0.035);
     let trail = exp(-lat * lat / (tw * tw)) * exp(-bk / (35.0 + spd * 14.0)) * smoothstep(-hl * 1.2, 0.0, back) * saturate(spd * 0.5);
@@ -154,7 +154,7 @@ fn ndcOf(dir: vec3f) -> vec2f {
     foam += wv.z;
   }
   if (F.params.x > 0.0 && dist < 70.0) {
-    slope += rainRings(p.xz, t) * 0.05 * F.params.x * (1.0 - smoothstep(25.0, 70.0, dist));
+    slope += rainRings(p.xz, t) * 0.3 * F.params.x * (1.0 - smoothstep(20.0, 70.0, dist));
   }
   let n = normalize(vec3f(-slope.x, 1.0, -slope.y));
 
@@ -203,7 +203,6 @@ fn ndcOf(dir: vec3f) -> vec2f {
     refl /= rw;
   }
 
-
   // moon glitter
   let hm = normalize(v + F.moon.xyz);
   let a = 0.05 + sqrt(sigma2) * 0.6;
@@ -211,7 +210,7 @@ fn ndcOf(dir: vec3f) -> vec2f {
   let nh = max(dot(n, hm), 0.0);
   let dd = nh * nh * (a2 - 1.0) + 1.0;
   let D = a2 / (PI * dd * dd);
-  let moonSpec = vec3f(0.55, 0.65, 0.95) * F.moon.w * D * 0.25 * saturate(dot(n, F.moon.xyz));
+  let moonSpec = vec3f(0.55, 0.65, 0.95) * F.moon.w * D * 0.15 * saturate(dot(n, F.moon.xyz));
 
   let NdotV = saturate(dot(n, v));
   let fres = 0.02 + 0.98 * pow(1.0 - NdotV, 5.0);
@@ -225,8 +224,9 @@ fn ndcOf(dir: vec3f) -> vec2f {
     let fn1 = gnoise2(fp * 0.45) * 0.5 + 0.5;
     let fn2 = gnoise2(fp * 1.7 + 5.0) * 0.5 + 0.5;
     foam = saturate(foam * (fn1 * 0.7 + fn2 * 0.6) - 0.15);
-    let foamLight = skyAmbient(vec3f(0.0, 1.0, 0.0)) * 1.2 + luma(refl) * vec3f(0.35) + vec3f(0.012, 0.01, 0.014);
-    col = mix(col, foamLight * 0.8, foam * 0.85);
+    // foam is lit by the city glow, the sky and whatever the surface reflects
+    let foamLight = skyAmbient(vec3f(0.0, 1.0, 0.0)) * 1.5 + min(luma(refl), 2.0) * vec3f(0.4) + vec3f(0.05, 0.045, 0.06);
+    col = mix(col, foamLight, foam * 0.85);
   }
 
   // soft edge where the water is very shallow
