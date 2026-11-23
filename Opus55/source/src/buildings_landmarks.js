@@ -74,10 +74,10 @@ export function prepareLots(world) {
       const lx0 = ax * c + az * s, lz0 = -ax * s + az * c;
       const dlz = -ux * s + uz * c;
       const dlx = ux * c + uz * s;
+      const half = 4.5;
       if (Math.abs(dlx) > Math.abs(dlz) * 3) {
         // corridor runs along local x: cut the lot in z (line position at the lot center)
         const lzc = lz0 - dlz * lx0 / dlx;
-        const half = 4.5;
         const lo = -L.d / 2, hi = L.d / 2;
         const keepLow = (lzc - half) - lo, keepHigh = hi - (lzc + half);
         if (Math.max(keepLow, keepHigh) < 8) { L.dead = true; continue; }
@@ -86,6 +86,18 @@ export function prepareLots(world) {
         const mid = (nlo + nhi) / 2;
         L.x += -s * mid; L.z += c * mid;
         L.d = nhi - nlo;
+        L.trimmed = true;
+      } else if (Math.abs(dlz) > Math.abs(dlx) * 3) {
+        // corridor runs along local z: cut the lot in x
+        const lxc = lx0 - dlx * lz0 / dlz;
+        const lo = -L.w / 2, hi = L.w / 2;
+        const keepLow = (lxc - half) - lo, keepHigh = hi - (lxc + half);
+        if (Math.max(keepLow, keepHigh) < 8) { L.dead = true; continue; }
+        let nlo, nhi;
+        if (keepLow > keepHigh) { nlo = lo; nhi = lxc - half; } else { nlo = lxc + half; nhi = hi; }
+        const mid = (nlo + nhi) / 2;
+        L.x += c * mid; L.z += s * mid;
+        L.w = nhi - nlo;
         L.trimmed = true;
       } else L.dead = true;
     }
@@ -96,6 +108,63 @@ export function prepareLots(world) {
 }
 
 // ------------------------------------------------------------------ market plaza (pose 6)
+
+// Goods on a stall counter (top at y). (ux,uz) runs along the counter, (fx,fz) points from the stall to the lane.
+function stallGoods(B, R, x, z, y, a, ux, uz, fx, fz) {
+  const kind = Math.floor(R() * 5);
+  const at = (u, f) => [x + ux * u - fx * f, z + uz * u - fz * f];
+  if (kind === 0) {
+    // hanging carpets on the canopy front, a few rolled ones standing on the counter
+    for (let k = 0; k < 3; k++) {
+      const [cx, cz] = at(-1.3 + k * 1.3, 1.45);
+      B.prop({ x: cx, y0: y + 0.25, z: cz, a, hw: 0.55, hd: 0.025, h: 1.25, mat: MAT.CARPET, col: [0.5, 0.1, 0.08], seed: R() * 999 });
+    }
+    for (let k = 0; k < 3; k++) {
+      const [cx, cz] = at(-1.2 + k * 0.35, -0.3);
+      B.prop({ x: cx, y0: y, z: cz, hw: 0.12, h: 0.9 + R() * 0.3, kind: 2, prm: 12, mat: MAT.CARPET, col: [0.4, 0.1, 0.1], seed: R() * 999 });
+    }
+  } else if (kind === 1) {
+    // stacks of folded felt with ornament bands
+    for (let s = 0; s < 3; s++) {
+      const [cx, cz] = at(-1.2 + s * 1.2, 0);
+      for (let k = 0; k < 3 + Math.floor(R() * 3); k++) {
+        B.prop({ x: cx, y0: y + k * 0.13, z: cz, a: a + (R() - 0.5) * 0.3, hw: 0.32, hd: 0.24, h: 0.12, mat: MAT.FELT, col: [[0.8, 0.76, 0.7], [0.6, 0.15, 0.12], [0.15, 0.3, 0.55], [0.7, 0.55, 0.2]][Math.floor(R() * 4)], param: 0.4, flags: FLAG.BOTTOM });
+      }
+    }
+  } else if (kind === 2) {
+    // charcoal grill with skewers
+    const [gx, gz] = at(0, 0);
+    B.prop({ x: gx, y0: y, z: gz, a, hw: 1.3, hd: 0.25, h: 0.22, mat: MAT.METAL, col: [0.12, 0.12, 0.12] });
+    B.prop({ x: gx, y0: y + 0.22, z: gz, a, hw: 1.2, hd: 0.18, h: 0.02, mat: MAT.EMIT, col: [1, 0.35, 0.08], param: 5, winW: 2 });
+    for (let k = 0; k < 9; k++) {
+      const [sx, sz] = at(-1.05 + k * 0.26, 0);
+      B.prop({ x: sx, y0: y + 0.27, z: sz, a: a + Math.PI / 2, hw: 0.32, hd: 0.035, h: 0.05, mat: MAT.CONCRETE, col: [0.45, 0.2, 0.1] });
+    }
+  } else if (kind === 3) {
+    // fruit pyramids
+    const fruit = [[1, 0.45, 0.05], [0.8, 0.1, 0.08], [0.45, 0.7, 0.15], [0.95, 0.8, 0.15]];
+    for (let p = 0; p < 3; p++) {
+      const col = fruit[Math.floor(R() * fruit.length)];
+      const [cx, cz] = at(-1.2 + p * 1.2, 0);
+      const r = 0.1;
+      for (let lay = 0; lay < 3; lay++) {
+        const nn = 3 - lay;
+        for (let i = 0; i < nn; i++) for (let j = 0; j < nn; j++) {
+          const ou = (i - (nn - 1) / 2) * r * 2, of = (j - (nn - 1) / 2) * r * 2;
+          B.prop({ x: cx + ux * ou - fx * of, y0: y + lay * r * 1.6, z: cz + uz * ou - fz * of, hw: r, h: r * 2, kind: 2, prm: 12, prof: 2, mat: MAT.TILE, col: col.map((v) => v * 0.6), param: -1 });
+        }
+      }
+    }
+  } else {
+    // bowls and ceramics, plus a lit brass lamp
+    for (let k = 0; k < 7; k++) {
+      const [cx, cz] = at(-1.5 + k * 0.5, (R() - 0.5) * 0.4);
+      B.prop({ x: cx, y0: y, z: cz, hw: 0.13, h: 0.12, kind: 2, prm: 16, prof: 6, taper: 1.6, mat: MAT.TILE, col: R() < 0.6 ? [0.05, 0.4, 0.6] : [0.75, 0.72, 0.65], param: -1 });
+    }
+    const [lx, lz] = at(1.6, 0.2);
+    B.prop({ x: lx, y0: y, z: lz, hw: 0.12, h: 0.35, kind: 2, prm: 8, prof: 3, mat: MAT.EMIT, col: [1, 0.65, 0.25], param: 3 });
+  }
+}
 
 export function genMarket(B, R, world, market) {
   const C = world.poses[5].resolved;
@@ -117,17 +186,35 @@ export function genMarket(B, R, world, market) {
       const [cx, cz] = [x - px * side * 0.3, z - pz * side * 0.3];
       B.part({ x: cx, y0: g + 2.35, z: cz, a, hw: 1.9, hd: 1.3, h: 0.7, taper: 0.5, mat: MAT.CONCRETE, col: fabric[Math.floor(R() * fabric.length)], param: 2.2, flags: FLAG.BOTTOM });
       for (const o of [-2.2, 2.2]) B.prop({ x: x + ux * o, y0: g, z: z + uz * o, hw: 0.07, h: 2.6, kind: 2, prm: 8, mat: MAT.METAL, col: [0.2, 0.2, 0.2] });
-      for (let k = 0; k < 3; k++) B.prop({ x: x + ux * (k - 1) * 1.2, y0: g + 1.0, z: z + uz * (k - 1) * 1.2, a, hw: 0.3 + R() * 0.2, hd: 0.3, h: 0.25 + R() * 0.3, mat: MAT.EMIT, col: [[1, 0.5, 0.2], [0.9, 0.8, 0.4], [1, 0.3, 0.3], [0.5, 0.9, 0.3]][k], param: 0.15 + R() * 0.2, flags: FLAG.BOTTOM });
-      B.prop({ x: x - px * side * 1.2, y0: g + 1.85, z: z - pz * side * 1.2, hw: 0.24, h: 0.5, kind: 2, prm: 16, prof: 2, mat: MAT.EMIT, col: [1, 0.55, 0.18], param: 6, winW: 2 });
+      stallGoods(B, R, x, z, g + 1.0, a, ux, uz, px * side, pz * side);
+      // hanging lamp on a cord under the canopy
+      const lx = x - px * side * 1.2, lz = z - pz * side * 1.2;
+      B.prop({ x: lx, y0: g + 1.85, z: lz, hw: 0.24, h: 0.5, kind: 2, prm: 16, prof: 2, mat: MAT.EMIT, col: [1, 0.55, 0.18], param: 6, winW: 2 });
+      B.prop({ x: lx, y0: g + 2.35, z: lz, hw: 0.015, h: 0.25, mat: MAT.METAL, col: [0.1, 0.1, 0.1] });
       B.slot(cx - px * side * 1.7, g + 3.2, cz - pz * side * 1.7, -px * side, -pz * side, 3.5, 0.8, false, DT.STEPPE);
     }
     // lantern string across the lane
     if (Math.round(t / 5.5) % 3 === 0) {
       const g = world.heightAt(C.x + ux * t, C.z + uz * t);
+      // poles at both ends, a catenary wire through the lantern tops
+      const wire = [];
+      for (const o of [-7, 7]) {
+        const wx = C.x + ux * t + px * o, wz = C.z + uz * t + pz * o;
+        const gp = world.heightAt(wx, wz);
+        B.prop({ x: wx, y0: gp - 0.3, z: wz, hw: 0.08, h: g + 5.75 - gp, kind: 2, prm: 8, mat: MAT.METAL, col: [0.18, 0.17, 0.16] });
+        if (o < 0) wire.push([wx, g + 5.45, wz]);
+      }
       for (let k = -6; k <= 6; k++) {
         const o = k * 0.95;
-        const sag = 1.2 * (1 - (o / 6.5) * (o / 6.5));
-        B.prop({ x: C.x + ux * t + px * o, y0: g + 5.2 - sag, z: C.z + uz * t + pz * o, hw: 0.2, h: 0.36, kind: 2, prm: 16, prof: 2, mat: MAT.EMIT, col: k % 2 ? [1, 0.18, 0.08] : [1, 0.62, 0.22], param: 6, winW: 2 });
+        const sag = 1.2 * (1 - (o / 7) * (o / 7));
+        const lx = C.x + ux * t + px * o, lz = C.z + uz * t + pz * o;
+        B.prop({ x: lx, y0: g + 5.2 - sag, z: lz, hw: 0.2, h: 0.36, kind: 2, prm: 16, prof: 2, mat: MAT.EMIT, col: k % 2 ? [1, 0.18, 0.08] : [1, 0.62, 0.22], param: 6, winW: 2 });
+        wire.push([lx, g + 5.2 - sag + 0.4, lz]);
+      }
+      wire.push([C.x + ux * t + px * 7, g + 5.45, C.z + uz * t + pz * 7]);
+      for (let k = 0; k < wire.length - 1; k++) {
+        const [a0, b0] = wire[k][1] <= wire[k + 1][1] ? [wire[k], wire[k + 1]] : [wire[k + 1], wire[k]];
+        B.prop({ x: a0[0], y0: a0[1] - 0.012, z: a0[2], hw: 0.012, h: b0[1] - a0[1] + 0.024, lx: b0[0] - a0[0], lz: b0[2] - a0[2], mat: MAT.METAL, col: [0.08, 0.08, 0.08] });
       }
       if (t < 150) B.light(C.x + ux * t, g + 4.2, C.z + uz * t, 14, [1, 0.6, 0.3], 26, 4);
     }

@@ -73,7 +73,8 @@ export class Builder {
     this.led = [];
     this.sites = {};             // landmark anchor points published to world.shared.landmarkSites
     this.hillTowers = [];        // hillside tower shafts, used to add skybridges
-    this.propBudget = quality >= 2 ? 70000 : quality === 1 ? 40000 : 15000;
+    this.hillPods = [];          // terraced hillside podiums, used to add elevated walkways
+    this.propBudget = quality >= 2 ? 90000 : quality === 1 ? 50000 : 18000;
     this.props = 0;
   }
 
@@ -192,7 +193,7 @@ function crown(B, R, o) {
       B.part({ x, y0: y - 0.4, z, a, hw: thw + 0.4, hd: thd + 0.4, h: 0.5, kind, prm, mat: MAT.EMIT, col, param: 2.2, flags: FLAG.BOTTOM });
       // fins around the perimeter (only on box-like plans, max ~20 per tier)
       if (kind !== 2 || prm <= 8) {
-        const nx = Math.max(2, Math.min(6, Math.round(thw / 3.5))), nz = Math.max(2, Math.min(5, Math.round(thd / 3.5)));
+        const nx = Math.max(2, Math.min(4, Math.round(thw / 4.5))), nz = Math.max(2, Math.min(3, Math.round(thd / 4.5)));
         const fins = [];
         for (let i = 0; i < nx; i++) { const u = -thw + (i + 0.5) * 2 * thw / nx; fins.push([u, thd], [u, -thd]); }
         for (let i = 0; i < nz; i++) { const v = -thd + (i + 0.5) * 2 * thd / nz; fins.push([thw, v], [-thw, v]); }
@@ -261,6 +262,7 @@ function streetFaces(L) {
 }
 
 function lotSigns(B, R, L, podTop, style, density = 1) {
+  const topAt = typeof podTop === 'function' ? podTop : () => podTop;
   const W = B.world;
   const hw = L.w / 2 - 0.5, hd = L.d / 2 - 0.5;
   const faces = rectFaces(hw, hd);
@@ -271,19 +273,45 @@ function lotSigns(B, R, L, podTop, style, density = 1) {
     const p = street[fi] ? 1 : 0.25;
     const nx = F.nx * c - F.nz * s, nz = F.nx * s + F.nz * c;
     const at = (t, out) => { const lx = F.sx + F.dx * t + F.nx * 0.05, lz = F.sz + F.dz * t + F.nz * 0.05; return [L.x + lx * c - lz * s, L.z + lx * s + lz * c]; };
+    // Hong Kong-style street faces (hillside, urban): a blade every few metres, a second taller blade on some,
+    // and a fascia over each shopfront. All stay below the podium top so they sit on a wall.
+    if (street[fi] && (style === DT.HILLSIDE || style === DT.URBAN)) {
+      const hill = style === DT.HILLSIDE;
+      const step = hill ? 4.6 : 7.0;
+      for (let t = 1.5 + R() * 2; t < F.len - 1.5; t += step * (0.7 + R() * 0.6)) {
+        if (R() > 0.85 * density) continue;
+        const [x, z] = at(t);
+        const g = W.heightAt(x, z), top = topAt(x, z) - 0.4;
+        const h1 = Math.min(2.5 + R() * 3.5, top - g - 3.6);
+        if (h1 >= 2) B.slot(x, g + 3.6 + h1 / 2, z, nx, nz, 0.9 + R() * 0.6, h1, true, style);
+        const b2 = g + 7.5 + R() * 2, h2 = Math.min(3 + R() * 5, top - b2);
+        if (R() < (hill ? 0.5 : 0.3) && h2 >= 2.5) {
+          const [x2, z2] = at(Math.min(t + 0.6, F.len - 0.5));
+          B.slot(x2, b2 + h2 / 2, z2, nx, nz, 1.4 + R() * 1.2, h2, true, style);
+        }
+      }
+      for (let t = 0.6; t < F.len - 2;) {
+        const seg = Math.min(4 + R() * 6, F.len - t);
+        const [x, z] = at(t + seg / 2);
+        const g = W.heightAt(x, z);
+        if (R() < 0.85 * density && topAt(x, z) - g > 4.6) B.slot(x, g + 3.0, z, nx, nz, seg - 0.4, 0.9 + R() * 0.5, false, style);
+        t += seg + 0.3;
+      }
+      continue;
+    }
     if (street[fi] && R() < 0.38 * density) {
       const t = F.len * (0.3 + R() * 0.4);
       const [x, z] = at(t);
       const g = W.heightAt(x, z);
       const w = Math.min(F.len * 0.55, 4 + R() * 10);
-      B.slot(x, Math.min(g + 4.0, podTop - 0.8), z, nx, nz, w, 1.1, false, style);
+      B.slot(x, Math.min(g + 4.0, topAt(x, z) - 0.8), z, nx, nz, w, 1.1, false, style);
     }
     if (R() < 0.33 * p * density) {
       const t = R() < 0.5 ? 1.2 + R() * 2 : F.len - 1.2 - R() * 2;
       const [x, z] = at(t);
       const g = W.heightAt(x, z);
       // blade sign on the podium facade: from 3.5 m above the street up to just below the podium top
-      const bottom = g + 3.5, top = Math.min(podTop - 0.4, g + 20);
+      const bottom = g + 3.5, top = Math.min(topAt(x, z) - 0.4, g + 20);
       const h = Math.min(4 + R() * 9, top - bottom);
       if (h >= 2) B.slot(x, bottom + h / 2, z, nx, nz, 1.1 + R() * 0.6, h, true, style);
     }
@@ -304,7 +332,7 @@ function podium(B, R, L, opts) {
 function terracedPodium(B, R, L, opts) {
   const W = B.world;
   const diff = L.gMax - L.gMin;
-  if (diff < 7) { const top = podium(B, R, L, opts); return { top, minTop: top }; }
+  if (diff < 7) { const top = podium(B, R, L, opts); B.hillPods.push({ L, top, minTop: top }); return { top, minTop: top, topAt: () => top }; }
   const hw = L.w / 2 - 0.5, hd = L.d / 2 - 0.5;
   const hAt = (lx, lz) => { const [x, z] = Builder.tw(L.x, L.z, L.angle, lx, lz); return W.heightAt(x, z); };
   const sx = (hAt(hw, 0) - hAt(-hw, 0)) / (2 * hw), sz = (hAt(0, hd) - hAt(0, -hd)) / (2 * hd);
@@ -343,7 +371,7 @@ function terracedPodium(B, R, L, opts) {
   if (diff > 9 && free.length && R() < 0.45) {
     const sgn = free[0][1];
     const off = (alongX ? hd : hw) + 2.5;
-    const steps = Math.min(60, Math.round(2 * len / 1.1));
+    const steps = Math.min(40, Math.round(2 * len / 1.4));
     for (let k = 0; k < steps; k++) {
       const u = -len + (k + 0.5) * 2 * len / steps;
       const lx = alongX ? u : sgn * off, lz = alongX ? sgn * off : u;
@@ -359,7 +387,15 @@ function terracedPodium(B, R, L, opts) {
     }
   }
   B.hillPods.push({ L, top, minTop });
-  return { top, minTop };
+  // podium top at a world point (used to keep sign slots on the terrace they are mounted on)
+  const c = Math.cos(L.angle), s = Math.sin(L.angle);
+  const topAt = (x, z) => {
+    const dx = x - L.x, dz = z - L.z;
+    const u = alongX ? dx * c + dz * s : -dx * s + dz * c;
+    const i = Math.max(0, Math.min(n - 1, Math.floor((u + len) / (2 * len) * n)));
+    return strips[i].t;
+  };
+  return { top, minTop, topAt };
 }
 
 // Elevated pedestrian walkways between facing hillside podiums across a road.
@@ -386,7 +422,7 @@ export function walkways(B, R) {
         const gap = Math.abs(alongX ? lx : lz) - (alongX ? (LA.w + LB.w) / 2 : (LA.d + LB.d) / 2);
         if (gap < 9 || gap > 24) continue;    // across a road, not across an alley
         const y = Math.min(A.minTop, pods[j].minTop) - 0.3;
-        if (y - Math.max(LA.gMax, LB.gMax) < 6) continue;
+        if (y - Math.max(LA.gMax, LB.gMax) < 5) continue;
         const mx = LA.x + ox / 2, mz = LA.z + oz / 2;
         const ang = Math.atan2(oz, ox);
         const half = Math.hypot(ox, oz) / 2;
@@ -450,8 +486,9 @@ const CROWNS_CBD = ['lit', 'lit', 'spire', 'helipad', 'antenna', 'spire', 'machi
 
 export function genHillside(B, R, L) {
   const podH = 6 + 3 * Math.floor(R() * 3);
-  const podTop = podium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.6, winW: 3.2, lit: 0.55, flags: R() < 0.3 ? FLAG.ARCADE : 0 });
-  lotSigns(B, R, L, podTop, DT.HILLSIDE);
+  const tp = terracedPodium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.6, winW: 3.2, lit: 0.55, flags: R() < 0.3 ? FLAG.ARCADE : 0 });
+  const podTop = tp.minTop;   // towers start on the lowest terrace (they pass through the higher ones)
+  lotSigns(B, R, L, tp.topAt, DT.HILLSIDE);
   if (R() < 0.55) shopLight(B, R, L, podTop);
   const t = R();
   const maxTop = L.maxTop || 1e9;
@@ -480,6 +517,7 @@ export function genHillside(B, R, L) {
   const two = long && R() < 0.55;
   let floors = 18 + Math.floor(Math.pow(R(), 1.15) * 38);
   if (R() < 0.07) floors = 62 + Math.floor(R() * 22);
+  else if (R() < 0.16) floors = 10 + Math.floor(R() * 7);
   const floorH = 3.0;
   const shapeR = R();
   let kind = 0, prm = 0;
@@ -507,7 +545,9 @@ export function genHillside(B, R, L) {
     const segs = R() < 0.35 ? 2 : 1;
     const tw = tower(B, R, { x: T.x, z: T.z, a: L.angle, y0: podTop, baseY: podTop, hw: T.hw, hd: T.hd, h, segs, kind, prm, mat: MAT.RES, col, floorH, winW, lit, flags, seed: R() * 999 });
     B.hillTowers.push({ x: T.x, z: T.z, a: L.angle, hw: T.hw, hd: T.hd, y0: podTop, top: podTop + h * (segs === 2 ? 0.6 : 1), district: L.district });
-    if (kind === 0 && prm === 0) acUnits(B, R, T.x, T.z, L.angle, T.hw, T.hd, podTop, podTop, podTop + h * (segs === 2 ? 0.6 : 1), floorH, winW, 0.07);
+    if (kind === 0 && prm === 0) acUnits(B, R, T.x, T.z, L.angle, T.hw, T.hd, podTop, podTop, podTop + h * (segs === 2 ? 0.6 : 1), floorH, winW, 0.09);
+    // rooftop neon accent: a coloured parapet line that reads from far viewpoints
+    if (kind !== 2 && R() < 0.28) B.part({ x: T.x, y0: tw.top - 0.7, z: T.z, a: L.angle, hw: tw.hw + 0.15, hd: tw.hd + 0.15, h: 0.35, kind: tw.kind, prm: tw.prm, mat: MAT.EMIT, col: pick(R, PAL.neon), param: 4.5, flags: FLAG.BOTTOM | FLAG.NOTOP });
     if (R() < 0.12 && kind === 0) {
       // cross plan: perpendicular wing
       B.part({ x: T.x, y0: podTop, z: T.z, a: L.angle, hw: T.hw * 0.45, hd: T.hd + 3, h: h * 0.92, mat: MAT.RES, col, floorH, winW, baseY: podTop, param: lit, seed: R() * 999, solid: true });
@@ -549,8 +589,9 @@ export function genUrban(B, R, L) {
     return;
   }
   const podH = 6 + 3.5 * Math.floor(R() * 2);
-  const podTop = podium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.5, winW: 3.2, lit: 0.55, flags: arcade ? FLAG.ARCADE : 0 });
-  lotSigns(B, R, L, podTop, DT.URBAN);
+  const tp = terracedPodium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.5, winW: 3.2, lit: 0.55, flags: arcade ? FLAG.ARCADE : 0 });
+  const podTop = tp.minTop;
+  lotSigns(B, R, L, tp.topAt, DT.URBAN);
   if (R() < 0.5) shopLight(B, R, L, podTop);
   const ins = 1.5 + R() * 3;
   const hw = L.w / 2 - ins, hd = L.d / 2 - ins;

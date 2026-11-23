@@ -19,7 +19,7 @@ export const FLAG = {
 
 export const MAT = {
   CONCRETE: 0, RES: 1, OFFICE: 2, GLASS: 3, STONE: 4, SHOP: 5, BRICK: 6, TILE: 7, WOOD: 8, FELT: 9,
-  METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17, CRYSTAL: 18,
+  METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17, CRYSTAL: 18, CARPET: 19,
 };
 
 export const PART_WGSL = /* wgsl */ `
@@ -819,6 +819,13 @@ fn carpet(p: vec2f) -> vec3f {
     // up-lighting: bright at the foot of each crown tier, fading upward, with a hot rim at the base
     let up = 0.25 + 1.1 * exp(-hf * 3.2) + 1.2 * (1.0 - smoothstep(0.0, 0.05, hf));
     S.emis = col * prm * up * 0.55 * (0.2 + 0.8 * slat) * pulseK;
+  } else if (mat == 19u) {
+    // ---------------- woven carpet (market goods): medallion pattern, softly lit by the stall lamps
+    let hf = (wp.y - P.a.y) / max(P.b.z, 0.1);
+    let cb = carpet(vec2f(fd / max(fl, 0.3) * 1.0 + seed * 0.13, hf * 1.6));
+    let hue = hsv(fract(seed * 0.071), 0.5, 1.0);
+    S.alb = cb * mix(vec3f(1.0), hue, 0.35); S.rough = 0.95; S.wet = 0.2;
+    S.emis = S.alb * vec3f(1.0, 0.75, 0.5) * 0.25;
   } else if (mat == 15u) {
     S.alb = vec3f(0.2); S.metal = 0.6; S.rough = 0.4;
     S.emis = vec3f(1.0, 0.85, 0.3) * 2.0 * pulse(0.0, 0.3, fract(fd / 2.0), fw.x / 2.0);
