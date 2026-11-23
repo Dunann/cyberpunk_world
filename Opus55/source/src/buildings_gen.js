@@ -74,15 +74,16 @@ export class Builder {
     this.sites = {};             // landmark anchor points published to world.shared.landmarkSites
     this.hillTowers = [];        // hillside tower shafts, used to add skybridges
     this.hillPods = [];          // terraced hillside podiums, used to add elevated walkways
-    this.propBudget = quality >= 2 ? 90000 : quality === 1 ? 50000 : 18000;
+    this.propBudget = quality >= 2 ? 130000 : quality === 1 ? 70000 : 20000;
     this.props = 0;
+    this.shopProps = 0;          // props added by shopfront() (awnings, AC units, stepped pavements)
   }
 
   part(o) { return this.P.add(o); }
   prop(o) {
     if (this.props >= this.propBudget) return -1;
     this.props++;
-    o.flags = (o.flags || 0) | FLAG.PROP;
+    o.flags = (o.flags || 0) | FLAG.PROP | (this.detail ? FLAG.DETAIL : 0);
     return this.P.add(o);
   }
   light(x, y, z, r, c, k, prio = 1, flicker = 0) { this.lights.push([x, y, z, r, c[0] * k, c[1] * k, c[2] * k, flicker, prio]); }
@@ -251,14 +252,95 @@ function crown(B, R, o) {
 }
 
 // Choose podium and sign slots for a lot. Returns podium top.
-function streetFaces(L) {
+function streetFaces(L) { return streetFacesBox(L, L.x, L.z, L.w / 2, L.d / 2); }
+
+// Which faces of a box (centre x,z, half sizes hw,hd, aligned with lot L) face a street. Ring order: +z, -x, -z, +x.
+function streetFacesBox(L, x, z, hw, hd) {
   const D = DISTRICTS[L.district];
   const c = Math.cos(-D.angle), s = Math.sin(-D.angle);
-  const qx = (L.x - D.cx) * c - (L.z - D.cz) * s, qz = (L.x - D.cx) * s + (L.z - D.cz) * c;
-  const lim = D.road / 2 + 3 + 2.5;
+  const qx = (x - D.cx) * c - (z - D.cz) * s, qz = (x - D.cx) * s + (z - D.cz) * c;
+  // road half width + 3 m sidewalk + slack for lots trimmed back from the road (prepareLots); internal
+  // edges between sub-lots of a block lie much further from any road line
+  const lim = D.road / 2 + 3 + 8;
   const isStreet = (e) => Math.abs(e - Math.round(e / D.block) * D.block) < lim;
-  // ring order faces: +z, -x, -z, +x
-  return [isStreet(qz + L.d / 2), isStreet(qx - L.w / 2), isStreet(qz - L.d / 2), isStreet(qx + L.w / 2)];
+  return [isStreet(qz + hd), isStreet(qx - hw), isStreet(qz - hd), isStreet(qx + hw)];
+}
+
+// The shader's integer hash (pcg, common.js), so props can line up with shader-drawn shop bays.
+function pcg(v) {
+  const s = (Math.imul(v >>> 0, 747796405) + 2891336453) >>> 0;
+  const w = Math.imul(((s >>> ((s >>> 28) + 4)) ^ s) >>> 0, 277803737) >>> 0;
+  return ((w >>> 22) ^ w) >>> 0;
+}
+const hash11u = (v) => pcg(v) / 4294967295;
+
+// Shopfront dressing on the street faces of a box-shaped SHOP part. Mirrors the shop bay layout in the
+// facade shader (buildings_wgsl.js, mat 5): every bay has a level floor at the mean pavement height of its
+// two ends. Per bay: a fascia sign slot on the signage board, often a straight awning with a light strip
+// under its front edge, sometimes an AC unit above. On sloping hillside streets the pavement in front is
+// stepped, with a stepped handrail along the kerb.
+function shopfront(B, R, L, cx, cz, hw, hd, seed, top, hill) {
+  if (B.q === 0) return;
+  const p0 = B.props;
+  B.detail = true;
+  shopfrontFaces(B, R, L, cx, cz, hw, hd, seed, top, hill);
+  B.detail = false;
+  B.shopProps += B.props - p0;
+}
+
+function shopfrontFaces(B, R, L, cx, cz, hw, hd, seed, top, hill) {
+  const W = B.world;
+  const faces = rectFaces(hw, hd);
+  const street = streetFacesBox(L, cx, cz, hw + 0.5, hd + 0.5);
+  const c = Math.cos(L.angle), s = Math.sin(L.angle);
+  const sf = Math.fround(seed);
+  for (let fi = 0; fi < 4; fi++) {
+    if (!street[fi]) continue;
+    const F = faces[fi];
+    const nx = F.nx * c - F.nz * s, nz = F.nx * s + F.nz * c;
+    const tx = F.dx * c - F.dz * s, tz = F.dx * s + F.dz * c;
+    const [x0, z0] = Builder.tw(cx, cz, L.angle, F.sx, F.sz);
+    const ang = Math.atan2(F.nz, F.nx) - Math.PI / 2 + L.angle;
+    const gOut = (t, o = 1.5) => W.heightAt(x0 + tx * t + nx * o, z0 + tz * t + nz * o);
+    const bwT = 4.5 + 3 * hash11u(Math.floor(sf) + F.fid * 3);
+    const nb = Math.max(1, Math.round(F.len / bwT)), bw = F.len / nb;
+    const awnC = pick(R, [[0.5, 0.1, 0.08], [0.08, 0.26, 0.38], [0.48, 0.4, 0.1], [0.14, 0.32, 0.18], [0.3, 0.3, 0.32], [0.42, 0.16, 0.3]]);
+    for (let k = 0; k < nb; k++) {
+      const gb = 0.5 * (gOut(k * bw) + gOut((k + 1) * bw));
+      if (top - gb < 5) continue;
+      const tm = (k + 0.5) * bw;
+      const mx = x0 + tx * tm, mz = z0 + tz * tm;
+      const hb = hash11u(Math.floor(Math.fround(Math.fround(Math.fround(k + F.fid * 17) + sf) * 7)) + 3);
+      const shut = hb < 0.22;
+      if (R() < (shut ? 0.5 : 0.9)) B.slot(mx + nx * 0.05, gb + 3.9, mz + nz * 0.05, nx, nz, bw * 0.76, 0.95, false, L.type);
+      if (R() < (shut ? 0.2 : 0.5)) {
+        const ah = bw * 0.42, dep = 0.65 + R() * 0.3;
+        const col = R() < 0.7 ? awnC : pick(R, PAL.neon).map((v) => v * 0.45);
+        const ox = mx + nx * (dep + 0.03), oz = mz + nz * (dep + 0.03);
+        B.prop({ x: ox, y0: gb + 3.28, z: oz, a: ang, hw: ah, hd: dep, h: 0.1, mat: MAT.CONCRETE, col, flags: FLAG.BOTTOM, seed: R() * 999 });
+        B.prop({ x: mx + nx * (2 * dep - 0.12), y0: gb + 3.22, z: mz + nz * (2 * dep - 0.12), a: ang, hw: ah * 0.94, hd: 0.04, h: 0.05, mat: MAT.EMIT, col: [1, 0.86, 0.62], param: 2.2, flags: FLAG.BOTTOM });
+      }
+      if (R() < 0.35 && top - gb > 6) {
+        const u = (R() - 0.5) * bw * 0.6;
+        B.prop({ x: mx + tx * u + nx * 0.32, y0: gb + 4.72, z: mz + tz * u + nz * 0.32, a: ang, hw: 0.42, hd: 0.3, h: 0.55, mat: MAT.CONCRETE, col: [0.5, 0.5, 0.47], flags: FLAG.BOTTOM, seed: R() * 999 });
+      }
+    }
+    // stepped pavement and kerb handrail on sloping hillside streets
+    const slope = Math.abs(gOut(F.len) - gOut(0)) / F.len;
+    if (hill && slope > 0.09) {
+      const ns = Math.min(60, Math.max(2, Math.floor(F.len / Math.min(3.0, Math.max(1.5, 0.3 / slope)))));
+      const rl = F.len / ns;
+      for (let k = 0; k < ns; k++) {
+        const ga = gOut(k * rl, 1.4), gb2 = gOut((k + 1) * rl, 1.4);
+        const yt = Math.max(ga, gb2) + 0.04, yb = Math.min(ga, gb2) - 0.6;
+        const tm = (k + 0.5) * rl;
+        const sx = x0 + tx * tm, sz = z0 + tz * tm;
+        if (B.prop({ x: sx + nx * 1.45, y0: yb, z: sz + nz * 1.45, a: ang, hw: rl / 2 + 0.01, hd: 1.35, h: yt - yb, mat: MAT.CONCRETE, col: [0.3, 0.29, 0.28], seed: R() * 999 }) < 0) return;
+        B.prop({ x: sx + nx * 2.95, y0: yt + 0.95, z: sz + nz * 2.95, a: ang, hw: rl / 2 + 0.03, hd: 0.035, h: 0.05, mat: MAT.METAL, col: [0.55, 0.56, 0.58] });
+        if (k % 3 === 2) B.prop({ x: sx + tx * (rl / 2 - 0.05) + nx * 2.95, y0: yt, z: sz + tz * (rl / 2 - 0.05) + nz * 2.95, hw: 0.035, h: 1.0, kind: 2, prm: 6, mat: MAT.METAL, col: [0.3, 0.3, 0.32] });
+      }
+    }
+  }
 }
 
 function lotSigns(B, R, L, podTop, style, density = 1) {
@@ -282,15 +364,17 @@ function lotSigns(B, R, L, podTop, style, density = 1) {
         if (R() > 0.85 * density) continue;
         const [x, z] = at(t);
         const g = W.heightAt(x, z), top = topAt(x, z) - 0.4;
-        const h1 = Math.min(2.5 + R() * 3.5, top - g - 3.6);
-        if (h1 >= 2) B.slot(x, g + 3.6 + h1 / 2, z, nx, nz, 0.9 + R() * 0.6, h1, true, style);
+        // blades start above the awnings and signage boards of the shopfronts
+        const h1 = Math.min(2.5 + R() * 3.5, top - g - 4.7);
+        if (h1 >= 2) B.slot(x, g + 4.7 + h1 / 2, z, nx, nz, 0.9 + R() * 0.6, h1, true, style);
         const b2 = g + 7.5 + R() * 2, h2 = Math.min(3 + R() * 5, top - b2);
         if (R() < (hill ? 0.5 : 0.3) && h2 >= 2.5) {
           const [x2, z2] = at(Math.min(t + 0.6, F.len - 0.5));
           B.slot(x2, b2 + h2 / 2, z2, nx, nz, 1.4 + R() * 1.2, h2, true, style);
         }
       }
-      for (let t = 0.6; t < F.len - 2;) {
+      // fascia signs: shopfront() already put one on each bay's signage board
+      if (!L.shopfront) for (let t = 0.6; t < F.len - 2;) {
         const seg = Math.min(4 + R() * 6, F.len - t);
         const [x, z] = at(t + seg / 2);
         const g = W.heightAt(x, z);
@@ -322,8 +406,17 @@ function podium(B, R, L, opts) {
   const hw = L.w / 2 - 0.5, hd = L.d / 2 - 0.5;
   const y0 = L.gMin - 4;
   const top = L.gMax + opts.h;
-  B.part({ x: L.x, y0, z: L.z, a: L.angle, hw, hd, h: top - y0, mat: opts.mat, col: opts.col, floorH: opts.floorH || 4.2, winW: opts.winW || 3.4, baseY: L.gMin, param: opts.lit || 0.45, flags: opts.flags || 0, seed: R() * 999, solid: true });
+  const seed = R() * 999;
+  B.part({ x: L.x, y0, z: L.z, a: L.angle, hw, hd, h: top - y0, mat: opts.mat, col: opts.col, floorH: opts.floorH || 4.2, winW: opts.winW || 3.4, baseY: L.gMin, param: opts.lit || 0.45, flags: opts.flags || 0, seed, solid: true });
+  if (wantsShopfront(L, opts)) shopfront(B, R, L, L.x, L.z, hw, hd, seed, top, L.type === DT.HILLSIDE);
   return top;
+}
+
+// shopfront dressing for street-level shop podiums in the hillside and urban districts (not arcades)
+function wantsShopfront(L, opts) {
+  const ok = opts.mat === MAT.SHOP && !((opts.flags || 0) & FLAG.ARCADE) && (L.type === DT.HILLSIDE || L.type === DT.URBAN);
+  if (ok) L.shopfront = true;
+  return ok;
 }
 
 // Podium that steps down a slope: on steep lots it is split along the fall line into 2-4 strips, each covering
@@ -353,6 +446,7 @@ function terracedPodium(B, R, L, opts) {
     const t = smax + opts.h;
     const [cx, cz] = Builder.tw(L.x, L.z, L.angle, alongX ? mid : 0, alongX ? 0 : mid);
     B.part({ x: cx, y0: smin - 4, z: cz, a: L.angle, hw: alongX ? half : hw, hd: alongX ? hd : half, h: t - smin + 4, mat: opts.mat, col: opts.col, floorH: opts.floorH || 4.2, winW: opts.winW || 3.4, baseY: L.gMin, param: opts.lit || 0.45, flags: opts.flags || 0, seed, solid: true });
+    if (wantsShopfront(L, opts)) shopfront(B, R, L, cx, cz, alongX ? half : hw, alongX ? hd : half, seed, t, L.type === DT.HILLSIDE);
     strips.push({ mid, half, t });
     top = Math.max(top, t); minTop = Math.min(minTop, t);
   }

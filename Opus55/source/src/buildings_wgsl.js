@@ -15,6 +15,7 @@ export const PART_FLOATS = 24;
 export const FLAG = {
   NOTOP: 1, BOTTOM: 2, LED: 4, ARCADE: 8, FLOOD: 16, EDGE: 32, ROUND: 64, CURVED: 128, PROP: 256,
   CAPFACADE: 512, BALC: 1024, BLINK: 2048, PORTAL: 4096, RIBS: 8192, NOWIN: 16384, CROWNLIT: 32768, NOBOX: 65536,
+  DETAIL: 131072,   // small street-dressing prop: culled below 8 px instead of the global minimum
 };
 
 export const MAT = {
@@ -55,7 +56,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let dist = max(length(c - F.camPos.xyz) - rad * 0.5, 1.0);
   let pix = rad / dist * F.res.y * 0.5 / tanY * cullU.z;
   let isProp = (flags & 256u) != 0u;
-  if (pix < select(0.35, cullU.w, isProp)) { return; }
+  let minPix = select(0.35, select(cullU.w, 8.0, (flags & 131072u) != 0u), isProp);
+  if (pix < minPix) { return; }
   let isRound = (flags & 64u) != 0u;
   let curved = (flags & 128u) != 0u;
   let nobox = (flags & 65536u) != 0u;
@@ -262,7 +264,17 @@ fn interior(f: vec2f, d0: vec3f, size: vec3f, rs: f32, mode: u32) -> vec3f {
       if (mode == 1u) { let desk = step(0.5, fract(h.z * 3.0 + 0.1)) * step(0.3, fract(h.x * 2.0)); c = mix(c, vec3f(0.55), desk * 0.5); }
     }
   }
-  if (mode == 1u) { lamp = clamp(lamp, 0.6, 0.9); }
+  if (mode == 1u) {
+    // open-plan office: darker walls and floor so rows of ceiling light panels (parallel to the facade)
+    // and the desks give the room depth, instead of a flat bright pane
+    if (t == ty && d.y > 0.0) {
+      let pn = step(fract(h.z * 3.0 + 0.2), 0.2) * step(0.15, fract(h.x * 3.0));
+      c = vec3f(0.07) + vec3f(2.4) * pn;
+    } else if (t == tz) { c *= 0.45; }
+    else if (t != ty) { c *= 0.5; }
+    else { c *= 0.6; }
+    lamp = 0.5 + 0.55 * h.y;
+  }
   if (mode >= 2u) {
     if (t != tz && t != ty) {
       // side-wall shelving
@@ -284,12 +296,13 @@ fn interior(f: vec2f, d0: vec3f, size: vec3f, rs: f32, mode: u32) -> vec3f {
   return col;
 }
 
-fn winLit(id: vec2f, seed: f32, litFrac: f32) -> vec4f {
+// tLo, tSpan: the building's range of roomLight() colour temperatures
+fn winLit(id: vec2f, seed: f32, litFrac: f32, tLo: f32, tSpan: f32) -> vec4f {
   let h1 = hash21(id + vec2f(seed * 7.31, seed * 3.17));
   let period = 70.0 + 230.0 * h1;
   let slot = floor(time() / period + h1 * 17.0);
   let h2 = hash31(vec3f(id + vec2f(seed * 1.7, 11.0), slot));
-  return vec4f(roomLight(fract(h1 * 9.7 + seed * 0.37)), step(h2, litFrac));
+  return vec4f(roomLight(tLo + tSpan * fract(h1 * 9.7 + seed * 0.37)), step(h2, litFrac));
 }
 
 // Shared window grid. Returns emissive (rgb) and glass coverage (w).
@@ -327,6 +340,20 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   if (style == 5u) { ww = 1.0; wh = 0.74; y0 = 0.22; mode = 1u; }
   let x0 = 0.5 - ww * 0.5;
   var mask = pulse(x0, x0 + ww, f.x, fwc.x) * pulse(y0, y0 + wh, f.y, fwc.y);
+  // office glazing: a mullion splits each bay into two panes
+  if (mode == 1u) { mask *= 1.0 - (1.0 - pulse(0.03, 0.97, fract((f.x - x0) / ww * 2.0), fwc.x * 2.0 / ww)) * det; }
+  // per-building character: share of lit windows and colour temperature (warm homes, cool LED, mixed;
+  // offices cool white, neutral, warm or fluorescent green)
+  let hb1 = hash11u(u32(seed * 17.0) + 31u);
+  let hb2 = hash11u(u32(seed * 23.0) + 57u);
+  let litB = clamp(litFrac * (0.35 + 1.3 * hb1), 0.03, 0.95);
+  var tLo = 0.0; var tSpan = 1.0; var avgHome = vec3f(1.0, 0.72, 0.46);
+  if (hb2 < 0.32) { tSpan = 0.74; avgHome = vec3f(1.0, 0.62, 0.33); }
+  else if (hb2 < 0.64) { tLo = 0.7; tSpan = 0.29; avgHome = vec3f(0.88, 0.88, 0.98); }
+  var offBase = vec3f(0.78, 0.88, 1.0);
+  if (hb2 >= 0.35 && hb2 < 0.6) { offBase = vec3f(1.0, 0.94, 0.84); }
+  else if (hb2 >= 0.6 && hb2 < 0.85) { offBase = vec3f(1.0, 0.8, 0.56); }
+  else if (hb2 >= 0.85) { offBase = vec3f(0.82, 1.0, 0.88); }
   if (style == 2u || style == 3u) {
     // arched top: semicircle of the window width
     let rm = ww * cw * 0.5;
@@ -338,17 +365,24 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   // lit state: offices light whole floors / bays; homes light whole apartments (2-3 windows) with
   // per-floor activity so lit and dark storeys read as coherent bands instead of noise
   var lid = id;
-  var lf = litFrac;
-  let floorOn = step(hash21(vec2f(id.y + f32(fid) * 0.0, seed * 1.31 + 5.0)), litFrac * 1.1);
-  if (mode == 1u) { lid = vec2f(floor(id.x / 3.0), id.y); lf = mix(0.05, 0.85, floorOn); }
+  var lf = litB;
+  let floorOn = step(hash21(vec2f(id.y, seed * 1.31 + 5.0)), litB * 1.1);
+  if (mode == 1u) {
+    // lit floors are lit as floor plates (long zones, a few dark); dark floors keep the odd single office
+    let zw = 4.0 + floor(hb1 * 6.0);
+    lid = select(id, vec2f(floor(id.x / zw), id.y), floorOn > 0.5);
+    lf = mix(0.04, 0.9, floorOn);
+  }
   if (mode == 0u) {
     let uw = 2.0 + floor(hs * 1.99);
     lid = vec2f(floor(id.x / uw), id.y);
     let fa = hash21(vec2f(id.y * 0.37, seed + 9.0));
-    lf = clamp(litFrac * (0.3 + 1.4 * fa), 0.03, 0.95);
+    lf = clamp(litB * (0.3 + 1.4 * fa), 0.03, 0.95);
   }
-  let L0 = winLit(lid, seed, lf);
-  let offC = mix(vec3f(0.8, 0.9, 1.0), vec3f(1.0, 0.84, 0.62), step(0.62, fract(seed * 0.37 + lid.y * 0.0137)));
+  let L0 = winLit(lid, seed, lf, tLo, tSpan);
+  // office floors share the building's light colour; some tenants use the opposite temperature
+  let fh = hash21(vec2f(id.y, seed + 3.0));
+  let offC = select(offBase, offBase.zyx * vec3f(1.0, 0.97, 0.92), fh > 0.86) * (0.85 + 0.3 * fract(fh * 7.0));
   let warmOnly = style == 2u || style == 3u || style == 4u;
   let L = vec4f(select(select(L0.rgb, roomLight(fract(hash21(lid + seed) * 7.0) * 0.72), warmOnly), offC, mode == 1u), L0.a);
   var room = vec3f(0.0);
@@ -385,11 +419,11 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   let nearE = room * L.rgb * L.a * mask * inten;
   // far: averaged emission; lit/dark floor runs stay visible while floors are larger than ~1.5 px
   let run = floor(vec2f(cx / 4.0, cy)) + vec2f(f32(fid) * 13.0, seed);
-  let runLit = select(step(hash21(run), litFrac), mix(0.1, 1.0, floorOn) * 0.9, mode == 1u);
+  let runLit = select(step(hash21(run), litB), mix(0.1, 1.0, floorOn) * 0.9, mode == 1u);
   let bandK = 1.0 - smoothstep(0.35, 0.7, fwc.y);
-  let bv = mix(1.0, (0.3 + 1.4 * runLit) / (0.3 + 1.4 * litFrac), bandK * (1.0 - det));
-  let avgCol = mix(vec3f(1.0, 0.66, 0.36), vec3f(0.85, 0.9, 1.0), select(0.3, 0.7, mode == 1u));
-  let farE = avgCol * litFrac * ww * wh * inten * 0.5 * bv;
+  let bv = mix(1.0, (0.3 + 1.4 * runLit) / (0.3 + 1.4 * litB), bandK * (1.0 - det));
+  let avgCol = select(select(avgHome, vec3f(1.0, 0.66, 0.4), warmOnly), offC * 0.8, mode == 1u);
+  let farE = avgCol * litB * ww * wh * inten * 0.5 * bv;
   G.e = mix(farE, nearE, det);
   G.cov = mix(ww * wh, mask, det);
   G.det = det; G.f = f; G.id = id; G.cw = cw;
@@ -502,6 +536,10 @@ fn carpet(p: vec2f) -> vec3f {
   let vt = tangentView(n, V);
   let Rv = reflect(-V, n);
   let dR = length(fwidth(Rv));
+  // horizontal facade direction in which the face distance fd grows (to look up points at other fd values)
+  let nh0 = normalize(vec3f(n.x, 0.0, n.z) + vec3f(1e-5, 0.0, 0.0));
+  let Th = vec3f(-nh0.z, 0.0, nh0.x);
+  let tAlong = Th * select(-1.0, 1.0, dpdx(fd) * dot(Th, dpdx(wp)) + dpdy(fd) * dot(Th, dpdy(wp)) >= 0.0);
 
   var S: Surf;
   S.alb = col; S.rough = 0.8; S.metal = 0.0; S.emis = vec3f(0.0); S.mid = 0.0; S.wet = 0.6; S.n = n; S.ao = 1.0;
@@ -622,8 +660,13 @@ fn carpet(p: vec2f) -> vec3f {
     }
     if ((flags & 4u) != 0u) {
       let hf = saturate((wp.y - P.a.y) / max(P.b.z, 1.0));
-      let dots = mix(0.25, pulse(0.25, 0.75, fract(fd / 0.6), fw.x / 0.6) * pulse(0.25, 0.75, fract(yRel / 0.6), fw.y / 0.6), 1.0 - smoothstep(0.15, 0.4, max(fw.x, fw.y) / 0.6));
-      S.emis += ledColor(wp, seed, hf) * dots;
+      // LED pixels follow the window grid (one pixel per window cell, fine dots up close); brightness
+      // shades across the face and varies by floor so a far tower reads as a lit screen, not a flat panel
+      let px = pulse(0.1, 0.9, G.f.x, fw.x / G.cw) * pulse(0.26, 0.92, G.f.y, fw.y / floorH);
+      let dots = mix(1.0, pulse(0.2, 0.8, fract(fd / 0.6), fw.x / 0.6) * pulse(0.2, 0.8, fract(yRel / 0.6), fw.y / 0.6) * 1.6, 1.0 - smoothstep(0.15, 0.4, max(fw.x, fw.y) / 0.6));
+      let across = 1.0 - 0.6 * pow(abs(fd / max(fl, 1.0) * 2.0 - 1.0), 2.0);
+      let rowK = 0.65 + 0.35 * sin(G.id.y * 2.1 + G.id.x * 0.45 + F.show.y * 3.0);
+      S.emis += ledColor(wp, seed, hf) * (0.08 + 0.92 * px * dots) * across * rowK * 0.8;
     }
   } else if (mat == 4u) {
     // ---------------- Bund stone
@@ -649,9 +692,24 @@ fn carpet(p: vec2f) -> vec3f {
     }
   } else if (mat == 5u || mat == 6u) {
     // ---------------- shop podium (5) and steppe patterned brick (6)
-    let gl = terrainHeight(wp.xz);
-    let hr = wp.y - gl;
     let brick = mat == 6u;
+    // Shop bays along the face. Each bay stands on a level floor (mean pavement height at its two ends) so
+    // shopfronts step down a slope instead of warping with the terrain. shopfront() in buildings_gen.js
+    // mirrors this layout for awnings, AC units and fascia signs.
+    let bwT = 4.5 + 3.0 * hash11u(u32(seed) + fid * 3u);
+    let nb = max(1.0, round(fl / bwT));
+    let bw = fl / nb;
+    let bx = fd / bw;
+    let bay = floor(bx);
+    let bf = fract(bx);
+    // baseY is the lot's lowest ground: pixels far above it skip the terrain lookups (only the street spill
+    // light uses hr up there, and it has faded out)
+    var gl = baseY;
+    if (wp.y - baseY < 26.0) {
+      let pa = wp.xz + tAlong.xz * (bay * bw - fd) + nh0.xz * 1.5;
+      gl = 0.5 * (terrainHeight(pa) + terrainHeight(pa + tAlong.xz * bw));
+    }
+    let hr = wp.y - gl;
     var base = col * (0.8 + 0.3 * vnoise2(vec2f(fd * 0.4 + seed, wp.y * 0.3)));
     if (brick) {
       let bv = wp.y / 0.25;
@@ -664,43 +722,65 @@ fn carpet(p: vec2f) -> vec3f {
       base = mix(base, vec3f(0.05, 0.45, 0.48), dia);
     }
     S.alb = base; S.rough = 0.75;
-    if (hr < 4.6) {
-      // ground-floor shopfronts
-      let bwT = 4.5 + 3.0 * hash11u(u32(seed) + fid * 3u);
-      let nb = max(1.0, round(fl / bwT));
-      let bw = fl / nb;
-      let bx = fd / bw;
-      let bid = floor(bx) + f32(fid) * 17.0 + seed;
-      let bf = fract(bx);
-      let hb = hash11u(u32(bid * 7.0) + 3u);
-      let arcade = (flags & 8u) != 0u;
-      let colw = select(0.07, 0.11, arcade);
-      let pillar = 1.0 - pulse(colw, 1.0 - colw, bf, fw.x / bw);
-      let fasc = pulse(3.35, 4.6, hr, fw.y);
-      let shut = hb < 0.2 && !arcade;
+    let hb = hash11u(u32((bay + f32(fid) * 17.0 + seed) * 7.0) + 3u);
+    let arcade = (flags & 8u) != 0u;
+    let colw = select(0.07, 0.11, arcade);
+    let fwb = fw.x / bw;
+    let pillar = 1.0 - pulse(colw, 1.0 - colw, bf, fwb);
+    let det = 1.0 - smoothstep(0.15, 0.5, fwb);
+    if (hr < 0.0) {
+      // plinth with steps where the pavement drops below the bay floor
+      let stp = pulse(0.0, 0.25, fract(hr / 0.18), fw.y / 0.18);
+      S.alb = vec3f(0.2, 0.19, 0.18) * (1.0 - 0.5 * stp);
+    } else if (hr < 4.6) {
+      // ground-floor shopfront: glazing with a door, mullions and transom, or a roller shutter (closed or
+      // half down), a framed signage board above and a ledge
+      let shut = hb < 0.22 && !arcade;
+      let halfShut = hb >= 0.22 && hb < 0.33 && !arcade;
       var shopC = mix(mix(vec3f(1.0, 0.9, 0.76), vec3f(0.85, 0.92, 1.0), step(0.6, fract(hb * 9.1))), hsv(fract(hb * 5.3), 0.35, 1.0), step(0.75, fract(hb * 3.7)));
       if (brick) { shopC = mix(vec3f(1.0, 0.62, 0.3), hsv(fract(0.02 + hb * 0.1), 0.6, 1.0), step(0.5, fract(hb * 6.1))); }
-      let fr = vec2f((bf - colw) / (1.0 - 2.0 * colw), saturate((hr - 0.15) / 3.2));
+      let iw = bw * (1.0 - 2.0 * colw);
+      let fx = saturate((bf - colw) / (1.0 - 2.0 * colw));
+      let fr = vec2f(fx, saturate((hr - 0.15) / 3.2));
       let glassM = (1.0 - pillar) * pulse(0.15, 3.35, hr, fw.y);
-      var room = vec3f(0.0);
-      let det = 1.0 - smoothstep(0.15, 0.5, fw.x / bw);
+      // frame lines in metres from the door side
+      let xm = select(fx, 1.0 - fx, fract(hb * 13.0) > 0.5) * iw;
+      let doorW = min(1.1, iw * 0.5);
+      let isDoor = xm < doorW;
+      let m = max(1.0, round((iw - doorW) / 1.7));
+      let p = max((iw - doorW) / m, 0.3);
+      let mull = select(1.0 - pulse(0.04 / p, 1.0 - 0.04 / p, fract((xm - doorW) / p), fw.x / p), 0.0, isDoor);
+      let doorEdge = pulse(doorW - 0.05, doorW + 0.05, xm, fw.x);
+      let transom = select(pulse(2.5, 2.58, hr, fw.y), pulse(2.26, 2.34, hr, fw.y), isDoor);
+      let rim = pulse(3.27, 3.36, hr, fw.y) + pulse(0.15, 0.42, hr, fw.y);
+      let frameM = saturate(mull + doorEdge + transom + rim) * det;
+      let frameC = select(vec3f(0.05, 0.05, 0.055), vec3f(0.38, 0.39, 0.4), fract(hb * 5.7) > 0.6);
+      var room = vec3f(0.7);
       if (glassM > 0.0 && det > 0.01) {
-        room = interior(fr, vt, vec3f(bw * (1.0 - 2.0 * colw), 3.2, select(7.0, 9.0, arcade)), hb * 31.0, select(2u, 3u, arcade));
-      } else { room = vec3f(0.7); }
-      room *= shopC;
-      if (shut) {
-        let rib = 0.75 + 0.25 * sin(hr * 40.0) * det;
-        S.alb = mix(S.alb, vec3f(0.22, 0.23, 0.24) * rib, glassM);
-        S.emis = vec3f(0.6, 0.5, 0.4) * 0.02 * glassM;
-        S.metal = glassM * 0.6;
-      } else {
-        S.alb = mix(S.alb, vec3f(0.02), glassM);
-        S.emis = room * glassM * 0.45;
-        S.rough = mix(S.rough, 0.08, glassM);
+        room = interior(fr, vt, vec3f(iw, 3.2, select(7.0, 9.0, arcade)), hb * 31.0, select(2u, 3u, arcade));
       }
-      // fascia (sign backing)
-      S.alb = mix(S.alb, mix(vec3f(0.04), hsv(fract(hb * 2.1), 0.5, 0.25), step(0.5, hb)), fasc * (1.0 - pillar));
-      S.emis += shopC * 0.6 * pulse(3.3, 3.42, hr, fw.y) * (1.0 - pillar) * select(1.0, 0.0, shut);
+      room *= shopC * select(1.0, 0.75, isDoor);
+      let shutM = glassM * select(select(0.0, pulse(1.9, 3.4, hr, fw.y), halfShut), 1.0, shut);
+      S.alb = mix(S.alb, vec3f(0.02), glassM);
+      S.emis = room * glassM * 0.45 * (1.0 - frameM);
+      S.rough = mix(S.rough, 0.08, glassM);
+      S.alb = mix(S.alb, frameC, frameM * glassM);
+      S.metal = frameM * glassM * 0.6;
+      if (shutM > 0.0) {
+        let shC = mix(vec3f(0.22, 0.23, 0.24), vec3f(0.16, 0.22, 0.24), step(0.5, fract(hb * 21.0)));
+        let rib = 0.75 + 0.25 * sin(hr * 40.0) * det;
+        S.alb = mix(S.alb, shC * rib * (1.0 - 0.5 * pulse(1.9, 2.0, hr, fw.y) * select(1.0, 0.0, shut)), shutM);
+        S.emis *= 1.0 - shutM;
+        S.metal = mix(S.metal, 0.6, shutM); S.rough = mix(S.rough, 0.45, shutM);
+      }
+      // signage board with a thin frame, back-lit on some shops, and a ledge on top
+      let board = pulse(3.36, 4.42, hr, fw.y) * (1.0 - pillar);
+      let edgeB = (pulse(3.36, 3.42, hr, fw.y) + pulse(4.36, 4.42, hr, fw.y) + pulse(0.0, 0.03, fx, fwb) + pulse(0.97, 1.0, fx, fwb)) * det;
+      let boardC = mix(vec3f(0.04), hsv(fract(hb * 2.1), 0.55, 0.3), step(0.45, hb));
+      S.alb = mix(S.alb, mix(boardC, vec3f(0.45), saturate(edgeB)), board);
+      S.emis = mix(S.emis, boardC * select(0.0, 0.5, fract(hb * 3.3) > 0.55), board * (1.0 - saturate(edgeB)));
+      let ledge = pulse(4.42, 4.6, hr, fw.y);
+      S.alb = mix(S.alb, base * 1.15, ledge);
       if (arcade) { S.alb = mix(S.alb, base * 1.1, pillar); }
     } else if (brick && hr < 6.6 && hr > 4.9 && (flags & 8u) != 0u) {
       // carpet-pattern band, uplit
@@ -715,6 +795,16 @@ fn carpet(p: vec2f) -> vec3f {
     }
     // spill light on the wall near the street
     S.emis += S.alb * vec3f(1.0, 0.7, 0.5) * 0.35 * exp(-max(hr - 4.6, 0.0) * 0.4) * step(4.6, hr);
+    // drainpipes down some bay boundaries, with brackets every 2.2 m
+    if (!brick && det > 0.01) {
+      let db = min(bf, 1.0 - bf) * bw;
+      if (hash11u(u32(bay + step(0.5, bf) + f32(fid) * 31.0 + seed * 3.0) + 11u) < 0.4) {
+        let pipe = (1.0 - smoothstep(0.07, 0.07 + fw.x, db)) * det;
+        let brk = pulse(0.0, 0.08, fract(wp.y / 2.2), fw.y / 2.2);
+        S.alb = mix(S.alb, vec3f(0.07, 0.075, 0.08) + vec3f(0.12) * (1.0 - db / 0.07) + brk * 0.08, pipe);
+        S.emis *= 1.0 - pipe; S.metal = mix(S.metal, 0.5, pipe); S.rough = mix(S.rough, 0.4, pipe);
+      }
+    }
   } else if (mat == 7u) {
     // ---------------- glazed tiles (domes, iwans)
     var c = col;
@@ -809,6 +899,19 @@ fn carpet(p: vec2f) -> vec3f {
     let tw = 0.5 + 0.5 * sin(time() * (1.0 + 2.0 * hash21(cell)) + hash21(cell + 3.0) * 6.28);
     let det = 1.0 - smoothstep(0.15, 0.4, max(fw.x, fw.y) / 1.6);
     S.emis = col * prm * 0.35 + mix(col * 0.25, mix(col, vec3f(1.0), 0.45) * dotm * tw * 3.0, det) * prm;
+    // steel frame (meridians and latitude rings, kept at least ~1 px wide) and darker rims, so the orbs read
+    // as built spheres from far away rather than flat glowing ovals
+    let hfo = saturate((wp.y - P.a.y) / max(P.b.z, 0.5));
+    let mu = fd / max(fl, 1.0) * 16.0; let mv = hfo * 9.0;
+    let fu = fw.x / max(fl, 1.0) * 16.0; let fv = fw.y / max(P.b.z, 0.5) * 9.0;
+    let ribU = 1.0 - smoothstep(max(0.04, fu * 0.6), max(0.04, fu * 0.6) + fu + 1e-4, abs(fract(mu + 0.5) - 0.5));
+    let ribV = 1.0 - smoothstep(max(0.05, fv * 0.6), max(0.05, fv * 0.6) + fv + 1e-4, abs(fract(mv + 0.5) - 0.5));
+    let rib = max(ribU, ribV);
+    let NdVo = saturate(dot(n, V));
+    S.emis *= (1.0 - 0.85 * rib) * (0.25 + 0.75 * sqrt(NdVo));
+    S.alb = mix(S.alb, vec3f(0.35, 0.36, 0.4), rib); S.metal = mix(S.metal, 0.8, rib);
+    S.emis += vec3f(0.9, 0.95, 1.0) * rib * pulse(0.47, 0.53, hfo, fv / 9.0 + 0.01) * 1.5;
+    if (rib > 0.5) { S.mid = 0.0; }
   } else if (mat == 14u) {
     // ---------------- lit crown lantern (slats)
     let hf = saturate((wp.y - P.a.y) / max(P.b.z, 1.0));
@@ -867,6 +970,12 @@ fn carpet(p: vec2f) -> vec3f {
   }
   // a touch of facade self-illumination so silhouettes read at night
   S.emis += S.alb * 0.006;
+  // aerial perspective on top of the fog: distant facades lose contrast (highlights compressed, slightly
+  // desaturated, walls lifted toward the night haze) so near towers stand out from the far ones
+  let farK = smoothstep(450.0, 2600.0, length(F.camPos.xyz - wp));
+  let eL = dot(S.emis, vec3f(0.3, 0.5, 0.2));
+  S.emis = mix(S.emis, mix(S.emis, vec3f(eL), 0.25) / (1.0 + eL * 0.6), farK * 0.7);
+  S.alb = mix(S.alb, vec3f(0.06, 0.06, 0.085), farK * 0.4);
   return gbuf(S.alb, S.rough, S.n, S.metal, S.emis, S.ao, motionVector(wp, wp), S.mid, S.wet);
 }
 `;
