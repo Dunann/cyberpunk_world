@@ -85,9 +85,9 @@ export const LANDMARKS = [
 // Viewpoints (keys 1-0) and the 10 verification poses. y is meters above ground when rel is true.
 // t = scene time used for captures (light show is active for 20 s < (t mod 180) < 80 s).
 export const POSES = [
-  { name: 'Nanshan overlook',      pos: [450, 40, 2000],  rel: true, target: [600, 80, -200],    t: 40 },
-  { name: 'Bund light show',       pos: [1990, 3, -860],  rel: true, target: [3250, 180, -1300], t: 45 },
-  { name: 'Hillside neon street',  pos: [-820, 1.7, -190], rel: true, target: [-560, 96, -100],  t: 100 },
+  { name: 'Nanshan overlook',      pos: [200, 325, 2400], rel: false, target: [568, 205, 1478],  t: 40 },
+  { name: 'Bund light show',       pos: [2080, 8, -880],  rel: false, target: [3051, 187, -725], t: 45 },
+  { name: 'Hillside neon street',  pos: [-1162, 1.7, -255], rel: true, target: [-1058, 98, -568], t: 100 },
   { name: 'Monorail station',      pos: [-930, 140, -760], rel: false, target: [-1040, 146, -770], t: 15 },
   { name: 'Lake gardens',          pos: [-1500, 3, 2120], rel: true, target: [-2000, 40, 2900],  t: 120 },
   { name: 'Steppe night market',   pos: [760, 2, -2560],  rel: true, target: [900, 60, -2780],   t: 130 },
