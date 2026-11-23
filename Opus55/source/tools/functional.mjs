@@ -54,6 +54,20 @@ await page.keyboard.press('Space'); await sleep(120); await page.keyboard.press(
 await sleep(200);
 check('double-tap Space switches back to flying', (await state()).flying);
 
+// holding R while moving sprints
+{
+  const a0 = await state();
+  await page.keyboard.down('KeyW'); await sleep(1000); await page.keyboard.up('KeyW');
+  const a1 = await state();
+  await sleep(600);
+  const b0 = await state();
+  await page.keyboard.down('KeyR'); await page.keyboard.down('KeyW'); await sleep(1000);
+  await page.keyboard.up('KeyW'); await page.keyboard.up('KeyR');
+  const b1 = await state();
+  const normal = Math.hypot(a1.x - a0.x, a1.z - a0.z), fast = Math.hypot(b1.x - b0.x, b1.z - b0.z);
+  check('holding R while moving sprints', fast > normal * 2, `${normal.toFixed(1)} m vs ${fast.toFixed(1)} m in 1 s`);
+}
+
 // viewpoint keys
 for (const [key, idx] of [['Digit2', 1], ['Digit7', 6], ['Digit0', 9]]) {
   await page.keyboard.press(key); await sleep(300);
@@ -64,10 +78,10 @@ for (const [key, idx] of [['Digit2', 1], ['Digit7', 6], ['Digit0', 9]]) {
 
 // rain toggle
 const r0 = (await state()).rain;
-await page.keyboard.press('KeyR'); await sleep(100);
+await page.keyboard.press('KeyT'); await sleep(100);
 const r1 = (await state()).rain;
-check('R toggles rain', r0 !== r1, `${r0} -> ${r1}`);
-await page.keyboard.press('KeyR');
+check('T toggles rain', r0 !== r1, `${r0} -> ${r1}`);
+await page.keyboard.press('KeyT');
 
 // collision: fly into the nearest building collider and check we stay outside it
 const col = await page.evaluate(() => {

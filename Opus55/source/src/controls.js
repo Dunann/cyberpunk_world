@@ -1,7 +1,7 @@
 // First-person controller in the style of Minecraft creative mode.
 //  Walk: WASD, Space jumps, gravity, collision with terrain, water surface and building boxes.
 //  Fly : double-tap Space to toggle. Space rises, Shift descends. Landing on the ground ends flight.
-//  Double-tap W (or hold Q) sprints. Ctrl is avoided because Ctrl+W closes the browser tab.
+//  Hold R (or Q), or double-tap W, to sprint. Ctrl is avoided because Ctrl+W closes the browser tab.
 //  Mouse wheel changes flying speed.
 
 import { WORLD_BOUND } from './world.js';
@@ -43,7 +43,7 @@ export class Controls {
         else this.lastSpace = now;
         if (!this.flying && this.onGround) this.vy = 7.2;
       }
-      if ((e.code === 'Space' || e.code === 'KeyQ') && this.locked) e.preventDefault();
+      if ((e.code === 'Space' || e.code === 'KeyQ' || e.code === 'KeyR') && this.locked) e.preventDefault();
     });
     addEventListener('keyup', (e) => { this.keys.delete(e.code); if (e.code === 'KeyW') this.sprintW = false; });
     addEventListener('blur', () => this.keys.clear());
@@ -106,7 +106,7 @@ export class Controls {
     const k = this.keys;
     const f = (k.has('KeyW') ? 1 : 0) - (k.has('KeyS') ? 1 : 0);
     const s = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0);
-    const sprint = this.sprintW || k.has('KeyQ');
+    const sprint = this.sprintW || k.has('KeyR') || k.has('KeyQ');
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
     // horizontal movement ignores pitch (Minecraft style)
     let mx = -sy * f + cy * s, mz = -cy * f - sy * s;

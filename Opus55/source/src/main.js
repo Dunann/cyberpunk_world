@@ -106,7 +106,7 @@ async function main() {
   addEventListener('keydown', (e) => {
     if (e.code === 'KeyH') { statsOn = !statsOn; stats.style.display = statsOn ? 'block' : 'none'; ctx.prof.enabled = statsOn || ctx.benchmarking; }
     else if (e.code === 'KeyM') { audio.toggleMute && audio.toggleMute(ctx); }
-    else if (e.code === 'KeyR') { ctx.env.rain = ctx.env.rain > 0 ? 0 : 0.55; }
+    else if (e.code === 'KeyT') { ctx.env.rain = ctx.env.rain > 0 ? 0 : 0.55; }
     else if (/^Digit[0-9]$/.test(e.code)) { const n = +e.code.slice(5); gotoPose(n === 0 ? 9 : n - 1); }
   });
   stats.style.display = statsOn ? 'block' : 'none';

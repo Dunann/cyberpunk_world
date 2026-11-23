@@ -31,10 +31,10 @@ You can also download `index.html` and open it directly; it works offline.
 | W A S D | Move |
 | Space twice | Switch between walking and flying (like Minecraft creative mode) |
 | Space / Shift | Fly up / down. Space jumps when walking |
-| Double-tap W, or hold Q | Sprint |
+| Hold R (or double-tap W) | Sprint while moving |
 | Mouse wheel | Flying speed |
 | 1 – 0 | Viewpoints |
-| R | Rain on/off |
+| T | Rain on/off |
 | M | Sound on/off |
 | H | Stats (frame time, GPU time per pass) |
 | Esc | Menu |
