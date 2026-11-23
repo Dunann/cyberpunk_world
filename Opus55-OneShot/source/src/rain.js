@@ -100,7 +100,7 @@ const FOCAL_K = 0.5; // focal length in pixels = res.y * FOCAL_K / tan(fov/2)
   let focal = res.y * FOCAL_K / F.camRight.w;
   let wpx = 0.0025 * focal / ch.w;
   let drawW = max(wpx, 1.1);
-  alpha *= min(wpx / drawW, 1.0) * 0.9;
+  alpha *= min(wpx / drawW, 1.0) * (0.45 + 0.55 * h1(i, 8u));
   // fade very long streaks (less energy per pixel) and far drops
   alpha *= 1.0 / (1.0 + dl * 0.012);
   var corner = array<vec2f, 6>(vec2f(-1.0, 0.0), vec2f(1.0, 0.0), vec2f(-1.0, 1.0), vec2f(-1.0, 1.0), vec2f(1.0, 0.0), vec2f(1.0, 1.0));

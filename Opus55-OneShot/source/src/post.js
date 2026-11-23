@@ -3,6 +3,10 @@
 // filmic grading + hue-preserving tonemap, film grain and dithering. Output may be upscaled from the render
 // resolution.
 //
+// Bloom source: the composite also writes the quarter-resolution bloom input (one fragment per 4x4 block
+// averages its block from texels already in cache), so the bloom chain of the next frame does not need its
+// own full-resolution read of the HDR image (one frame of bloom latency, not noticeable).
+//
 // Rain layer: the rain module draws its streaks into post.rainView (render resolution, additive HDR) after
 // lighting and sets post.rainActive each frame. It is added here, after TAA, so the thin fast streaks are
 // not smeared or rejected by the temporal filter.
@@ -17,21 +21,6 @@ const BLOOM_UP_WEIGHTS = [1.0, 1.3, 1.6, 2.0];
 const BLOOM_WGSL = /* wgsl */ `
 @group(1) @binding(0) var src: texture_2d<f32>;
 @group(1) @binding(1) var smp: sampler;
-
-fn karis(c: vec3f) -> f32 { return 1.0 / (1.0 + luma(c)); }
-
-// First level (full -> quarter resolution): 4 bilinear taps, each averaging a 2x2 block, together covering
-// the 4x4 source texels of the output texel. Karis-weighted against fireflies.
-@fragment fn fsDownFirst(i: FsOut) -> @location(0) vec4f {
-  let ts = 1.0 / vec2f(textureDimensions(src, 0));
-  let a = textureSampleLevel(src, smp, i.uv + ts * vec2f(-1.0, -1.0), 0.0).rgb;
-  let b = textureSampleLevel(src, smp, i.uv + ts * vec2f(1.0, -1.0), 0.0).rgb;
-  let c = textureSampleLevel(src, smp, i.uv + ts * vec2f(-1.0, 1.0), 0.0).rgb;
-  let d = textureSampleLevel(src, smp, i.uv + ts * vec2f(1.0, 1.0), 0.0).rgb;
-  let wa = karis(a); let wb = karis(b); let wc = karis(c); let wd = karis(d);
-  let o = (a * wa + b * wb + c * wc + d * wd) / (wa + wb + wc + wd);
-  return vec4f(min(o, vec3f(400.0)), 1.0);
-}
 
 // 13-tap downsample (Call of Duty: Advanced Warfare).
 @fragment fn fsDown(i: FsOut) -> @location(0) vec4f {
@@ -80,6 +69,9 @@ struct PostU {
 @group(1) @binding(2) var smp: sampler;
 @group(1) @binding(3) var rainTex: texture_2d<f32>;
 @group(1) @binding(4) var<uniform> P: PostU;
+@group(1) @binding(5) var bloomSrcOut: texture_storage_2d<rgba16float, write>;
+
+fn karis(c: vec3f) -> f32 { return 1.0 / (1.0 + luma(c)); }
 
 // Khronos PBR Neutral tone mapper: compresses highlights along the line to white without hue skew.
 fn tonemapNeutral(c0: vec3f) -> vec3f {
@@ -134,6 +126,22 @@ fn rc(c: vec3f) -> vec3f { return c / (1.0 + c); }
     hdr = vec3f(textureSampleLevel(hdrTex, smp, uv + ca, 0.0).r, e.g, textureSampleLevel(hdrTex, smp, uv - ca, 0.0).b);
   }
   hdr *= ratio;
+
+  // ---- quarter-resolution bloom source for the next frame: 4 bilinear taps (each a 2x2 average) over the
+  // 4x4 block, Karis-weighted against fireflies. Written by the fragment at the block's corner.
+  let rsz = vec2f(textureDimensions(hdrTex, 0));
+  let rp = vec2u(uv * rsz);
+  let bq = rp / 4u;
+  if ((rp.x & 3u) == 0u && (rp.y & 3u) == 0u && all(bq < textureDimensions(bloomSrcOut))) {
+    let b0 = vec2f(rp);
+    let ta = textureSampleLevel(hdrTex, smp, (b0 + vec2f(1.0, 1.0)) * ts, 0.0).rgb;
+    let tb = textureSampleLevel(hdrTex, smp, (b0 + vec2f(3.0, 1.0)) * ts, 0.0).rgb;
+    let tc = textureSampleLevel(hdrTex, smp, (b0 + vec2f(1.0, 3.0)) * ts, 0.0).rgb;
+    let td = textureSampleLevel(hdrTex, smp, (b0 + vec2f(3.0, 3.0)) * ts, 0.0).rgb;
+    let wa = karis(ta); let wb = karis(tb); let wc = karis(tc); let wd = karis(td);
+    let bo = (ta * wa + tb * wb + tc * wc + td * wd) / (wa + wb + wc + wd);
+    textureStore(bloomSrcOut, bq, vec4f(min(bo, vec3f(400.0)), 1.0));
+  }
 
   // ---- bloom (wide, soft) and rain layer
   let bloom = textureSampleLevel(bloomTex, smp, uv, 0.0).rgb * P.a.w;
@@ -193,7 +201,6 @@ export class Post {
       fragment: { module: bm, entryPoint: fs, targets: [{ format: 'rgba16float', blend }] },
       primitive: { topology: 'triangle-list' },
     });
-    this.downFirst = mk('fsDownFirst');
     this.down = mk('fsDown');
     this.up = mk('fsUp', { color: { srcFactor: 'constant', dstFactor: 'one', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } });
     this.blendConst = { r: 1, g: 1, b: 1, a: 1 };
@@ -204,6 +211,7 @@ export class Post {
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
       { binding: 4, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+      { binding: 5, visibility: GPUShaderStage.FRAGMENT, storageTexture: { access: 'write-only', format: 'rgba16float' } },
     ] });
     const cm = shader(d, WGSL_LIB + WGSL_FRAME + WGSL_FULLSCREEN + COMPOSITE_WGSL, 'composite');
     this.composite = d.createRenderPipeline({
@@ -221,11 +229,15 @@ export class Post {
   resize(w, h) {
     const d = this.device;
     if (this.bloomTex) this.bloomTex.destroy();
+    if (this.bloomSrc) this.bloomSrc.destroy();
     if (this.rainTex) this.rainTex.destroy();
     const bw = Math.max(1, w >> 2), bh = Math.max(1, h >> 2);
     const levels = Math.max(1, Math.min(BLOOM_LEVELS, Math.floor(Math.log2(Math.min(bw, bh))) - 1));
     this.levels = levels;
-    this.bloomTex = d.createTexture({ size: [bw, bh], mipLevelCount: levels, format: 'rgba16float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+    this.bloomTex = d.createTexture({ size: [bw, bh], mipLevelCount: levels, format: 'rgba16float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    this.bloomSrc = d.createTexture({ size: [bw, bh], format: 'rgba16float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC, label: 'bloomSrc' });
+    this.cpySrc = { texture: this.bloomSrc }; this.cpyDst = { texture: this.bloomTex, mipLevel: 0 }; this.cpySize = [bw, bh];
+    const bloomSrcView = this.bloomSrc.createView();
     this.mipViews = [];
     for (let i = 0; i < levels; i++) this.mipViews.push(this.bloomTex.createView({ baseMipLevel: i, mipLevelCount: 1 }));
     // normalisation so that a flat field keeps its brightness through the weighted mip sum
@@ -236,11 +248,10 @@ export class Post {
     this.rainView = this.rainTex.createView();
     const views = this.r.views;
     const bg = (view) => d.createBindGroup({ layout: this.layout, entries: [{ binding: 0, resource: view }, { binding: 1, resource: this.samp }] });
-    this.firstGroups = [bg(views.hist0), bg(views.hist1)];
     this.mipGroups = this.mipViews.map((v) => bg(v));
     this.compGroups = [views.hist0, views.hist1].map((v) => d.createBindGroup({ layout: this.compLayout, entries: [
       { binding: 0, resource: v }, { binding: 1, resource: this.mipViews[0] }, { binding: 2, resource: this.samp },
-      { binding: 3, resource: this.rainView }, { binding: 4, resource: { buffer: this.ubuf } }] }));
+      { binding: 3, resource: this.rainView }, { binding: 4, resource: { buffer: this.ubuf } }, { binding: 5, resource: bloomSrcView }] }));
   }
 
   _pass(enc, pipe, group, target, load, tsName, weight) {
@@ -267,7 +278,7 @@ export class Post {
     this.device.queue.writeBuffer(this.ubuf, 0, u);
     this.rainActive = false;
 
-    this._pass(enc, this.downFirst, this.firstGroups[histIndex], this.mipViews[0], false, 'bloom');
+    enc.copyTextureToTexture(this.cpySrc, this.cpyDst, this.cpySize);
     for (let i = 1; i < this.levels; i++) this._pass(enc, this.down, this.mipGroups[i - 1], this.mipViews[i], false, 'bloom');
     for (let i = this.levels - 2; i >= 0; i--) this._pass(enc, this.up, this.mipGroups[i + 1], this.mipViews[i], true, 'bloom', BLOOM_UP_WEIGHTS[i + 1]);
     this._pass(enc, this.composite, this.compGroups[histIndex], swapTex.createView(), false, 'post');

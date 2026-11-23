@@ -230,7 +230,9 @@ fn medium(p: vec3f, dir: vec3f, dist: f32, cnt: u32) -> vec4f {
   var Li = vec3f(0.005, 0.0062, 0.012) + skyCityGlow(p.xz) * vec3f(0.32, 0.36, 0.5);
   // diffuse city glow from the street lights below (coarse light grid)
   let g = textureSampleLevel(glowTex, sampClamp, (p.xz - GRID_ORIGIN) / GRID_SIZE, 0.0).rgb;
-  Li += g * FU.tune.y * (exp(-hA / 90.0) * 0.75 + exp(-hA / 600.0) * 0.25);
+  var gl = g * FU.tune.y * (exp(-hA / 90.0) * 0.75 + exp(-hA / 600.0) * 0.25);
+  gl /= 1.0 + max(gl.r, max(gl.g, gl.b)) * 4.0; // soft knee: very dense districts must not wash out the haze
+  Li += gl;
   // moon above a broken cloud deck: forward scattering when looking toward it
   Li += vec3f(0.62, 0.70, 1.0) * F.moon.w * (0.008 * phaseHG(dot(dir, F.moon.xyz), 0.75) + 0.018);
   // point light halos (lights of this froxel's cluster, cached in workgroup memory with flicker applied)
