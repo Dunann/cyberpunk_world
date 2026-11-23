@@ -80,7 +80,23 @@ export function buildSignAtlas(device) {
     } });
   };
 
+  // horizontal bilingual sign: a short vertical Mongolian column (scaled to the sign height) left of Chinese text
+  const addPairH = (mn, cn, S) => {
+    const hh = S * 1.7 + PAD * 2;
+    g.font = CJK_FONTS[0].replace('{S}', S);
+    const cw = g.measureText(cn).width;
+    specs.push({ key: 'H:' + mn + cn, w: S * 1.1 + cw + PAD * 2 + 20, h: hh, e: { text: mn + cn, vertical: false, n: 0, mongol: true }, draw: (r) => {
+      g.font = MONGOL_FONT.replace('{S}', S * 1.5);
+      const tw = g.measureText(mn).width;
+      const k = Math.min(1, (hh - PAD * 2) / tw);
+      g.save(); g.translate(r.x + PAD + S * 0.55, r.y + hh / 2); g.rotate(Math.PI / 2); g.scale(k, k); g.fillText(mn, 0, 0); g.restore();
+      g.font = CJK_FONTS[0].replace('{S}', S);
+      g.fillText(cn, r.x + PAD + S * 1.1 + 20 + cw / 2, r.y + hh / 2 + S * 0.04);
+    } });
+  };
+
   const S = 72;
+  MONGOL_PAIRS.forEach(([m, c]) => addPairH(m, c, 64));
   BIG_WORDS.forEach((t, i) => { addH(t, CJK_FONTS[i % 2], 104); addV(t, CJK_FONTS[i % 2], 104); });
   STATION_WORDS.forEach((t) => { addH(t, CJK_FONTS[0], 80); if ([...t].length > 1) addV(t, CJK_FONTS[0], 80); });
   LATIN_WORDS.forEach((t, i) => addH(t, LATIN_FONT, 70, i % 2 === 0));

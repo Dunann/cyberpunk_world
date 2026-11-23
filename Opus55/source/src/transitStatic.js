@@ -48,7 +48,7 @@ fn residential(uv: vec2f, n: vec3f, seed: f32, dist: f32) -> Surf {
   let faceId = floor(n.x * 2.0 + 3.0) * 7.0 + floor(n.z * 2.0 + 3.0) * 13.0;
   let h = hash21(vec2f(bay + faceId * 31.0 + seed, fl));
   let h2 = hash21(vec2f(bay * 1.7 + 5.0 + seed, fl * 3.1 + faceId));
-  let grime = vnoise2(vec2f(uv.x * 0.15, uv.y * 0.04)) * 0.5 + vnoise2(uv * vec2f(0.6, 0.08)) * 0.5;
+  let grime = vnoise2(vec2f(uv.x * 0.15, uv.y * 0.04));
   var albedo = mix(vec3f(0.36, 0.34, 0.31), vec3f(0.22, 0.21, 0.2), grime) * (0.85 + 0.3 * hash21(vec2f(bay, 99.0 + seed)) * 0.4);
   var rough = 0.8;
   var emis = vec3f(0.0);
@@ -119,8 +119,8 @@ fn concrete(p: vec3f, uv: vec2f) -> vec3f {
       albedo = vec3f(0.01, 0.012, 0.016); rough = 0.04; mat = 2.0;
       let g = 0.7 + 0.3 * vnoise2(uv * vec2f(0.15, 0.6));
       let ceilBand = smoothstep(6.6, 7.4, fy) * (1.0 - smoothstep(7.6, 8.1, fy));
-      let interior = mix(0.1, 0.22, smoothstep(1.0, 6.0, fy));
-      emis = vec3f(0.72, 0.86, 1.0) * (interior * g + ceilBand * 1.3);
+      let interior = mix(0.35, 0.8, smoothstep(1.0, 6.0, fy));
+      emis = vec3f(0.78, 0.9, 1.0) * (interior * g + ceilBand * 2.6);
     }
   } else if (m == 4) { // ceiling with light strips
     albedo = vec3f(0.5, 0.5, 0.52); rough = 0.6;
@@ -559,6 +559,12 @@ function buildLizibaTower(mb, world, T, lights, signs, col, R) {
     // tall vertical neon sign near the corner of each end face
     const [xb, zb] = W(e * (HX + 0.05), -e * (HZ - 2.5));
     signs.push({ x: xb, y: yU + 12, z: zb, nx: ex[0] * e, nz: ex[1] * e, w: 3.4, h: 13, text: '李子坝', kind: 'fascia', vertical: true, color: [1.0, 0.25, 0.4], offset: 0.35 });
+    // signage bands up the residential floors (shops and guesthouses on the lower floors, a hotpot place higher up)
+    const bands = [['老火锅', [1.0, 0.25, 0.1]], ['旅馆', [0.3, 0.9, 1.0]], ['麻将', [1.0, 0.75, 0.2]], ['小面', [1.0, 0.2, 0.6]]];
+    bands.forEach(([text, color], k) => {
+      const [xs, zs] = W(e * (HX + 0.05), e * (k % 2 ? 5 : -4));
+      signs.push({ x: xs, y: yU + 4.5 + k * 6.2, z: zs, nx: ex[0] * e, nz: ex[1] * e, w: 8, h: 1.8, text, kind: k % 2 ? 'lightbox' : 'fascia', color, offset: 0.3 });
+    });
     // light spill over the opening
     const [x3, z3] = W(e * (HX + 4), 0);
     lights.push([x3, yb + 4.5, z3, 16, 18, 24, 30, 0]);

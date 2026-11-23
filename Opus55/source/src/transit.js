@@ -144,10 +144,23 @@ fn deform(lp: vec3f, n: vec3f, flags: u32, kind: f32, halfL: f32, mat: f32) -> D
   return o;
 }
 
-fn passengers(z: f32, y: f32, seed: f32) -> f32 {
-  let n = vnoise2(vec2f(z * 2.2 + seed * 13.0, y * 1.3));
-  let m = vnoise2(vec2f(z * 0.6 + seed * 3.0, 4.0));
-  return 1.0 - 0.75 * smoothstep(0.55, 0.62, n) * smoothstep(0.35, 0.6, m);
+// Head-and-shoulder silhouettes of standing / seated passengers against the lit interior (floorY = car floor).
+fn passengers(z: f32, y: f32, seed: f32, floorY: f32) -> f32 {
+  var k = 1.0;
+  for (var o = -1; o <= 1; o++) {
+    let cell = floor(z / 0.7) + f32(o);
+    let h = hash21(vec2f(cell, seed * 97.0));
+    if (h < 0.4) { continue; }
+    let h2 = hash21(vec2f(cell + 13.0, seed * 31.0));
+    let cx = (cell + 0.5 + (h2 - 0.5) * 0.4) * 0.7;
+    let seated = h > 0.75;
+    let hy = floorY + select(1.58, 1.22, seated) + h2 * 0.12;
+    let dz = z - cx;
+    let head = length(vec2f(dz, (y - hy) * 0.85)) < 0.12;
+    let body = abs(dz) < 0.2 - max(y - (hy - 0.2), 0.0) * 0.6 && y < hy - 0.13;
+    if (head || body) { k = min(k, 0.12 + 0.1 * h2); }
+  }
+  return k;
 }
 
 @fragment fn fs(i: VOut) -> GOut {
@@ -184,7 +197,7 @@ fn passengers(z: f32, y: f32, seed: f32) -> f32 {
         let inWin = (wz > 0.08 && wz < 0.92) || isDoor;
         if (inWin && (!isDoor || (doorZ < 0.55 && doorZ > 0.05))) {
           albedo = vec3f(0.02); rough = 0.06; metal = 0.0; mtl = 2.0;
-          emis = vec3f(0.82, 0.9, 1.0) * 2.1 * passengers(lp.z, lp.y, seed) * (0.85 + 0.15 * smoothstep(1.2, 2.2, lp.y));
+          emis = vec3f(0.82, 0.9, 1.0) * 2.1 * passengers(lp.z, lp.y, seed, 0.0) * (0.85 + 0.15 * smoothstep(1.2, 2.2, lp.y));
         }
       }
     } else if (kind < 1.5) {
@@ -201,7 +214,7 @@ fn passengers(z: f32, y: f32, seed: f32) -> f32 {
         let inWin = (wz > 0.1 && wz < 0.9 && !isDoor) || (isDoor && dz < 0.58 && dz > 0.06);
         if (inWin) {
           albedo = vec3f(0.02); rough = 0.06; metal = 0.0; mtl = 2.0;
-          emis = vec3f(0.85, 0.92, 1.0) * 2.0 * passengers(lp.z, lp.y, seed);
+          emis = vec3f(0.85, 0.92, 1.0) * 2.0 * passengers(lp.z, lp.y, seed, 1.1);
         }
       }
     }
@@ -245,7 +258,7 @@ fn passengers(z: f32, y: f32, seed: f32) -> f32 {
       let post = fr < 0.06 && abs(lp.z) < 3.1;
       if (!post) {
         albedo = vec3f(0.02); rough = 0.05; metal = 0.0; mtl = 2.0;
-        emis = vec3f(1.0, 0.8, 0.55) * 1.25 * passengers(lp.z + lp.x, lp.y * 1.2, seed);
+        emis = vec3f(1.0, 0.8, 0.55) * 1.4 * passengers(lp.z + lp.x * 0.5, lp.y, seed, -6.15);
       }
     }
     if (lp.y < -6.1) { albedo = vec3f(0.08); }
@@ -281,7 +294,7 @@ export class Transit {
       T.instRange = [firstInst, inst];
       // spread trains evenly over the cycle; train 0 of the monorail dwells at Liziba at t = 15 (pose 4)
       const liz = T.stations.find((s) => s.liziba);
-      const base = liz ? T.offsetForDwell(liz, 1, 15) : 37;
+      const base = liz ? T.offsetForDwell(liz, 1, 0) : 37; // train 0 pulls out of Liziba toward the pose 4 camera at t = 15
       for (const tr of this.trains) if (tr.T === T) tr.offset = base + tr.k * T.cycle / cfg.trains;
     }
     this.cabinBase = inst;
@@ -307,7 +320,7 @@ export class Transit {
     this.cabTravel = 92; this.cabDwell = 18;
     this.cabCycle = 2 * (this.cabTravel + this.cabDwell);
     // at t = 70 (pose 10) cabin 0 is over the river a quarter of the way out, in the middle of that view
-    this.cabOffset = this.cabDwell + this.cabTravel * 0.27 - 70;
+    this.cabOffset = this.cabDwell + this.cabTravel * 0.43 - 70; // cabin 0 mid-river at t = 70 (pose 10)
 
     // dynamic lights: train headlights, cabin interiors
     this.lightBase = ctx.lights.reserve(this.trains.length + 2);

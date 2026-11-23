@@ -117,7 +117,10 @@ export function placeSigns(world, atlas, quality) {
           continue;
         }
       }
-      if (useSlots) { if (t === DT.STEPPE || (t === DT.HILLSIDE && R() < 0.1)) lanternRow(ex, ez, nx, nz, tx, tz, L, 0); continue; }
+      if (useSlots) {
+        if (t === DT.STEPPE || (t === DT.HILLSIDE && R() < 0.1)) lanternRow(ex, ez, nx, nz, tx, tz, L, 0);
+        if (world.signSlots.length > 20000 || (t !== DT.HILLSIDE && t !== DT.URBAN)) continue; // dense slot pass from the buildings module
+      }
       if (t === DT.HILLSIDE || t === DT.URBAN) {
         const hill = t === DT.HILLSIDE;
         const bladeStep = (hill ? 4.6 : 7.0) / dens;
@@ -137,7 +140,7 @@ export function placeSigns(world, atlas, quality) {
           if (R() < (hill ? 0.3 : 0.15)) blade(wx - tx * 0.4, wz - tz * 0.4, g, nx, nz, BIG_WORDS, PALETTE_STREET, 1.5, 2.3, 12.5, 15, false);
         }
         // shop fronts: fascia signs above the doors
-        for (let s = -L / 2 + 0.6; s < L / 2 - 2;) {
+        for (let s = -L / 2 + 0.6; s < L / 2 - 2 && !useSlots;) {
           const seg = Math.min(4 + R() * 6, L / 2 - s);
           const wx = ex + tx * (s + seg / 2), wz = ez + tz * (s + seg / 2);
           const g = world.heightAt(wx, wz);
@@ -226,7 +229,8 @@ export function placeSigns(world, atlas, quality) {
         addLight(sl.x + nx * (gap + w / 2), sl.y - h / 2 - 0.6, sl.z + nz * (gap + w / 2), c1, w * h, seed, w * h);
       } else {
         const kind = style.includes('billboard') ? KIND.BILLBOARD : style.includes('lightbox') ? KIND.LIGHTBOX : (R() < 0.5 ? KIND.LIGHTBOX : KIND.FASCIA);
-        fascia(sl.x, sl.z, sl.y - 0, nx, nz, pick(kind === KIND.BILLBOARD ? BIG_WORDS : SHOP_WORDS), kind, PALETTE_STREET, Math.min(sl.h, 0.8), sl.h, 0, sl.w);
+        const steppe = sl.style === DT.STEPPE;
+        fascia(sl.x, sl.z, sl.y - 0, nx, nz, steppe ? pick(MONGOL_BI) : pick(kind === KIND.BILLBOARD ? BIG_WORDS : SHOP_WORDS), steppe ? KIND.FASCIA : kind, steppe ? PALETTE_STEPPE : PALETTE_STREET, Math.min(sl.h, 0.8), sl.h, 0, sl.w);
       }
     }
   }
