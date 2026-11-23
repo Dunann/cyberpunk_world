@@ -7,6 +7,7 @@
 import { WGSL_LIB, TERRAIN, INFO, MAX_DISTRICTS } from './common.js';
 import { catmullRom, rng, clamp, smoothstep } from './math.js';
 import { shader } from './gpu.js';
+import { LAND_WGSL, CARVE_WGSL } from './terrainLand.js';
 
 // ---------------------------------------------------------------- layout data
 
@@ -176,26 +177,8 @@ const GEN_HEIGHT = /* wgsl */ `
 @group(1) @binding(1) var samp: sampler;
 @group(1) @binding(2) var outH: texture_storage_2d<r32float, write>;
 
-fn landHeight(p: vec2f) -> f32 {
-  // rolling inner hills
-  var h = 24.0 + fbm2(p * 0.0011, 5) * 60.0 + fbm2(p * 0.0045 + 3.0, 4) * 9.0;
-  // Yuzhong peninsula spine ridge
-  let sp = lineDist(p, vec2f(-2000.0, -180.0), vec2f(250.0, -80.0));
-  h += 85.0 * exp(-pow(sp / 360.0, 2.0));
-  // Nanshan ridge south of the Great River
-  let ns = lineDist(p, vec2f(-900.0, 2950.0), vec2f(2800.0, 2550.0));
-  h += (220.0 + ridged(p * 0.0016, 4) * 260.0) * exp(-pow(ns / 650.0, 2.0));
-  // hills around the lake (west lake: hills N, W and S)
-  let lk = length((p - vec2f(-2250.0, 2350.0)) / vec2f(1250.0, 1050.0));
-  h += smoothstep(0.75, 1.25, lk) * (60.0 + ridged(p * 0.0025, 4) * 110.0) * smoothstep(-1400.0, -2200.0, p.x + (p.y - 2350.0) * 0.3);
-  // mountain ring that bounds the world
-  let q = p - vec2f(300.0, -300.0);
-  let r = length(q * vec2f(1.0, 0.92)) + fbm2(p * 0.00035, 4) * 900.0;
-  let ring = smoothstep(4100.0, 6000.0, r);
-  h += ring * (260.0 + ridged(p * 0.0006, 6) * 1250.0);
-  h += smoothstep(5400.0, 7800.0, r) * 400.0;
-  return h;
-}
+${LAND_WGSL}
+${CARVE_WGSL}
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3u) {
@@ -218,20 +201,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   }
 
   // water carving
-  let wd = info.x;
-  let natural = info.w > 0.5;
-  let shore = select(5.5, 1.0, natural);
-  let wall = select(5.0, 26.0, natural);
-  let soft = mix(select(120.0, 220.0, natural), 28.0, hillW);
-  if (wd > 0.0) {
-    let landH = max(h, shore + 0.5);
-    let land = mix(shore, landH, smoothstep(wall, wall + soft, wd));
-    let wallH = mix(-1.5, shore, smoothstep(0.0, wall, wd));
-    h = select(land, wallH, wd < wall);
-  } else {
-    let depth = select(14.0, 4.0, natural);
-    h = -1.5 - depth * smoothstep(0.0, select(90.0, 40.0, natural), -wd) + gnoise2(p * 0.02) * 0.8;
-  }
+  h = carveWater(h, info.x, info.w > 0.5, hillW, p);
   textureStore(outH, id.xy, vec4f(h, 0.0, 0.0, 0.0));
 }
 `;
