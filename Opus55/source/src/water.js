@@ -153,8 +153,8 @@ fn ndcOf(dir: vec3f) -> vec2f {
     slope += wv.xy;
     foam += wv.z;
   }
-  if (F.params.x > 0.0 && dist < 120.0) {
-    slope += rainRings(p.xz, t) * 0.3 * F.params.x * (1.0 - smoothstep(35.0, 120.0, dist));
+  if (F.params.x > 0.0 && dist < 90.0) {
+    slope += rainRings(p.xz, t) * 0.3 * F.params.x * (1.0 - smoothstep(30.0, 90.0, dist));
   }
   let n = normalize(vec3f(-slope.x, 1.0, -slope.y));
 
@@ -187,8 +187,8 @@ fn ndcOf(dir: vec3f) -> vec2f {
   let streak = clamp(sqrt(sigma2) * 0.9 + 0.0015, 0.0, 0.035);
   var refl = vec3f(0.0);
   var rw = 0.0;
-  for (var k = 0; k < 5; k++) {
-    let fk = f32(k) - 2.0;
+  for (var k = 0; k < 4; k++) {
+    let fk = f32(k) - 1.5;
     let su = clamp(uv + off + vec2f(0.0, fk * streak), vec2f(0.0), vec2f(1.0));
     let s = textureSampleLevel(reflTex, sampClamp, su, 0.0);
     let w = select(0.0, exp(-fk * fk * 0.35), s.a > 1.9);
