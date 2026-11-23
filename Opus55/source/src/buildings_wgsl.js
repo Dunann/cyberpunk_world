@@ -20,7 +20,7 @@ export const FLAG = {
 
 export const MAT = {
   CONCRETE: 0, RES: 1, OFFICE: 2, GLASS: 3, STONE: 4, SHOP: 5, BRICK: 6, TILE: 7, WOOD: 8, FELT: 9,
-  METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17, CRYSTAL: 18, CARPET: 19,
+  METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17, CRYSTAL: 18, CARPET: 19, AC: 20,
 };
 
 export const PART_WGSL = /* wgsl */ `
@@ -119,7 +119,9 @@ fn ringEval(kind: f32, prm: f32, hw: f32, hd: f32, s: f32, sm: f32) -> Ring {
       let th = s * TAU;
       R.p = vec2f(cos(th) * hw, sin(th) * hd);
       R.n = normalize(vec2f(cos(th) / hw, sin(th) / hd));
-      R.fl = TAU * sqrt(0.5 * (hw * hw + hd * hd)); R.fd = s * R.fl; R.fid = 0u;
+      // face distance ~ arc length (first-order correction for ellipses, so windows keep their width all round)
+      let m2 = 0.5 * (hw * hw + hd * hd);
+      R.fl = TAU * sqrt(m2); R.fd = sqrt(m2) * (th + (hd * hd - hw * hw) / (8.0 * m2) * sin(2.0 * th)); R.fid = 0u;
     } else {
       let ki = min(floor(sm * N), N - 1.0);
       let f = clamp(s * N - ki, 0.0, 1.0);
@@ -277,13 +279,24 @@ fn interior(f: vec2f, d0: vec3f, size: vec3f, rs: f32, mode: u32) -> vec3f {
   }
   if (mode >= 2u) {
     if (t != tz && t != ty) {
-      // side-wall shelving
-      let sh = step(0.5, fract(h.y * 5.0)) * step(0.1, h.y) * step(h.y, 0.85);
-      c = mix(c, hsv(fract(rs * 2.3 + floor(h.z * 5.0) * 0.21), 0.3, 0.65), sh * 0.5);
+      // side walls: dark, with shelf uprights (horizontal shelf bands smear at grazing angles)
+      c = tint * 0.28 * (1.0 - 0.5 * step(0.85, fract(h.z * 4.0)));
     }
+    if (t == tz) { c *= 0.8; }
     if (t == ty && d.y < 0.0) { c = vec3f(0.16, 0.15, 0.14); }
   }
   var col = c * lamp * (1.0 - 0.45 * h.z);
+  if (mode >= 2u) {
+    // a customer or shopkeeper silhouette standing at 55% depth in some shops
+    let tp = 0.55 * size.z / d.z;
+    if (tp < t && fract(rs * 5.3) < 0.6) {
+      let pp = (p + d * tp) / size;
+      let px = fract(rs * 9.1) * 0.6 + 0.2;
+      let body = step(abs(pp.x - px) * size.x, 0.23) * step(pp.y * size.y, 1.45);
+      let head = step(length(vec2f((pp.x - px) * size.x, pp.y * size.y - 1.62)), 0.13);
+      col = mix(col, vec3f(0.025, 0.02, 0.02), max(body, head));
+    }
+  }
   // counter / furniture silhouette at 35% depth
   let tc = 0.35 * size.z / d.z;
   if (tc < t) {
@@ -549,8 +562,8 @@ fn carpet(p: vec2f) -> vec3f {
   if (roofCap) {
     // flat roof: gravel / membrane with drains and grime
     let nz = vnoise2(wp.xz * 0.35);
-    S.alb = vec3f(0.07, 0.07, 0.075) * (0.75 + 0.5 * nz);
-    S.rough = 0.85; S.wet = 1.0;
+    S.alb = vec3f(0.045, 0.045, 0.05) * (0.75 + 0.5 * nz);
+    S.rough = 0.9; S.wet = 0.35;
     if (mat == 15u) {
       // helipad
       let lp = rot2(-P.a.w) * (wp.xz - P.a.xz);
@@ -562,7 +575,10 @@ fn carpet(p: vec2f) -> vec3f {
       S.emis = vec3f(0.2, 1.0, 0.4) * ring * 3.0 + vec3f(1.0) * saturate(H) * 1.2;
       let edge = smoothstep(0.93, 0.97, r) * step(0.5, fract(atan2(lp.y, lp.x) * 4.0));
       S.emis += vec3f(1.0, 0.8, 0.2) * edge * 4.0;
-    } else if (mat == 11u || mat == 14u || mat == 13u) {
+    } else if (mat == 14u) {
+      // crown tier top: dark roof, faint glow from the lit lip below
+      S.alb = col * 0.12; S.emis = col * prm * 0.04;
+    } else if (mat == 11u || mat == 13u) {
       S.emis = col * prm * 0.6;
     } else if (mat == 7u || mat == 12u) {
       S.alb = col * 0.6;
@@ -620,7 +636,10 @@ fn carpet(p: vec2f) -> vec3f {
     let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, prm, 5u, 0.75);
     let spand = 1.0 - pulse(0.22, 0.96, G.f.y, fw.y / floorH);
     let mull = 1.0 - pulse(0.04, 0.96, G.f.x, fw.x / G.cw);
-    let frame = max(spand * 0.85, mull * 0.7) * G.det;
+    // frame lines stay visible while a window cell is a few pixels wide (lit floors read as rows of windows,
+    // not as stretched bands), then fade to their average coverage
+    let frameVis = 1.0 - smoothstep(0.3, 0.75, max(fw.x / G.cw, fw.y / floorH));
+    let frame = mix(0.22, max(spand * 0.85, mull * 0.7), frameVis);
     S.alb = mix(S.alb, col * 0.35 + vec3f(0.03), frame);
     S.rough = mix(S.rough, 0.35, frame);
     S.emis = G.e * (1.0 - frame);
@@ -761,9 +780,10 @@ fn carpet(p: vec2f) -> vec3f {
       }
       room *= shopC * select(1.0, 0.75, isDoor);
       let shutM = glassM * select(select(0.0, pulse(1.9, 3.4, hr, fw.y), halfShut), 1.0, shut);
-      S.alb = mix(S.alb, vec3f(0.02), glassM);
-      S.emis = room * glassM * 0.45 * (1.0 - frameM);
-      S.rough = mix(S.rough, 0.08, glassM);
+      // dark glass: the lit interior carries the read, reflections stay dim (rougher, occluded, not wet)
+      S.alb = mix(S.alb, vec3f(0.012), glassM);
+      S.emis = room * vec3f(1.0, 0.93, 0.82) * glassM * 0.5 * (1.0 - frameM);
+      S.rough = mix(S.rough, 0.35, glassM); S.ao = mix(S.ao, 0.15, glassM); S.wet = mix(S.wet, 0.0, glassM);
       S.alb = mix(S.alb, frameC, frameM * glassM);
       S.metal = frameM * glassM * 0.6;
       if (shutM > 0.0) {
@@ -851,14 +871,18 @@ fn carpet(p: vec2f) -> vec3f {
   } else if (mat == 8u) {
     // ---------------- Hongyadong wood with glowing lattices
     let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, 0.8, 4u, 2.4);
-    let lat = 1.0 - (1.0 - pulse(0.08, 0.92, fract(G.f.x * 5.0), fw.x * 5.0 / G.cw)) * (1.0 - pulse(0.08, 0.92, fract(G.f.y * 4.0), fw.y * 4.0 / floorH)) * G.det;
+    // lattice bars: 1 in the panes, 0 on the bars (4 x 5 panes per window, bars at least ~1 px wide)
+    let barX = 1.0 - pulse(0.1, 0.9, fract(G.f.x * 4.0), max(fw.x * 4.0 / G.cw, 0.05));
+    let barY = 1.0 - pulse(0.1, 0.9, fract(G.f.y * 5.0), max(fw.y * 5.0 / floorH, 0.05));
+    let lat = 1.0 - max(barX, barY) * G.det;
     let wood = col * (0.7 + 0.3 * vnoise2(vec2f(fd * 3.0, wp.y * 0.3)));
     S.alb = mix(wood, vec3f(0.1, 0.06, 0.02), G.cov);
     let gold = vec3f(1.0, 0.62, 0.22);
     // lit rooms behind the lattice (parallax interiors), each window a slightly different warmth
     let wv = 0.75 + 0.5 * hash21(G.id + vec2f(seed, 3.0));
     let behind = G.e * vec3f(1.0, 0.78, 0.5) * 1.6 + gold * 0.1 * G.g.x;
-    S.emis = mix(gold * prm * 0.4 * G.cov, behind * mix(0.35, 1.0, lat) * wv, G.det);
+    S.emis = mix(gold * prm * 0.4 * G.cov, behind * mix(0.12, 1.0, lat) * wv, G.det);
+    S.alb = mix(S.alb, wood * 0.6, (1.0 - lat) * G.cov);
     // beam lines glow
     S.emis += gold * 0.9 * pulse(0.0, 0.05, G.f.y, fw.y / floorH) * G.det;
     S.rough = 0.6;
@@ -929,6 +953,25 @@ fn carpet(p: vec2f) -> vec3f {
     let hue = hsv(fract(seed * 0.071), 0.5, 1.0);
     S.alb = cb * mix(vec3f(1.0), hue, 0.35); S.rough = 0.95; S.wet = 0.2;
     S.emis = S.alb * vec3f(1.0, 0.75, 0.5) * 0.25;
+  } else if (mat == 20u) {
+    // ---------------- air-conditioner unit: painted casing; the long faces carry a round fan grille and fins
+    let hf = saturate((wp.y - P.a.y) / max(P.b.z, 0.1));
+    S.alb = col * (0.85 + 0.15 * vnoise2(vec2f(fd * 6.0, wp.y * 6.0))); S.rough = 0.55; S.metal = 0.3; S.wet = 0.5;
+    if (fl > 0.7 && fl > P.b.z) {
+      // long plant rows repeat one fan unit every ~1.2 m
+      let uW = fl / max(1.0, round(fl / 1.2));
+      let cx = fract(fd / uW) * uW;
+      let q = vec2f(cx - uW * 0.36, (hf - 0.5) * P.b.z);
+      let r = length(q) / (P.b.z * 0.4);
+      let fwr = max(fwp * 4.0, 0.02);
+      let rings = 1.0 - pulse(0.25, 0.75, fract(r * 4.0), fwr * 4.0);
+      let grille = (1.0 - step(1.0, r)) * mix(0.55, rings, 1.0 - smoothstep(0.2, 0.6, fwr * 4.0));
+      let hub = 1.0 - smoothstep(0.18, 0.18 + fwr, r);
+      let fins = pulse(0.8, 0.96, cx / uW, fwp / uW) * (1.0 - pulse(0.3, 0.7, fract(wp.y / 0.06), fwp / 0.06));
+      S.alb = mix(S.alb, vec3f(0.06), saturate(grille * (1.0 - hub) + fins * 0.8));
+      S.alb = mix(S.alb, col * 0.6, hub);
+    }
+    S.alb *= 0.8 + 0.2 * hf;   // grime toward the bottom
   } else if (mat == 15u) {
     S.alb = vec3f(0.2); S.metal = 0.6; S.rough = 0.4;
     S.emis = vec3f(1.0, 0.85, 0.3) * 2.0 * pulse(0.0, 0.3, fract(fd / 2.0), fw.x / 2.0);
@@ -965,8 +1008,13 @@ fn carpet(p: vec2f) -> vec3f {
     S.emis += accent * edge * 3.0;
   }
   if (!isCap && (flags & 32768u) != 0u) {
-    let k = smoothstep(topY - 14.0, topY, wp.y);
-    S.emis += hsv(fract(seed * 0.0291 + 0.1), 0.3, 1.0) * k * k * 0.9;
+    // crown wash: beams from uplights spaced along the top band, fading upward, so the top of the tower does
+    // not glow as one flat pale panel (far away the beams average to a dimmer wash)
+    let u = (wp.y - (topY - 14.0)) / 14.0;
+    let beam = pow(0.5 + 0.5 * cos(fd / 3.0 * TAU), 4.0);
+    let beamF = mix(0.27, beam, 1.0 - smoothstep(0.2, 0.6, fw.x / 3.0));
+    let up = step(0.0, u) * (0.25 + 0.75 * pow(saturate(1.0 - u), 1.5));
+    S.emis += hsv(fract(seed * 0.0291 + 0.1), 0.65, 1.0) * up * beamF * 0.9;
   }
   // a touch of facade self-illumination so silhouettes read at night
   S.emis += S.alb * 0.006;
