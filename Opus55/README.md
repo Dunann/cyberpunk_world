@@ -49,12 +49,12 @@ Target machine: RTX 4050 Laptop GPU, 2560x1440, Chrome. Measured during a script
 
 | | Average | 99th percentile | Worst frame |
 |---|---|---|---|
-| GPU time per frame | 9.4 ms | 11.2 ms | 13.1 ms |
+| GPU time per frame | 9.5 ms | 11.5 ms | 12.9 ms |
 | Target | 11 ms | 16.7 ms | 25 ms |
 
 ## How it was built
 - **Team of agents:** five Claude agents worked in parallel on separate modules: terrain and gardens; buildings; water, bridges and light show; traffic, people and signs; atmosphere, post-processing and sound. They worked on top of a shared engine (deferred renderer, tiled lighting, froxel fog, temporal anti-aliasing, bloom).
-- **Visual critic:** a separate critic agent that sees only screenshots reviewed ten fixed viewpoints and motion frames in each round. Its findings drove the fixes for the next round. Summaries are in [verification/](verification/).
+- **Visual critic:** a separate critic agent that sees only screenshots reviewed ten fixed viewpoints and motion frames in each round. Its findings drove the fixes for the next round. Score progression and open items: [verification/critic-progress.md](verification/critic-progress.md).
 - **Original request:** in [prompt.txt](prompt.txt).
 
 ## Building from source
