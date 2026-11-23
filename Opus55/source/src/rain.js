@@ -16,7 +16,7 @@ import { WGSL_LIB, WGSL_FRAME } from './common.js';
 import { shader } from './gpu.js';
 import { FOG_AMBIENT_WGSL } from './fog.js';
 
-const NEAR_N = 7000, FAR_N = 15000, SPLASH_N = 1600;
+const NEAR_N = 4500, FAR_N = 15000, SPLASH_N = 1600;
 const NEAR_B = 16, FAR_B = 46;      // box sizes (m)
 const MAX_OCC = 16;
 
@@ -66,7 +66,7 @@ fn lightAt(p: vec3f) -> vec3f {
   let hA = max(p.y - max(terrainHeight(p.xz), 0.0), 0.0);
   let amb = fogAmbientLi(p, normalize(p - F.camPos.xyz), hA, g, R.wind.w);
   let pt = max(total - amb, vec3f(0.0));
-  return pt / (1.0 + luma(pt) * 0.6);
+  return pt / (1.0 + luma(pt) * 2.5);
 }
 // Neutral base so drops read the same (light rain) everywhere, also where no light is near.
 const RAIN_BASE = vec3f(0.017, 0.019, 0.025);
@@ -125,7 +125,7 @@ const FOCAL_K = 0.5; // focal length in pixels = res.y * FOCAL_K / tan(fov/2)
   o.pos = vec4f((spx / res * 2.0 - 1.0) * w, z * w, w);
   // lighting: incoming light around the drop (point lights, glow, sky, moon) + a little sky reflection
   let L = lightAt(p);
-  o.col = (L * 0.6 + RAIN_BASE) * R.a.x;
+  o.col = (L * 0.5 + RAIN_BASE) * R.a.x;
   o.q = vec2f(c.x, c.y);
   o.misc = vec4f(alpha, ch.w, 0.0, 0.0);
   return o;
