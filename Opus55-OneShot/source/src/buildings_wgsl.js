@@ -346,7 +346,7 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   let warmOnly = style == 2u || style == 3u || style == 4u;
   let L = vec4f(select(select(L0.rgb, roomLight(fract(hash21(lid + seed) * 7.0) * 0.72), warmOnly), offC, mode == 1u), L0.a);
   var room = vec3f(0.0);
-  if (det > 0.01 && L.a > 0.5 && mask > 0.0) {
+  if (det > 0.01 && L.a > 0.5 && mask > 0.0 && F.params.w > 0.5) {
     let fr = vec2f((f.x - x0) / ww, (f.y - y0) / wh);
     room = interior(fr, vt, vec3f(cw * ww * scale, floorH * wh, select(4.5, 8.0, mode == 1u)), hash21(id + seed), mode);
     // curtains on some homes
@@ -530,9 +530,9 @@ fn carpet(p: vec2f) -> vec3f {
     }
   } else if (mat == 4u) {
     // ---------------- Bund stone
-    let st = col * (0.85 + 0.25 * vnoise2(vec2f(fd * 0.5, wp.y * 0.5)));
+    let st = col * (0.62 + 0.2 * vnoise2(vec2f(fd * 0.5, wp.y * 0.5)));
     S.alb = st; S.rough = 0.7; S.wet = 0.5;
-    let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, prm, 2u, 1.7);
+    let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, prm, 2u, 1.25);
     // rustication at ground floor
     let gfl = smoothstep(floorH * 1.0, floorH * 0.95, yRel);
     let groove = pulse(0.0, 0.08, fract(yRel / 0.6), fw.y / 0.6) * gfl;

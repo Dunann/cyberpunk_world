@@ -85,7 +85,8 @@ export class Builder {
     return this.P.add(o);
   }
   light(x, y, z, r, c, k, prio = 1, flicker = 0) { this.lights.push([x, y, z, r, c[0] * k, c[1] * k, c[2] * k, flicker, prio]); }
-  slot(x, y, z, nx, nz, w, h, vertical, style) { this.slots.push({ x, y, z, nx, nz, w, h, vertical, style }); }
+  // x,y,z = centre of the free sign area on the facade surface; nx,nz = outward facade normal; w,h in m.
+  slot(x, y, z, nx, nz, w, h, vertical, style, roof = false) { this.slots.push({ x, y, z, nx, nz, w, h, vertical, style, roof }); }
 
   // world position of local (lx, lz) around (cx, cz) rotated by a
   static tw(cx, cz, a, lx, lz) { const c = Math.cos(a), s = Math.sin(a); return [cx + lx * c - lz * s, cz + lx * s + lz * c]; }
@@ -155,7 +156,7 @@ function billboard(B, R, x, z, y, a, w, h, style) {
     B.prop({ x: px, y0: y, z: pz, a, hw: 0.25, hd: 0.25, h: post, mat: MAT.METAL, col: [0.2, 0.2, 0.22] });
   }
   B.part({ x, y0: y + post, z, a, hw: w / 2, hd: 0.3, h, mat: MAT.METAL, col: [0.12, 0.12, 0.13], flags: FLAG.BOTTOM });
-  B.slot(x + nx * 0.32, y + post + h / 2, z + nz * 0.32, nx, nz, w - 0.6, h - 0.6, false, style);
+  B.slot(x + nx * 0.32, y + post + h / 2, z + nz * 0.32, nx, nz, w - 0.6, h - 0.6, false, style, true);
 }
 
 // Crown on top of a tower part. Returns the highest point.
@@ -253,9 +254,10 @@ function lotSigns(B, R, L, podTop, style, density = 1) {
       const t = R() < 0.5 ? 1.2 + R() * 2 : F.len - 1.2 - R() * 2;
       const [x, z] = at(t);
       const g = W.heightAt(x, z);
-      const h = Math.min(4 + R() * 9, Math.max(podTop - g - 6, 2.5));
-      const y = g + 5.5 + h / 2;
-      if (y + h / 2 < g + 21) B.slot(x, y, z, nx, nz, 1.1 + R() * 0.6, h, true, style);
+      // blade sign on the podium facade: from 3.5 m above the street up to just below the podium top
+      const bottom = g + 3.5, top = Math.min(podTop - 0.4, g + 20);
+      const h = Math.min(4 + R() * 9, top - bottom);
+      if (h >= 2) B.slot(x, bottom + h / 2, z, nx, nz, 1.1 + R() * 0.6, h, true, style);
     }
   }
 }
@@ -444,7 +446,7 @@ export function genBund(B, R, L, clockTower) {
     const h = 70 + Math.pow(R(), 1.3) * 180;
     const glass = R() < 0.7;
     const kind = R() < 0.4 ? 1 : 0, prm = kind ? 0.25 : (R() < 0.3 ? 0.4 : 0);
-    const tw = tower(B, R, { x: L.x, z: L.z, a: L.angle, y0: podTop, baseY: podTop, hw: Math.max(hw, 8), hd: Math.max(hd, 8), h, segs: 1 + Math.floor(R() * 3), kind, prm, mat: glass ? MAT.GLASS : MAT.OFFICE, col: glass ? pick(R, PAL.glass) : pick(R, PAL.office), floorH: 3.9, winW: glass ? 1.5 : 3.2, lit: 0.3 + R() * 0.2, flags: R() < 0.5 ? FLAG.EDGE : FLAG.CROWNLIT, seed: R() * 999 });
+    const tw = tower(B, R, { x: L.x, z: L.z, a: L.angle, y0: podTop, baseY: podTop, hw: Math.max(hw, 8), hd: Math.max(hd, 8), h, segs: 1 + Math.floor(R() * 3), kind, prm, mat: glass ? MAT.GLASS : MAT.OFFICE, col: glass ? pick(R, PAL.glass) : pick(R, PAL.office), floorH: 3.9, winW: glass ? 1.5 : 3.2, lit: 0.16 + R() * 0.2, flags: R() < 0.5 ? FLAG.EDGE : FLAG.CROWNLIT, seed: R() * 999 });
     const top = crown(B, R, { x: L.x, z: L.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, CROWNS_CBD), style: DT.BUND });
     B.tops.push({ x: L.x, y: tw.top, z: L.z, bund: true });
     if (tw.top > 140) aviation(B, L.x, top, L.z, R() * 999);
@@ -464,7 +466,7 @@ export function genBund(B, R, L, clockTower) {
   // floodlights toward the river (east face, local +x)
   for (const t of [-0.3, 0.3]) {
     const [fx, fz] = Builder.tw(L.x, L.z, L.angle, hw + 3, hd * t * 2);
-    B.light(fx, L.gMin + 2, fz, 22, [1, 0.72, 0.42], 28, 3);
+    B.light(fx, L.gMin + 2, fz, 20, [1, 0.72, 0.42], 16, 3);
   }
   // colonnade portico on the river face
   if (R() < 0.6) {
