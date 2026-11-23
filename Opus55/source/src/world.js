@@ -87,8 +87,8 @@ export const LANDMARKS = [
 export const POSES = [
   { name: 'Nanshan overlook',      pos: [450, 40, 2000],  rel: true, target: [600, 80, -200],    t: 40 },
   { name: 'Bund light show',       pos: [1990, 3, -860],  rel: true, target: [3250, 180, -1300], t: 45 },
-  { name: 'Hillside neon street',  pos: [-820, 1.7, -190], rel: true, target: [-560, 6, -100],   t: 100 },
-  { name: 'Monorail station',      pos: [-1180, 12, -640], rel: true, target: [-1050, 20, -770], t: 15 },
+  { name: 'Hillside neon street',  pos: [-820, 1.7, -190], rel: true, target: [-560, 96, -100],  t: 100 },
+  { name: 'Monorail station',      pos: [-930, 140, -760], rel: false, target: [-1040, 146, -770], t: 15 },
   { name: 'Lake gardens',          pos: [-1500, 3, 2120], rel: true, target: [-2000, 40, 2900],  t: 120 },
   { name: 'Steppe night market',   pos: [760, 2, -2560],  rel: true, target: [900, 60, -2780],   t: 130 },
   { name: 'Among the supertalls',  pos: [2950, 280, -820], rel: false, target: [3450, 220, -1550], t: 50 },
