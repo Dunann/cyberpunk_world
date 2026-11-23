@@ -71,6 +71,13 @@ fn bandAA(y: f32, c: f32, h: f32, fw: f32) -> f32 {
   return (1.0 - smoothstep(hw - w * 0.5, hw + w * 0.5, abs(y - c))) * (h / hw);
 }
 
+// Fake uplighting under the deck: warm pools every 36 m along the span (no point lights needed).
+fn underLit(s: f32, n: vec3f) -> vec3f {
+  let x = (fract(s / 36.0) - 0.5) * 36.0;
+  let pool = exp(-x * x / 50.0);
+  return vec3f(1.0, 0.72, 0.45) * (0.018 + 0.26 * pool) * select(0.55, 1.0, n.y < -0.5);
+}
+
 @fragment fn fs(i: VOut) -> GOut {
   let kind = i.kb.x; let bid = i.kb.y;
   let st = styles[bid];
@@ -101,14 +108,22 @@ fn bandAA(y: f32, c: f32, h: f32, fw: f32) -> f32 {
   } else if (kind == 4u) { // deck fascia: LED line (uv.y = meters below the deck surface)
     albedo = vec3f(0.18, 0.18, 0.19);
     rough = 0.5;
-    emis = bridgeLed(bid, i.uv.x, 0.0, t) * bandAA(i.uv.y, -0.9, 0.12, fwv) * 3.0;
+    emis = bridgeLed(bid, i.uv.x, 0.0, t) * bandAA(i.uv.y, -1.3, 0.14, fwv) * 3.0;
   } else if (kind == 5u) { // lamp head
     albedo = vec3f(0.1);
     emis = vec3f(1.0, 0.86, 0.66) * 14.0;
-  } else if (kind == 6u) { // under-deck girder with blue accent line along the bottom edges
-    albedo = vec3f(0.16, 0.16, 0.17);
+  } else if (kind == 6u) { // under-deck girder with blue accent line along the bottom edges, uplit pools
+    albedo = vec3f(0.2, 0.2, 0.21);
     rough = 0.6;
-    emis = vec3f(0.15, 0.4, 1.0) * bandAA(i.uv.y, -3.0, 0.1, fwv) * 3.0;
+    emis = vec3f(0.15, 0.4, 1.0) * bandAA(i.uv.y, -4.0, 0.1, fwv) * 3.0 + underLit(i.uv.x, n);
+  } else if (kind == 10u) { // deck underside concrete, washed by warm uplights in pools along the span
+    albedo = vec3f(0.24, 0.23, 0.22) * (0.85 + 0.15 * hash21(floor(i.wp.xz * 0.5)));
+    rough = 0.85;
+    emis = underLit(i.uv.x, n);
+  } else if (kind == 11u) { // fender: dark rubber with yellow hazard stripes
+    let k = step(0.5, fract((i.wp.x + i.wp.z) * 0.25));
+    albedo = mix(vec3f(0.03), vec3f(0.5, 0.38, 0.05), k);
+    rough = 0.7;
   } else if (kind == 7u) { // tower concrete/steel with vertical LED edge lines (uv.y = height)
     albedo = mix(st.steel.rgb, vec3f(0.3), 0.4);
     rough = 0.55;
@@ -289,35 +304,30 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
     q(hw - SW, 0.22, hw, 0.22, up, 2, 0, 0);
     q(-hw + SW, 0.22, -hw + SW, 0, lateral, 0, 0, 0);                      // curbs
     q(hw - SW, 0.22, hw - SW, 0, nl, 0, 0, 0);
-    q(-hw, 0.22, -hw, -1.8, nl, 4, 0.22, -1.8);                           // fascias (uv.y = meters from deck top)
-    q(hw, 0.22, hw, -1.8, lateral, 4, 0.22, -1.8);
-    q(-hw, -1.8, -hw * 0.62, -1.8, [0, -1, 0], 0, 0, 0);                  // underside slab
-    q(hw * 0.62, -1.8, hw, -1.8, [0, -1, 0], 0, 0, 0);
-    q(-hw * 0.62, -1.8, -hw * 0.5, -3.2, nl, 6, -1.8, -3.2);              // girder webs (slanted)
-    q(hw * 0.62, -1.8, hw * 0.5, -3.2, lateral, 6, -1.8, -3.2);
-    q(-hw * 0.5, -3.2, hw * 0.5, -3.2, [0, -1, 0], 6, -3.2, -3.2);          // girder bottom
+    q(-hw, 0.22, -hw, -2.8, nl, 4, 0.22, -2.8);                           // fascias (uv.y = meters from deck top)
+    q(hw, 0.22, hw, -2.8, lateral, 4, 0.22, -2.8);
+    q(-hw, -2.8, -hw * 0.62, -2.8, [0, -1, 0], 10, s0, s0);               // underside slab
+    q(hw * 0.62, -2.8, hw, -2.8, [0, -1, 0], 10, s0, s0);
+    q(-hw * 0.62, -2.8, -hw * 0.5, -4.2, nl, 6, -2.8, -4.2);              // box girder webs (slanted)
+    q(hw * 0.62, -2.8, hw * 0.5, -4.2, lateral, 6, -2.8, -4.2);
+    q(-hw * 0.5, -4.2, hw * 0.5, -4.2, [0, -1, 0], 6, -4.2, -4.2);          // box girder bottom
   }
   // ---- underside structure where the deck is high: edge girders, cross-beams, maintenance walkway with small lamps
   const elevated = (s) => deckY(s) - Math.max(world.heightAt(ax + ux * s, az + uz * s), 0) > 6;
   for (let i = 0; i < n; i++) {
     const s0 = S[i], s1 = S[i + 1];
     if (!elevated(s0) || !elevated(s1)) continue;
-    for (const sd of [-1, 1]) mesh.beam(P(s0, sd * hw * 0.8, -2.4), P(s1, sd * hw * 0.8, -2.4), up, 0.65, 0.3, 0, bid, s0);
-    mesh.beam(P(s0, hw * 0.4, -3.95), P(s1, hw * 0.4, -3.95), up, 0.05, 0.5, 3, bid, s0);        // walkway grating
-    mesh.beam(P(s0, hw * 0.4 + 0.5, -3.0), P(s1, hw * 0.4 + 0.5, -3.0), up, 0.04, 0.04, 3, bid, s0); // handrail
+    for (const sd of [-1, 1]) mesh.beam(P(s0, sd * hw * 0.8, -3.6), P(s1, sd * hw * 0.8, -3.6), up, 0.8, 0.45, 10, bid, s0); // edge girders
+    mesh.beam(P(s0, hw * 0.33, -5.0), P(s1, hw * 0.33, -5.0), up, 0.06, 0.55, 3, bid, s0);        // walkway grating
+    mesh.beam(P(s0, hw * 0.33 + 0.55, -4.0), P(s1, hw * 0.33 + 0.55, -4.0), up, 0.05, 0.05, 3, bid, s0); // handrail
   }
   for (let s = 4; s < len - 4; s += 8) {
     if (!elevated(s)) continue;
-    mesh.beam(P(s, -hw * 0.95, -2.3), P(s, hw * 0.95, -2.3), up, 0.55, 0.22, 0, bid, s);           // cross-beam
+    mesh.beam(P(s, -hw * 0.95, -3.4), P(s, hw * 0.95, -3.4), up, 0.65, 0.3, 10, bid, s);           // cross-beam
     if (((s - 4) / 8) % 2 === 0) {
-      const l = P(s, hw * 0.4, -4.1);
+      const l = P(s, hw * 0.33, -5.15);
       mesh.beam(add(l, mul(along, -0.25)), add(l, mul(along, 0.25)), lateral, 0.12, 0.08, 9, bid, s); // walkway lamp
     }
-  }
-  // warm uplights washing the underside over the water
-  for (let s = sw0 + 30; s < sw1 - 20; s += 55) {
-    const l = P(s, 0, -9);
-    lightsOut.push([l[0], Math.max(l[1], 4), l[2], 24, 32, 25, 17]);
   }
   // ---- railings: posts every 2.5 m + top rail (thin beams)
   for (const sd of [-1, 1]) {
@@ -367,6 +377,17 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
   if (single) { mainA = pylonS; mainB = pylonS + reachS; }
   const towers = [];
   // lit band at the waterline around a pier or leg (base below water) and a light washing it upward
+  // massive pile cap under a pylon standing in the river: fender band, corner lamps and a light on its base
+  const footing = (cx, cz, s, halfLat) => {
+    const c0 = [cx - ux * 14, 0.5, cz - uz * 14], c1 = [cx + ux * 14, 0.5, cz + uz * 14];
+    mesh.beam(c0, c1, up, 4.5, halfLat, 0, bid, s);
+    mesh.beam([c0[0] - ux * 0.4, 1.3, c0[2] - uz * 0.4], [c1[0] + ux * 0.4, 1.3, c1[2] + uz * 0.4], up, 0.6, halfLat + 0.4, 11, bid, s);
+    for (const a of [-1, 1]) for (const b of [-1, 1]) {
+      const x = cx + ux * 13.6 * a + vx * (halfLat - 0.4) * b, z = cz + uz * 13.6 * a + vz * (halfLat - 0.4) * b;
+      mesh.beam([x, 5.0, z], [x, 5.7, z], along, 0.25, 0.25, 9, bid, s);
+    }
+    lightsOut.push([cx - vx * (halfLat + 4), 4, cz - vz * (halfLat + 4), 30, style.a[0] * 22, style.a[1] * 22, style.a[2] * 22]);
+  };
   const waterline = (x, z, r, s) => {
     mesh.beam([x, 0.2, z], [x, 1.4, z], along, r + 0.35, r + 0.35, 8, bid, s, 0);
     lightsOut.push([x - vx * (r + 3), 2.0, z - vz * (r + 3), 22, style.a[0] * 18, style.a[1] * 18, style.a[2] * 18]);
@@ -381,11 +402,11 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
     if (y - 3.2 - Math.max(g, 0) < 3) continue;
     for (const sd of [-1, 1]) {
       const c = P(s, sd * hw * 0.42, 0);
-      mesh.beam([c[0], base, c[2]], [c[0], y - 3.4, c[2]], along, 1.1, 1.1, 0, bid, s);
+      mesh.beam([c[0], base, c[2]], [c[0], y - 4.4, c[2]], along, 1.1, 1.1, 0, bid, s);
     }
-    const c0 = P(s, -hw * 0.6, -3.2), c1 = P(s, hw * 0.6, -3.2);
+    const c0 = P(s, -hw * 0.6, -4.2), c1 = P(s, hw * 0.6, -4.2);
     mesh.beam(add(c0, [0, -1.2, 0]), add(c1, [0, -1.2, 0]), along, 1.2, 1.2, 0, bid, s);
-    for (const sd of [-1, 1]) { const bb = P(s, sd * hw * 0.42, -3.35); mesh.beam(add(bb, [0, -0.2, 0]), add(bb, [0, 0.15, 0]), along, 0.7, 0.7, 3, bid, s); } // bearings
+    for (const sd of [-1, 1]) { const bb = P(s, sd * hw * 0.42, -4.35); mesh.beam(add(bb, [0, -0.2, 0]), add(bb, [0, 0.15, 0]), along, 0.7, 0.7, 3, bid, s); } // bearings
     // accent light washing the pier and the deck underside
     if (g < -0.5) {
       const c = P(s, hw * 0.42, 0);
@@ -413,7 +434,7 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
       const b0 = at(sd * (hw + 2.6), 0, base);
       mesh.beam(b0, legTop(sd), lateral, 2.4, 2.0, 7, bid, pylonS, 0);
       rib(at(sd * (hw + 5.1), 0, base + 3), add(legTop(sd), mul(lateral, sd * 2.5)), 0.24, 1, pylonS, pylonS, 0);
-      if (base < 0) waterline(b0[0], b0[2], 2.6, pylonS);
+
       lightsOut.push([b0[0] + ux * 6, yd + 4, b0[2] + uz * 6, 30, style.a[0] * 30, style.a[1] * 30, style.a[2] * 30]);
     }
     for (const f of [1.0, 0.82]) {
@@ -421,6 +442,7 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
       mesh.beam(at(-(hw + 2.0), dd, yy), at(hw + 2.0, dd, yy), along, 1.6, 1.8, 7, bid, pylonS);
     }
     mesh.beam(at(-(hw + 2.5), 0, yd - 4.5), at(hw + 2.5, 0, yd - 4.5), along, 1.6, 1.4, 7, bid, pylonS);
+    if (base < 0) footing(c[0], c[2], pylonS, hw + 7);
     lightsOut.push([c[0] - ux * H * lean * 0.9, yd + H * 0.9, c[2] - uz * H * lean * 0.9, 34, style.b[0] * 26, style.b[1] * 26, style.b[2] * 26]);
     towers.push({ x: c[0], z: c[2], top: yd + H });
     // harp: parallel cables, farther deck anchors attach higher up the legs
@@ -487,7 +509,7 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
       // pylon uplights at deck level and the top, lit band and light at the waterline
       lightsOut.push([c[0], yd + 3, c[2], 30, style.a[0] * 30, style.a[1] * 30, style.a[2] * 30]);
       lightsOut.push([c[0], top - 6, c[2], 26, style.b[0] * 22, style.b[1] * 22, style.b[2] * 22]);
-      if (base < 0) for (const sd of [-1, 1]) { const b0 = at(sd * (hw + 4), base); waterline(b0[0], b0[2], 2.4, ts); }
+      if (base < 0) footing(c[0], c[2], ts, hw + 9);
       towers.push({ x: c[0], z: c[2], top });
     }
   } else if (B.type === 'suspension') {
@@ -516,7 +538,7 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
       }
       lightsOut.push([c[0], yd + 3, c[2], 32, style.a[0] * 30, style.a[1] * 30, style.a[2] * 30]);
       lightsOut.push([c[0], top - 10, c[2], 30, style.b[0] * 26, style.b[1] * 26, style.b[2] * 26]);
-      if (base < 0) for (const sd of [-1, 1]) { const b0 = at(sd * (hw + 3), base); waterline(b0[0], b0[2], 2.4, ts); }
+      if (base < 0) footing(c[0], c[2], ts, hw + 8);
       towers.push({ x: c[0], z: c[2], top });
     }
     // main cables (parabola between towers) and back stays to anchorages, hangers every 10 m
