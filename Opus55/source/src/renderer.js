@@ -53,6 +53,7 @@ const TILE_MAX = 256u;
 var<workgroup> tMin: atomic<u32>;
 var<workgroup> tMax: atomic<u32>;
 var<workgroup> tCount: atomic<u32>;
+var<workgroup> tMask: atomic<u32>;   // 2.5D culling: 32 depth slices between zmin and zmax that contain geometry
 var<workgroup> tList: array<u32, TILE_MAX>;
 
 fn fresnelR(f0: vec3f, cosT: f32, rough: f32) -> vec3f {
@@ -64,7 +65,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wg: ve
   let dims = textureDimensions(gD);
   let inside = gid.x < dims.x && gid.y < dims.y;
   let px = vec2i(min(gid.xy, dims - 1u));
-  if (li == 0u) { atomicStore(&tMin, 0x7f7fffffu); atomicStore(&tMax, 0u); atomicStore(&tCount, 0u); }
+  if (li == 0u) { atomicStore(&tMin, 0x7f7fffffu); atomicStore(&tMax, 0u); atomicStore(&tCount, 0u); atomicStore(&tMask, 0u); }
   workgroupBarrier();
   let d = textureLoad(gD, px, 0);
   if (d > 0.0 && inside) {
@@ -75,6 +76,13 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wg: ve
   workgroupBarrier();
   let zmax = bitcast<f32>(atomicLoad(&tMax));
   let zmin = bitcast<f32>(atomicLoad(&tMin));
+  let zScale = 32.0 / max(zmax - zmin, 1e-3);
+  if (d > 0.0 && inside) {
+    let sl = u32(clamp((linearDepth(d) - zmin) * zScale, 0.0, 31.0));
+    atomicOr(&tMask, 1u << sl);
+  }
+  workgroupBarrier();
+  let depthMask = atomicLoad(&tMask);
   let lightCount = u32(F.fog.w);
   if (zmax > 0.0) {
     let tanY = F.camRight.w;
@@ -94,6 +102,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u, @builtin(workgroup_id) wg: ve
       let vp = (F.view * vec4f(L.posR.xyz, 1.0)).xyz;
       let vz = -vp.z;
       if (vz + r < zmin || vz - r > zmax) { continue; }
+      let s0 = u32(clamp((vz - r - zmin) * zScale, 0.0, 31.0));
+      let s1 = u32(clamp((vz + r - zmin) * zScale, 0.0, 31.0));
+      let lmask = (0xffffffffu >> (31u - s1)) & (0xffffffffu << s0);
+      if ((lmask & depthMask) == 0u) { continue; }
       if (dot(pl, vp) < -r || dot(pr, vp) < -r || dot(pb, vp) < -r || dot(pt, vp) < -r) { continue; }
       let k = atomicAdd(&tCount, 1u);
       if (k < TILE_MAX) { tList[k] = i; }

@@ -69,7 +69,7 @@ fn lightAt(p: vec3f) -> vec3f {
   return pt / (1.0 + luma(pt) * 2.5);
 }
 // Neutral base so drops read the same (light rain) everywhere, also where no light is near.
-const RAIN_BASE = vec3f(0.017, 0.019, 0.025);
+const RAIN_BASE = vec3f(0.042, 0.046, 0.058);
 
 fn cull() -> VOut { var o: VOut; o.pos = vec4f(0.0, 0.0, -2.0, 1.0); return o; }
 
@@ -206,7 +206,9 @@ const FOCAL_K = 0.5; // focal length in pixels = res.y * FOCAL_K / tan(fov/2)
   a *= saturate(diff / 0.3);
   if (kind > 0.5 && kind < 1.5) { a *= 1.0 - smoothstep(0.3, 0.8, diff - i.misc.y * 0.02); }
   if (a <= 0.002) { discard; }
-  return vec4f(i.col * a, 0.0);
+  // alpha = coverage: the composite darkens bright backgrounds a little along the streaks (refraction),
+  // so rain stays visible against lit windows
+  return vec4f(i.col * a, a);
 }
 `;
 

@@ -155,7 +155,10 @@ fn beamReflection(P: vec3f, V: vec3f, nrm: vec3f, bm: Beam, jit: f32) -> vec3f {
       // thin laser: rippled mirror reflection of the beam itself (broken wavy lines)
       c = beamGlow(P, reflect(rd, nrm), 1e5, bm, pixAng * 5.0, t) * fres * 0.85;
     } else {
-      c = beamReflection(P, V, nrm, bm, ign(i.pos.xy, F.params.y)) * fres * 1500.0;
+      // in rain the overcast-dimmed, rain-roughened surface near the camera keeps these to faint streaks
+      // (otherwise the grazing Fresnel turns them into broad white sheets that read as snow)
+      let nearDim = mix(1.0, 0.15, saturate(F.params.x * 1.8) * (1.0 - smoothstep(80.0, 450.0, tW)));
+      c = beamReflection(P, V, nrm, bm, ign(i.pos.xy, F.params.y)) * min(fres, 0.5) * 1500.0 * nearDim;
     }
     s = tW;
   }

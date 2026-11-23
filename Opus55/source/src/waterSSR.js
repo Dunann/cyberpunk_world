@@ -102,7 +102,8 @@ fn trace(P: vec3f, R: vec3f, steps: i32, jit: f32, maxLen: f32, dims: vec2f) -> 
 
 // What the river reflects when the screen has no data: sky plus a smeared, irregular glow of the city at the horizon.
 fn waterFallback(R: vec3f) -> vec3f {
-  var c = skyAmbient(R) * 0.8 + vec3f(0.012, 0.008, 0.014) * saturate(R.y * 3.0);
+  // in rain the moon is behind cloud: keep the sky reflection dim and free of moon glow
+  var c = (skyAmbient(R) - skyMoonHalo(dot(R, F.moon.xyz)) * 1.2 * saturate(F.params.x)) * mix(0.8, 0.55, saturate(F.params.x)) + vec3f(0.012, 0.008, 0.014) * saturate(R.y * 3.0);
   let az = atan2(R.x, R.z);
   let band = exp(-max(R.y, 0.0) * 14.0);
   let lights = 0.7 + 0.3 * vnoise2(vec2f(az * 9.0, 0.5));
@@ -213,7 +214,8 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
     let w = select(0.0, exp(-o * o * 2.5), same);
     acc += select(s, vec4f(s.rgb, s.a - 2.0), water) * w; wsum += w;
   }
-  if (wsum <= 1e-4) { textureStore(outB, p, c); return; }   // ground miss with no hits nearby: keep the miss
+  // ground miss: fill from neighbouring hits only when there are enough of them (avoids ghost blobs)
+  if (wsum <= 1e-4 || (c.a < 0.0 && wsum < 2.0)) { textureStore(outB, p, c); return; }
   var r = acc / wsum;
   if (water) { r.a += 2.0; }
   else if (c.a < 0.0) { r = r * (-c.a / max(r.a, 1e-3)) * 0.8; }   // miss: neighbour colour at this pixel's weight
@@ -252,7 +254,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   let mv = textureLoad(mTex, clamp(vec2i(uv * vec2f(fd)), vec2i(0), fd - 1), 0).xy;
   let puv = uv - mv;
   var hist = textureSampleLevel(histTex, sampClamp, puv, 0.0);
-  var a = select(0.15, 0.25, water);
+  var a = select(0.22, 0.25, water);
   if (any(puv < vec2f(0.0)) || any(puv > vec2f(1.0)) || (hist.a >= 1.5) != water || hist.a < 0.0) { hist = c; a = 1.0; }
   let ext = (mx - mn) * 0.2 + vec4f(0.01, 0.01, 0.01, 0.02);
   hist = clamp(hist, mn - ext, mx + ext);
@@ -299,7 +301,7 @@ export class WaterSSR {
     ] });
     const q = ctx.quality.level;
     this.tracePipe = r.computePipeline({ label: 'ssr-trace', code: WGSL_SSR_COMMON + TRACE_WGSL, groups: [this.traceLayout],
-      constants: { STEPS_W: q >= 2 ? 24 : q === 1 ? 16 : 12, STEPS_G: q >= 2 ? 14 : q === 1 ? 12 : 8 } });
+      constants: { STEPS_W: q >= 2 ? 20 : q === 1 ? 16 : 12, STEPS_G: q >= 2 ? 14 : q === 1 ? 12 : 8 } });
     this.blurLayout = d.createBindGroupLayout({ entries: [
       { binding: 0, visibility: C, texture: { sampleType: 'unfilterable-float' } },
       { binding: 1, visibility: C, texture: { sampleType: 'unfilterable-float' } },
