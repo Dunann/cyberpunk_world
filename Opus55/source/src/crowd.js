@@ -4,7 +4,8 @@
 // Agent kinds: 0 sidewalk walker on a street run, 1 pacing back and forth (market shoppers), 2 standing (spectators,
 // platform waiters, vendors).
 
-import { MeshBuilder, VERTEX_LAYOUT } from './trafficGeom.js';
+import { VERTEX_LAYOUT } from './trafficGeom.js';
+import { personMesh, ARM_SY, ARM_EY, HOLD_SHOULDER, HOLD_ELBOW } from './crowdMesh.js';
 import { buildRuns } from './trafficCars.js';
 import { DISTRICTS, DT } from './world.js';
 import { rng } from './math.js';
@@ -57,7 +58,9 @@ struct Glint { a: vec4f, b: vec4f }; // a: pos, radius   b: color (fog applied),
 @group(1) @binding(1) var<storage, read_write> near: array<Person>;
 @group(1) @binding(2) var<storage, read_write> glints: array<Glint>;
 @group(1) @binding(3) var<storage, read_write> args: array<atomic<u32>>;
-@group(1) @binding(4) var<uniform> P: vec4f; // x count, y near distance, z glint distance, w near capacity
+struct Params { a: vec4f, b: vec4f };
+// a: x count, y mesh distance, z glint distance, w far-mesh capacity   b: x LOD0 distance, y LOD1 distance, z/w LOD0/LOD1 capacity
+@group(1) @binding(4) var<uniform> P: Params;
 
 fn ledColor(k: u32) -> vec3f {
   if (k == 0u) { return vec3f(0.1, 0.9, 1.0); }
@@ -69,28 +72,48 @@ fn ledColor(k: u32) -> vec3f {
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
   let i = gid.x;
-  if (i >= u32(P.x)) { return; }
+  if (i >= u32(P.a.x)) { return; }
   let A = agents[i];
   let t = time();
   let st = agentState(A, t);
   if (st.fade < 0.02) { return; }
   let dist = length(st.p - F.camPos.xyz);
-  if (dist > P.z) { return; }
+  if (dist > P.a.z) { return; }
   let c = F.viewProjNJ * vec4f(st.p + vec3f(0.0, 1.0, 0.0), 1.0);
   if (c.w < -2.0 || abs(c.x) > c.w * 1.05 + 3.0 || abs(c.y) > c.w * 1.05 + 3.0) { return; }
   let style = u32(A.c.z);
-  if (dist < P.y) {
+  var show = dist < P.a.y;
+  if (dist < 25.0) {
+    // people right next to or behind the lens, or whose umbrella top is in the bottom fifth of the frame, would only
+    // show a clipped sliver of canopy at the frame edge: leave them out
+    let top = F.viewProjNJ * vec4f(st.p + vec3f(0.0, 2.3 * A.c.w, 0.0), 1.0);
+    if (top.w < 1.0 || top.y < -0.6 * top.w) { show = false; }
+  }
+  if (show) {
     let ps = agentState(A, t - F.camFwd.w);
     var o: Person;
     o.p = vec4f(st.p, A.c.y);
     o.f = vec4f(st.f, st.walk * 4.2, ps.walk * 4.2);
     o.pp = vec4f(ps.p, A.c.z);
     o.pf = vec4f(ps.f, st.amp, A.c.w * st.fade * smoothstep(2.0, 4.5, dist));
-    let k = atomicAdd(&args[1], 1u);
-    if (k < u32(P.w)) { near[k] = o; }
+    // level of detail by distance; a full list spills into the next coarser one
+    var lod = 2u;
+    if (dist < P.b.x) { lod = 0u; } else if (dist < P.b.y) { lod = 1u; }
+    if (lod == 0u) {
+      let k = atomicAdd(&args[1], 1u);
+      if (k < u32(P.b.z)) { near[k] = o; } else { lod = 1u; }
+    }
+    if (lod == 1u) {
+      let k = atomicAdd(&args[6], 1u);
+      if (k < u32(P.b.w)) { near[u32(P.b.z) + k] = o; } else { lod = 2u; }
+    }
+    if (lod == 2u) {
+      let k = atomicAdd(&args[11], 1u);
+      if (k < u32(P.a.w)) { near[u32(P.b.z + P.b.w) + k] = o; }
+    }
   }
   // far glints: LED umbrella rims and raised phones
-  if (dist > P.y * 0.6) {
+  if (dist > P.a.y * 0.6) {
     var col = vec3f(0.0); var h = 0.0;
     if ((style & 2u) != 0u) { col = ledColor((style >> 11u) & 3u) * 4.0; h = 1.97; }
     else if ((style & 8u) != 0u) { col = vec3f(0.6, 0.8, 1.0) * 3.0; h = 1.85; }
@@ -105,7 +128,7 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
       var g: Glint;
       g.a = vec4f(pos, rr);
       g.b = vec4f(col * pow(r / rr, 1.3) * fog * st.fade, 0.0);
-      let k = atomicAdd(&args[6], 1u);
+      let k = atomicAdd(&args[15], 1u);
       if (k < arrayLength(&glints)) { glints[k] = g; }
     }
   }
@@ -113,8 +136,10 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 
 @compute @workgroup_size(1)
 fn clampArgs() {
-  atomicStore(&args[1], min(atomicLoad(&args[1]), u32(P.w)));
-  atomicStore(&args[6], min(atomicLoad(&args[6]), arrayLength(&glints)));
+  atomicStore(&args[1], min(atomicLoad(&args[1]), u32(P.b.z)));
+  atomicStore(&args[6], min(atomicLoad(&args[6]), u32(P.b.w)));
+  atomicStore(&args[11], min(atomicLoad(&args[11]), u32(P.a.w)));
+  atomicStore(&args[15], min(atomicLoad(&args[15]), arrayLength(&glints)));
 }
 `;
 
@@ -131,35 +156,68 @@ struct VOut {
   @location(4) @interpolate(flat) info: vec4f, // part, style, seed, 0
 };
 
-fn rotX(p: vec3f, pivot: vec3f, a: f32) -> vec3f {
-  let q = p - pivot;
+const ARM_SY = ${ARM_SY};
+const ARM_EY = ${ARM_EY};
+
+fn rotX(p: vec3f, py: f32, a: f32) -> vec3f {
+  let qy = p.y - py;
   let c = cos(a); let s = sin(a);
-  return pivot + vec3f(q.x, q.y * c - q.z * s, q.y * s + q.z * c);
+  return vec3f(p.x, py + qy * c - p.z * s, qy * s + p.z * c);
+}
+// Two-bone arm: bend the forearm at the elbow, then swing the whole arm at the shoulder.
+fn arm(p: vec3f, fore: bool, shoulder: f32, elbow: f32) -> vec3f {
+  var q = p;
+  if (fore) { q = rotX(q, ARM_EY, elbow); }
+  return rotX(q, ARM_SY, shoulder);
 }
 
 // Animate one vertex of the person mesh in local space (x left, y up, z forward).
+// style bits: 1 umbrella, 2 LED rim, 4 phone, 8 raised phone, 4-6 coat colour, 8-10 umbrella colour, 11-12 LED colour,
+// 13-14 clothes (0 jacket, 1 long coat, 2 poncho, 3 deel), 15-16 headwear (0 hair, 1 hood, 2 beanie, 3 steppe hat),
+// 17 long hair
 fn pose(p: vec3f, part: f32, style: u32, phase: f32, amp: f32) -> vec3f {
+  let pi = u32(part);
   let umb = (style & 1u) != 0u;
   let phone = (style & 4u) != 0u;
   let raised = (style & 8u) != 0u;
+  let cloth = (style >> 13u) & 3u;
+  let head = (style >> 15u) & 3u;
+  let longHair = ((style >> 17u) & 1u) != 0u;
+  var hide = false;
+  switch (pi) {
+    case 6u, 7u, 9u: { hide = !umb; }
+    case 8u: { hide = !phone && !raised; }
+    case 15u: { hide = head != 0u; }
+    case 25u: { hide = !longHair || head == 1u || head == 3u; }
+    case 16u: { hide = head != 1u; }
+    case 17u: { hide = head != 2u; }
+    case 18u: { hide = head != 3u; }
+    case 19u: { hide = cloth != 1u; }
+    case 20u: { hide = cloth != 2u; }
+    case 21u: { hide = cloth != 3u; }
+    default: {}
+  }
+  if (hide) { return vec3f(0.0, -1000.0, 0.0); }
   let sw = sin(phase) * 0.55 * amp;
+  let armSw = sw * select(0.8, 0.3, cloth == 2u);
   var q = p;
-  if (part == 2.0) { q = rotX(p, vec3f(0.1, 0.84, 0.0), sw); }
-  else if (part == 3.0) { q = rotX(p, vec3f(-0.1, 0.84, 0.0), -sw); }
-  else if (part == 4.0) {
-    // left arm holds the umbrella
-    q = select(rotX(p, vec3f(0.25, 1.44, 0.0), -sw * 0.8), rotX(p, vec3f(0.25, 1.44, 0.0), -1.25), umb);
-  } else if (part == 5.0) {
-    // right arm holds the phone (raised for spectators filming)
-    var a = sw * 0.8;
-    if (phone) { a = -1.0; }
-    if (raised) { a = -2.5; }
-    q = rotX(p, vec3f(-0.25, 1.44, 0.0), a);
-  } else if (part == 6.0 || part == 7.0 || part == 9.0) {
-    if (!umb) { return vec3f(0.0, -1000.0, 0.0); }
-  } else if (part == 8.0) {
-    if (!phone && !raised) { return vec3f(0.0, -1000.0, 0.0); }
-    if (raised) { q = p + vec3f(0.0, 0.62, 0.22); }
+  if (pi == 2u) { q = rotX(p, 0.84, sw); }
+  else if (pi == 3u) { q = rotX(p, 0.84, -sw); }
+  else if (pi == 4u || pi == 23u) {
+    // left arm: swings, or grips the umbrella pole in front of the chest
+    var s = -armSw; var e = -0.25 - max(0.0, sw) * 0.3;
+    if (umb) { s = ${HOLD_SHOULDER}; e = ${HOLD_ELBOW}; }
+    q = arm(p, pi == 23u, s, e);
+  } else if (pi == 5u || pi == 24u || pi == 8u) {
+    // right arm: swings, holds a phone at chest height, or films over the crowd
+    var s = armSw; var e = -0.25 - max(0.0, -sw) * 0.3;
+    if (phone) { s = -0.25; e = -1.35; }
+    if (raised) { s = -2.2; e = -0.5; }
+    q = arm(p, pi != 5u, s, e);
+  } else if (pi == 19u || pi == 21u) {
+    // coat and robe hems swing a little with the legs
+    let k = saturate((0.95 - p.y) / 0.8);
+    q.z += sin(phase) * 0.06 * amp * k * sign(p.x) * select(1.0, 0.6, pi == 21u);
   }
   // gentle body bob while walking
   q.y += abs(sin(phase)) * 0.035 * amp;
@@ -173,15 +231,21 @@ fn pose(p: vec3f, part: f32, style: u32, phase: f32, amp: f32) -> vec3f {
   let part = v.me.x;
   let sc = P.pf.w;
   let lp = pose(v.pos, part, style, P.f.z, P.pf.z) * sc;
-  let plp = pose(v.pos, part, style, P.f.w, P.pf.z) * sc;
   if (lp.y < -100.0) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
+  let plp = pose(v.pos, part, style, P.f.w, P.pf.z) * sc;
   let f = vec3f(P.f.x, 0.0, P.f.y);
   let l = vec3f(f.z, 0.0, -f.x);
   let pf = vec3f(P.pf.x, 0.0, P.pf.y);
   let pl = vec3f(pf.z, 0.0, -pf.x);
+  // limbs rotate their normals too (pose the point one normal-length away); the rest of the body only bobs
+  let pi = u32(part);
+  var pn = v.nrm;
+  if (pi == 2u || pi == 3u || pi == 4u || pi == 5u || pi == 8u || pi == 23u || pi == 24u) {
+    pn = pose(v.pos + v.nrm * 0.05, part, style, P.f.z, P.pf.z) * sc - lp;
+  }
   o.wp = P.p.xyz + l * lp.x + vec3f(0.0, lp.y, 0.0) + f * lp.z;
   o.pwp = P.pp.xyz + pl * plp.x + vec3f(0.0, plp.y, 0.0) + pf * plp.z;
-  o.n = l * v.nrm.x + vec3f(0.0, v.nrm.y, 0.0) + f * v.nrm.z;
+  o.n = l * pn.x + vec3f(0.0, pn.y, 0.0) + f * pn.z;
   o.lp = v.pos;
   o.info = vec4f(part, P.pp.w, P.p.w, 0.0);
   o.cp = F.viewProj * vec4f(o.wp, 1.0);
@@ -190,14 +254,34 @@ fn pose(p: vec3f, part: f32, style: u32, phase: f32, amp: f32) -> vec3f {
 
 fn coat(k: u32) -> vec3f {
   switch (k) {
-    case 0u: { return vec3f(0.05, 0.05, 0.06); }
-    case 1u: { return vec3f(0.2, 0.2, 0.22); }
-    case 2u: { return vec3f(0.08, 0.1, 0.22); }
-    case 3u: { return vec3f(0.4, 0.06, 0.05); }
-    case 4u: { return vec3f(0.55, 0.42, 0.08); }
-    case 5u: { return vec3f(0.05, 0.2, 0.15); }
-    case 6u: { return vec3f(0.33, 0.28, 0.22); }
-    default: { return vec3f(0.5, 0.5, 0.52); }
+    case 0u: { return vec3f(0.035, 0.035, 0.04); }   // black
+    case 1u: { return vec3f(0.18, 0.18, 0.2); }      // charcoal
+    case 2u: { return vec3f(0.06, 0.09, 0.24); }     // navy
+    case 3u: { return vec3f(0.38, 0.06, 0.06); }     // burgundy
+    case 4u: { return vec3f(0.5, 0.36, 0.12); }      // camel
+    case 5u: { return vec3f(0.12, 0.2, 0.09); }      // olive
+    case 6u: { return vec3f(0.05, 0.26, 0.3); }      // teal
+    default: { return vec3f(0.55, 0.52, 0.46); }     // stone
+  }
+}
+fn poncho(k: u32) -> vec3f {
+  switch (k & 3u) {
+    case 0u: { return vec3f(0.75, 0.62, 0.05); }     // safety yellow
+    case 1u: { return vec3f(0.08, 0.32, 0.55); }     // blue
+    case 2u: { return vec3f(0.6, 0.08, 0.3); }       // magenta
+    default: { return vec3f(0.35, 0.42, 0.45); }     // clear grey
+  }
+}
+fn deel(k: u32) -> vec3f {
+  switch (k) {
+    case 0u: { return vec3f(0.06, 0.12, 0.42); }     // royal blue
+    case 1u: { return vec3f(0.42, 0.05, 0.08); }     // crimson
+    case 2u: { return vec3f(0.05, 0.28, 0.2); }      // jade
+    case 3u: { return vec3f(0.55, 0.38, 0.06); }     // gold
+    case 4u: { return vec3f(0.25, 0.08, 0.3); }      // purple
+    case 5u: { return vec3f(0.1, 0.25, 0.4); }       // sky blue
+    case 6u: { return vec3f(0.32, 0.2, 0.12); }      // brown
+    default: { return vec3f(0.06, 0.06, 0.08); }     // black
   }
 }
 fn umbCol(k: u32) -> vec3f {
@@ -218,33 +302,80 @@ fn ledCol(k: u32) -> vec3f {
   if (k == 2u) { return vec3f(0.6, 0.25, 1.0); }
   return vec3f(1.0, 0.6, 0.15);
 }
+fn hairCol(h: f32) -> vec3f {
+  if (h < 0.55) { return vec3f(0.018, 0.016, 0.015); }
+  if (h < 0.8) { return vec3f(0.07, 0.04, 0.025); }
+  if (h < 0.88) { return vec3f(0.5, 0.5, 0.52); }
+  if (h < 0.94) { return vec3f(0.55, 0.08, 0.35); }
+  return vec3f(0.06, 0.35, 0.5);
+}
 
 @fragment fn fs(i: VOut) -> GOut {
-  let part = i.info.x;
+  let pi = u32(i.info.x);
   let style = u32(i.info.y);
   let seed = i.info.z;
   let n = normalize(i.n);
   let ci = (style >> 4u) & 7u;
-  var albedo = coat(ci);
-  var rough = 0.6; var metal = 0.0; var emis = vec3f(0.0);
+  let cloth = (style >> 13u) & 3u;
   let h = fract(seed * 7.13);
-  if (part == 1.0) {
-    let skin = mix(vec3f(0.45, 0.3, 0.22), vec3f(0.62, 0.45, 0.34), h);
-    albedo = select(skin, vec3f(0.03, 0.025, 0.02), i.lp.y > 1.67 || (i.lp.z < -0.05 && i.lp.y > 1.52));
-  } else if (part == 2.0 || part == 3.0 || part == 10.0) {
-    albedo = select(vec3f(0.04, 0.045, 0.06), vec3f(0.12, 0.12, 0.14), h > 0.6);
-    if (i.lp.y < 0.08) { albedo = vec3f(0.02); }
-  } else if (part == 4.0 || part == 5.0) {
-    albedo = coat(ci) * 0.9;
-  } else if (part == 6.0) {
-    albedo = umbCol((style >> 8u) & 7u); rough = 0.25; metal = 0.0;
-  } else if (part == 7.0) {
-    albedo = vec3f(0.05); metal = 0.8; rough = 0.3;
-  } else if (part == 8.0) {
-    albedo = vec3f(0.02); emis = vec3f(0.6, 0.8, 1.0) * 3.0;
-  } else if (part == 9.0) {
-    albedo = vec3f(0.1);
-    if ((style & 2u) != 0u) { emis = ledCol((style >> 11u) & 3u) * 6.0; albedo = vec3f(0.6); }
+  let h2 = fract(seed * 31.7);
+  let h3 = fract(seed * 113.1);
+  let lp = i.lp;
+  // garment colour: coat palette with a per-person shade, or a silk deel
+  var garment = coat(ci) * (0.75 + 0.5 * h2);
+  if (cloth == 3u) { garment = deel(ci); }
+  let trim = select(vec3f(0.75, 0.52, 0.12), vec3f(0.85, 0.82, 0.75), h3 > 0.5);
+  var albedo = garment;
+  var rough = 0.65; var metal = 0.0; var emis = vec3f(0.0);
+  switch (pi) {
+    case 1u: {
+      albedo = mix(vec3f(0.42, 0.27, 0.19), vec3f(0.66, 0.48, 0.37), h);
+      rough = 0.5;
+    }
+    case 15u, 25u: { albedo = hairCol(h3); rough = 0.45; }
+    case 2u, 3u, 10u: {
+      let tr = u32(h2 * 4.0);
+      albedo = select(select(vec3f(0.04, 0.045, 0.06), vec3f(0.06, 0.08, 0.16), tr == 1u), select(vec3f(0.14, 0.13, 0.11), vec3f(0.3, 0.25, 0.16), tr == 3u), tr >= 2u);
+      if (lp.y < 0.09) { albedo = vec3f(0.02); rough = 0.3; }
+      if (cloth == 3u && lp.y < 0.36) { albedo = vec3f(0.12, 0.05, 0.03); rough = 0.4; } // leather boots
+    }
+    case 23u, 24u: {
+      if (lp.y < 0.9) { albedo = mix(vec3f(0.42, 0.27, 0.19), vec3f(0.66, 0.48, 0.37), h); rough = 0.5; }
+      if (cloth == 3u && lp.y > 0.9 && lp.y < 0.94) { albedo = trim; }
+    }
+    case 0u, 4u, 5u, 19u, 21u: {
+      if (cloth == 3u) {
+        rough = 0.35;
+        // sash at the waist, diagonal collar trim and hem trim
+        if (lp.y > 0.92 && lp.y < 0.99) { albedo = select(vec3f(0.7, 0.35, 0.05), vec3f(0.75, 0.6, 0.08), h > 0.5); }
+        if (lp.z > 0.0 && lp.y > 1.12 && abs(lp.x + (lp.y - 1.45) * 0.55) < 0.016) { albedo = trim; }
+        if (lp.y < 0.2) { albedo = trim * 0.8; }
+      } else {
+        // zip line and hem band
+        if (lp.z > 0.06 && abs(lp.x) < 0.006 && lp.y > 0.95) { albedo = garment * 0.4; }
+        if (pi == 0u && lp.y < 1.0 && lp.y > 0.95) { albedo = garment * 0.7; }
+        // a few jackets have LED piping
+        if (h3 < 0.08 && pi == 0u && abs(lp.y - 1.0) < 0.012) { emis = ledCol(u32(h * 4.0)) * 3.0; }
+      }
+    }
+    case 20u: { albedo = poncho(ci); rough = 0.15; }
+    case 16u: { albedo = garment * 0.9; }
+    case 17u: {
+      albedo = select(select(vec3f(0.5, 0.06, 0.05), vec3f(0.55, 0.42, 0.08), h > 0.5), vec3f(0.12), h2 > 0.6);
+      rough = 0.9;
+    }
+    case 18u: {
+      if (lp.y > 1.732) { albedo = select(vec3f(0.5, 0.05, 0.05), vec3f(0.08, 0.12, 0.42), h > 0.6); rough = 0.35; if (lp.y > 1.855) { albedo = vec3f(0.7, 0.5, 0.1); } }
+      else { albedo = select(vec3f(0.06, 0.04, 0.03), vec3f(0.22, 0.15, 0.09), h2 > 0.5); rough = 0.95; }
+    }
+    case 6u: { albedo = umbCol((style >> 8u) & 7u); rough = 0.25; }
+    case 7u: { albedo = vec3f(0.05); metal = 0.8; rough = 0.3; }
+    case 8u: { albedo = vec3f(0.02); emis = vec3f(0.6, 0.8, 1.0) * 3.0; }
+    case 9u: {
+      albedo = vec3f(0.1);
+      if ((style & 2u) != 0u) { emis = ledCol((style >> 11u) & 3u) * 6.0; albedo = vec3f(0.6); }
+    }
+    default: {}
   }
   return gbuf(albedo, rough, n, metal, emis, 1.0, motionVector(i.wp, i.pwp), 0.0, 0.8);
 }
@@ -257,7 +388,7 @@ struct Glint { a: vec4f, b: vec4f };
 struct VOut { @builtin(position) cp: vec4f, @location(0) q: vec2f, @location(1) @interpolate(flat) col: vec3f };
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
   var o: VOut;
-  if (ii >= counts[6]) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
+  if (ii >= counts[15]) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
   let G = glints[ii];
   var corners = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = corners[vi];
@@ -273,46 +404,36 @@ struct VOut { @builtin(position) cp: vec4f, @location(0) q: vec2f, @location(1) 
 }
 `;
 
-function personMesh() {
-  const mb = new MeshBuilder();
-  const X = [1, 0, 0], Y = [0, 1, 0], Z = [0, 0, 1];
-  mb.box([0, 1.14, 0], X, Y, Z, 0.19, 0.31, 0.12, 0);          // torso
-  mb.box([0, 0.86, 0], X, Y, Z, 0.17, 0.05, 0.11, 2.5);        // hips (static, coloured like legs)
-  mb.box([0, 1.6, 0.01], X, Y, Z, 0.1, 0.12, 0.11, 1);         // head
-  mb.box([0.1, 0.42, 0], X, Y, Z, 0.075, 0.42, 0.085, 2);      // left leg
-  mb.box([-0.1, 0.42, 0], X, Y, Z, 0.075, 0.42, 0.085, 3);     // right leg
-  mb.box([0.25, 1.15, 0], X, Y, Z, 0.05, 0.3, 0.06, 4);        // left arm
-  mb.box([-0.25, 1.15, 0], X, Y, Z, 0.05, 0.3, 0.06, 5);       // right arm
-  mb.box([-0.12, 1.42, 0.3], X, Y, Z, 0.04, 0.07, 0.012, 8);   // phone screen
-  // umbrella: pole, canopy (both sides), LED rim
-  mb.beam([0.18, 1.2, 0.3], [0.05, 2.12, 0.08], 0.015, 0.015, 7);
-  const N = 8, r = 0.58, cy = 2.2, ry = 1.98, cx = 0.05, cz = 0.08;
-  for (let k = 0; k < N; k++) {
-    const a0 = k / N * Math.PI * 2, a1 = (k + 1) / N * Math.PI * 2, am = (a0 + a1) / 2;
-    const p0 = [cx + Math.cos(a0) * r, ry, cz + Math.sin(a0) * r], p1 = [cx + Math.cos(a1) * r, ry, cz + Math.sin(a1) * r];
-    const apex = [cx, cy, cz];
-    mb.tri(apex, p0, p1, [Math.cos(am) * 0.35, 0.94, Math.sin(am) * 0.35], [[0, 0], [1, 0], [0, 1]], 6);
-    mb.tri(apex, p1, p0, [0, -1, 0], [[0, 0], [1, 0], [0, 1]], 6);
-    mb.quad(p0, p1, [p1[0], ry - 0.035, p1[2]], [p0[0], ry - 0.035, p0[2]], [Math.cos(am), 0, Math.sin(am)], [[0, 0], [1, 0], [1, 1], [0, 1]], 9);
-  }
-  // hips use the leg material id range for shading but must not swing: remap 2.5 -> 2 shading in a static way
-  for (let i = 0; i < mb.vertexCount; i++) if (mb.v[i * 10 + 8] === 2.5) mb.v[i * 10 + 8] = 10;
-  return mb;
-}
-
 // ---------------------------------------------------------------- placement
 
 function buildAgents(world, transit, q) {
   const R = rng(8080);
   const A = [];
   const dens = [0.4, 0.7, 1.0][q];
+  // clothes: 0 jacket, 1 long coat, 2 poncho, 3 deel   headwear: 0 hair, 1 hood, 2 beanie, 3 steppe hat
+  // Clothes and headwear use their own random stream; umbrella, phone and colours keep drawing from the placement
+  // stream in the original order so the crowd layout does not change.
+  const S = rng(9191);
   const style = (o) => {
-    const umb = !o.indoor && R() < 0.55;
+    const r = S();
+    const cloth = o.steppe ? (r < 0.45 ? 3 : r < 0.65 ? 1 : r < 0.9 ? 0 : 2) : (r < 0.45 ? 0 : r < 0.8 ? 1 : 2);
+    const umb = !o.indoor && R() < (cloth === 2 ? 0.15 : o.umbrella || 0.55);
     const led = umb && R() < 0.3;
     const phone = !umb && R() < 0.3;
-    return (umb ? 1 : 0) | (led ? 2 : 0) | (phone ? 4 : 0) | (o.raised ? 8 : 0) | (((R() * 8) | 0) << 4) | (((R() * 8) | 0) << 8) | (((R() * 4) | 0) << 11);
+    const coatCol = (R() * 8) | 0, umbCol = (R() * 8) | 0, ledCol = (R() * 4) | 0;
+    const rh = S();
+    let head = umb ? (rh < 0.12 ? 1 : rh < 0.27 ? 2 : 0) : (rh < 0.35 ? 1 : rh < 0.5 ? 2 : 0);
+    if (o.steppe && S() < (cloth === 3 ? 0.65 : 0.25)) head = 3;
+    const longHair = S() < 0.35;
+    return (umb ? 1 : 0) | (led ? 2 : 0) | (phone ? 4 : 0) | (o.raised ? 8 : 0) | (coatCol << 4) | (umbCol << 8) |
+      (ledCol << 11) | (cloth << 13) | (head << 15) | (longHair ? 1 << 17 : 0);
+  };
+  const isSteppe = (x, z) => {
+    const d = world.districtAt(x, z);
+    return d.index >= 0 && DISTRICTS[d.index].type === DT.STEPPE;
   };
   const push = (ax, az, dx, dz, b0, b1, b2, b3, mode, o = {}) => {
+    if (o.steppe === undefined) o.steppe = isSteppe(ax, az);
     A.push(ax, az, dx, dz, b0, b1, b2, b3, mode, R(), style(o), 0.92 + R() * 0.16);
   };
   const blocked = (x, z) => {
@@ -337,7 +458,7 @@ function buildAgents(world, transit, q) {
       for (let k = 0; k < n; k++) {
         const lat = side * (D.road / 2 + 0.7 + R() * 1.6);
         const v = (0.95 + R() * 0.6) * (R() < 0.5 ? 1 : -1);
-        push(r.ax, r.az, r.dx, r.dz, r.len, lat, R() * r.len, v, 0);
+        push(r.ax, r.az, r.dx, r.dz, r.len, lat, R() * r.len, v, 0, { steppe: r.type === DT.STEPPE });
       }
     }
   }
@@ -366,14 +487,14 @@ function buildAgents(world, transit, q) {
       if (world.waterDist(x, z) < 8) continue;
       const across = R() < 0.35;
       const ddx = across ? px : ux, ddz = across ? pz : uz;
-      if (R() < 0.3) { const a = R() * 6.283; push(x, z, Math.cos(a), Math.sin(a), 0, -2000, R(), 0, 2); }
-      else push(x, z, ddx, ddz, 3 + R() * 9, -2000, R(), 0.6 + R() * 0.6, 1);
+      if (R() < 0.3) { const a = R() * 6.283; push(x, z, Math.cos(a), Math.sin(a), 0, -2000, R(), 0, 2, { steppe: true, umbrella: 0.75 }); }
+      else push(x, z, ddx, ddz, 3 + R() * 9, -2000, R(), 0.6 + R() * 0.6, 1, { steppe: true, umbrella: 0.75 });
     }
     for (let t = 14; t < 175; t += 5.5) for (const side of [-1, 1]) {
       if (R() < 0.25) continue;
       const o = side * 7.4;
       const x = C.x + ux * t + px * o, z = C.z + uz * t + pz * o;
-      push(x, z, -px * side, -pz * side, 0, -2000, R(), 0, 2);
+      push(x, z, -px * side, -pz * side, 0, -2000, R(), 0, 2, { steppe: true, indoor: true });
     }
   }
 
@@ -416,15 +537,17 @@ export class Crowd {
     const mk = (size, usage, label) => d.createBuffer({ label, size, usage });
     this.agentBuf = mk(ag.data.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, 'crowd-agents');
     d.queue.writeBuffer(this.agentBuf, 0, ag.data);
-    this.nearCap = [1500, 2500, 3500][q];
-    this.nearBuf = mk(this.nearCap * 64, GPUBufferUsage.STORAGE, 'crowd-near');
+    // three mesh levels of detail share one instance buffer: [LOD0 | LOD1 | LOD2], capacities multiples of 4 so each
+    // region starts on a 256-byte boundary for its bind group
+    const caps = [[200, 800, 1500], [300, 1200, 2500], [400, 1600, 3500]][q];
+    this.nearBuf = mk((caps[0] + caps[1] + caps[2]) * 64, GPUBufferUsage.STORAGE, 'crowd-near');
     this.glintCap = 12000;
     this.glintBuf = mk(this.glintCap * 32, GPUBufferUsage.STORAGE, 'crowd-glints');
-    this.mesh = personMesh().upload(d, 'person');
-    this.argsInit = new Uint32Array([this.mesh.count, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0]);
-    this.argsBuf = mk(48, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST, 'crowd-args');
-    this.params = new Float32Array([this.count, [110, 160, 210][q], [450, 600, 750][q], this.nearCap]);
-    this.paramBuf = mk(16, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, 'crowd-params');
+    this.meshes = [0, 1, 2].map((l) => personMesh(l).upload(d, 'person' + l));
+    this.argsInit = new Uint32Array([this.meshes[0].count, 0, 0, 0, 0, this.meshes[1].count, 0, 0, 0, 0, this.meshes[2].count, 0, 0, 0, 0, 0]);
+    this.argsBuf = mk(64, GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST, 'crowd-args');
+    this.params = new Float32Array([this.count, [110, 160, 210][q], [450, 600, 750][q], caps[2], [14, 18, 22][q], [40, 50, 60][q], caps[0], caps[1]]);
+    this.paramBuf = mk(32, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, 'crowd-params');
     d.queue.writeBuffer(this.paramBuf, 0, this.params);
     const C = GPUShaderStage.COMPUTE;
     this.csLayout = d.createBindGroupLayout({ entries: [
@@ -439,7 +562,9 @@ export class Crowd {
     this.clampPipe = R.computePipeline({ label: 'crowd-clamp', code: CROWD_CS, entry: 'clampArgs', groups: [this.csLayout] });
     const V = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
     this.meshLayout = d.createBindGroupLayout({ entries: [{ binding: 0, visibility: V, buffer: { type: 'read-only-storage' } }] });
-    this.meshGroup = d.createBindGroup({ layout: this.meshLayout, entries: [{ binding: 0, resource: { buffer: this.nearBuf } }] });
+    const offs = [0, caps[0], caps[0] + caps[1]];
+    this.meshGroups = [0, 1, 2].map((l) => d.createBindGroup({ layout: this.meshLayout,
+      entries: [{ binding: 0, resource: { buffer: this.nearBuf, offset: offs[l] * 64, size: caps[l] * 64 } }] }));
     this.meshPipe = R.gbufferPipeline({ label: 'people', code: PERSON_WGSL, buffers: [VERTEX_LAYOUT], groups: [this.meshLayout] });
     this.glintLayout = d.createBindGroupLayout({ entries: [
       { binding: 0, visibility: V, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: V, buffer: { type: 'read-only-storage' } }] });
@@ -466,10 +591,13 @@ export class Crowd {
 
   gbuffer(ctx, pass) {
     pass.setPipeline(this.meshPipe);
-    pass.setBindGroup(1, this.meshGroup);
-    pass.setVertexBuffer(0, this.mesh.vb);
-    pass.setIndexBuffer(this.mesh.ib, 'uint32');
-    pass.drawIndexedIndirect(this.argsBuf, 0);
+    for (let l = 0; l < 3; l++) {
+      const m = this.meshes[l];
+      pass.setBindGroup(1, this.meshGroups[l]);
+      pass.setVertexBuffer(0, m.vb);
+      pass.setIndexBuffer(m.ib, 'uint32');
+      pass.drawIndexedIndirect(this.argsBuf, l * 20);
+    }
   }
 
   forward(ctx, pass) {

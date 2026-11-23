@@ -10,7 +10,7 @@ import { rng } from './math.js';
 // material ids (see TRANSIT_STATIC_WGSL)
 export const M = {
   CONCRETE: 0, METAL: 1, RESID: 2, STATIONFACADE: 3, CEILING: 4, PLATFORM: 5, LED: 6, PORTAL: 7, TRACKBED: 8, RAIL: 9,
-  CABLETOWER: 10, CABLE: 11, INWALL: 12, GLASS: 13, ROOF: 14, SLAB: 15, ACUNIT: 16, BLACK: 17, SHED: 18, YELLOW: 19,
+  CABLETOWER: 10, CABLE: 11, INWALL: 12, GLASS: 13, ROOF: 14, SLAB: 15, ACUNIT: 16, BLACK: 17, SHED: 18, YELLOW: 19, LAUNDRY: 20, DOWNLIGHT: 21,
 };
 
 export const TRANSIT_STATIC_WGSL = /* wgsl */ `
@@ -53,8 +53,15 @@ fn residential(uv: vec2f, n: vec3f, seed: f32, dist: f32) -> Surf {
   var rough = 0.8;
   var emis = vec3f(0.0);
   var mat = 0.0;
-  // slab band
-  if (fy < 0.32) { albedo = vec3f(0.42, 0.41, 0.4) * (0.8 + grime * 0.3); }
+  // floor trim: a dark drip line under a light slab band, with a tiled accent stripe on some buildings
+  if (fy < 0.32) {
+    albedo = vec3f(0.42, 0.41, 0.4) * (0.8 + grime * 0.3);
+    if (fy < 0.07) { albedo = vec3f(0.1, 0.09, 0.085); }
+    let accent = hash21(vec2f(seed, 7.0));
+    if (fy > 0.14 && fy < 0.22 && accent > 0.4) {
+      albedo = select(vec3f(0.35, 0.12, 0.08), vec3f(0.1, 0.25, 0.3), accent > 0.7) * (0.85 + 0.3 * step(0.5, fract(uv.x * 2.0)));
+    }
+  }
   let inWin = fx > 0.45 && fx < 2.95 && fy > 0.95 && fy < 2.65;
   if (inWin) {
     let frame = min(min(fx - 0.45, 2.95 - fx), min(fy - 0.95, 2.65 - fy));
@@ -63,18 +70,34 @@ fn residential(uv: vec2f, n: vec3f, seed: f32, dist: f32) -> Surf {
       albedo = vec3f(0.08, 0.085, 0.09); rough = 0.4;
     } else {
       albedo = vec3f(0.02, 0.025, 0.03); rough = 0.08; mat = 2.0;
+      let u = (fx - 0.45) / 2.5; let v = (fy - 0.95) / 1.7;
+      // window treatment: 0 bare, 1 drawn curtains, 2 blinds, 3 one curtain pulled aside, 4 plants on the sill
+      let h3 = hash21(vec2f(bay * 3.3 + seed, fl * 1.9 + 11.0));
+      let kind = u32(h3 * 5.0);
+      let ck = hash21(vec2f(bay + 0.5, fl * 7.7 + seed));
+      var tint = vec3f(1.0);
+      if (ck < 0.25) { tint = vec3f(1.0, 0.45, 0.35); } else if (ck < 0.45) { tint = vec3f(0.5, 0.95, 0.75); }
+      else if (ck < 0.6) { tint = vec3f(0.95, 0.85, 0.55); } else if (ck < 0.7) { tint = vec3f(0.75, 0.6, 1.0); }
+      var cov = 1.0;
+      if (kind == 1u) { cov = (0.55 + 0.25 * sin(u * 60.0)) ; }
+      else if (kind == 2u) { cov = select(0.35, 0.9, fract(v * 14.0) > 0.45); tint = mix(tint, vec3f(1.0), 0.6); }
+      else if (kind == 3u) { cov = select(1.0, 0.5 + 0.2 * sin(u * 70.0), u < 0.42); }
+      else { tint = vec3f(1.0); }
+      let plants = kind == 4u && v < 0.28 && fract(u * 3.0 + h3 * 7.0) < 0.7 && v < 0.12 + 0.18 * abs(sin(u * 23.0 + h3 * 9.0));
       let lit = h < 0.48;
       if (lit) {
         var c = mix(vec3f(1.0, 0.62, 0.32), vec3f(1.0, 0.82, 0.55), h2);
         if (h2 > 0.82) { c = vec3f(0.55, 0.75, 1.0); }
         if (h2 > 0.95) { c = vec3f(1.0, 0.35, 0.55); }
-        // curtains / interior depth: darker toward the frame and lower part
-        let u = (fx - 0.45) / 2.5; let v = (fy - 0.95) / 1.7;
-        let curtain = select(1.0, 0.45, (u < 0.22 || u > 0.78) && h2 > 0.4);
+        // interior depth: darker toward the frame and lower part
         let depth = 0.55 + 0.45 * smoothstep(0.0, 0.5, v) * (1.0 - abs(u - 0.5));
         // TV flicker
         let tv = select(1.0, 0.75 + 0.25 * sin(time() * 9.0 + h * 60.0) * sin(time() * 3.3 + h2 * 20.0), h2 > 0.88 && h2 < 0.95);
-        emis = c * (0.7 + 1.1 * h2) * curtain * depth * tv;
+        emis = c * tint * (0.7 + 1.1 * h2) * cov * depth * tv;
+        if (plants) { emis = vec3f(0.0); albedo = vec3f(0.02, 0.04, 0.02); rough = 0.8; mat = 0.0; }
+      } else if (kind == 1u || kind == 3u) {
+        // unlit windows still show the curtain fabric faintly
+        albedo = tint * 0.06 * cov; rough = 0.7; mat = 0.0;
       }
     }
   }
@@ -162,8 +185,9 @@ fn concrete(p: vec3f, uv: vec2f) -> vec3f {
       }
     }
   } else if (m == 11) { // cable
-    albedo = vec3f(0.12, 0.12, 0.13); rough = 0.35; metal = 0.9;
-    emis = vec3f(0.02, 0.025, 0.03);
+    // galvanised steel rope: bright metal so it catches the city glow and reads against the sky
+    albedo = vec3f(0.42, 0.43, 0.45); rough = 0.3; metal = 1.0;
+    emis = vec3f(0.035, 0.04, 0.05);
   } else if (m == 12) { // station interior wall with backlit ad panels
     albedo = vec3f(0.55, 0.55, 0.56); rough = 0.5;
     let fx = fract(uv.x / 9.0) * 9.0;
@@ -196,6 +220,13 @@ fn concrete(p: vec3f, uv: vec2f) -> vec3f {
   } else if (m == 19) { // yellow safety paint
     albedo = vec3f(0.55, 0.42, 0.04); rough = 0.5;
     emis = vec3f(0.08, 0.05, 0.0);
+  } else if (m == 20) { // laundry: each garment (extra = index) gets its own colour
+    let k = hash21(vec2f(ex, 3.0));
+    albedo = select(select(vec3f(0.6, 0.6, 0.58), vec3f(0.5, 0.1, 0.08), k > 0.5), select(vec3f(0.08, 0.2, 0.45), vec3f(0.6, 0.45, 0.1), k > 0.85), k > 0.7);
+    rough = 0.9; wet = 0.2;
+  } else if (m == 21) { // warm downlight panel (station portal canopy underside)
+    albedo = vec3f(0.6); rough = 0.4;
+    emis = vec3f(1.0, 0.8, 0.55) * 3.0;
   }
   let fade = 1.0 - smoothstep(2000.0, 4500.0, dist);
   return gbuf(albedo, rough, n, metal, emis, 1.0, motionVector(p, p), mat, wet);
@@ -529,11 +560,76 @@ function buildLizibaTower(mb, world, T, lights, signs, col, R) {
       box(X + 1.2, y + 0.3, s * (HZ + 1.35), 0.42, 0.3, 0.22, M.ACUNIT);
     }
   }
-  // AC units on the end faces too
-  for (const e of [1, -1]) for (const y of floors) for (let Z = -HZ + 2; Z < HZ - 1; Z += 3.4) {
-    if (R() > 0.25 || Math.abs(Z) < 8 && y > yL - 4 && y < yU + 4) continue;
-    box(e * (HX + 0.25), y + 0.3, Z, 0.22, 0.3, 0.42, M.ACUNIT);
+  // End faces (the monorail runs through them): every window bay gets its own treatment so the grid is not
+  // uniform: enclosed cage balconies with laundry, AC units below or beside the window, or nothing.
+  let garment = 0;
+  // all floor levels of the facade texture, including those of the lower block below the first full floor
+  const endFloors = [];
+  for (let y = lowerBase - 3 * Math.floor((lowerBase - y0) / 3); y < yTop - 1; y += 3) if (y > y0 + 0.5 && (y < yL - 0.5 || y > yU + 0.5)) endFloors.push(y);
+  for (const e of [1, -1]) for (const y of endFloors) for (let k = 0; k < 8; k++) {
+    // window bay centres follow the facade texture (3.4 m bays starting at the face corner)
+    const Z = e > 0 ? -HZ + 3.4 * k + 1.7 : HZ - 3.4 * k - 1.7;
+    if (Math.abs(Z) > HZ - 1) continue;
+    if (Math.abs(Z) < 9 && y > yL - 4 && y < yU + 6) continue; // keep the station opening clear
+    const r = R();
+    const fx = e * HX;
+    if (r < 0.2) {
+      // cage balcony: slab, low wall, bars, a roof plate; laundry hung on a rod inside
+      const D = 1.0, hw = 1.35;
+      box(fx + e * D / 2, y + 0.05, Z, D / 2, 0.08, hw, M.SLAB);
+      box(fx + e * (D - 0.04), y + 0.55, Z, 0.04, 0.45, hw, M.SLAB);
+      for (const s of [-1, 1]) box(fx + e * D / 2, y + 0.55, Z + s * (hw - 0.04), D / 2, 0.45, 0.04, M.SLAB);
+      for (let b = -hw + 0.25; b < hw; b += 0.3) box(fx + e * (D - 0.03), y + 1.75, Z + b, 0.015, 0.75, 0.015, M.METAL);
+      box(fx + e * D / 2, y + 2.55, Z, D / 2 + 0.05, 0.04, hw + 0.05, M.METAL);
+      if (R() < 0.75) {
+        box(fx + e * (D - 0.25), y + 2.3, Z, 0.015, 0.015, hw - 0.1, M.METAL);
+        const n = 2 + ((R() * 4) | 0);
+        for (let g = 0; g < n; g++) {
+          const gz = Z - hw + 0.35 + (g + 0.5) * (2 * hw - 0.7) / n, gh = 0.35 + R() * 0.35;
+          box(fx + e * (D - 0.25), y + 2.3 - gh / 2, gz, 0.02, gh / 2, 0.16 + R() * 0.1, M.LAUNDRY, garment++);
+        }
+      }
+    } else if (r < 0.5) {
+      // AC unit under the window or beside it, with a drip pipe
+      const side = R() < 0.5;
+      const az = side ? Z + 1.55 : Z + (R() - 0.5) * 1.2;
+      const ay = side ? y + 1.6 : y + 0.45;
+      box(fx + e * 0.25, ay, az, 0.22, 0.3, 0.42, M.ACUNIT);
+      box(fx + e * 0.05, ay - 0.3 - 0.4, az + 0.3, 0.02, 0.4, 0.02, M.METAL);
+    } else if (r < 0.62) {
+      // flower box on the sill
+      box(fx + e * 0.15, y + 0.85, Z, 0.15, 0.1, 1.1, M.SLAB);
+      box(fx + e * 0.15, y + 1.0, Z, 0.12, 0.08, 1.0, M.LAUNDRY, 1000 + garment++);
+    }
   }
+  // Station portal on both end faces: a lit steel frame around the track opening, a short canopy with warm
+  // downlights over the guideway, and an LED edge so the opening reads as a station entrance from afar.
+  for (const e of [1, -1]) {
+    const fx = e * HX;
+    const top = yb + 5.4, bot = yL;
+    for (const s of [-1, 1]) {
+      box(fx + e * 0.3, (bot + top + 0.9) / 2, s * 7.35, 0.35, (top + 0.9 - bot) / 2, 0.35, M.METAL);
+      box(fx + e * 0.66, (bot + top) / 2, s * 7.0, 0.02, (top - bot) / 2, 0.05, M.LED, 1, 1 | 2 | 16 | 32);
+    }
+    box(fx + e * 0.3, top + 0.45, 0, 0.35, 0.45, 7.7, M.METAL);
+    box(fx + e * 0.66, top + 0.02, 0, 0.02, 0.05, 7.0, M.LED, 1, 1 | 2 | 8);
+    // canopy: slab projecting 3 m over the guideway, downlight panels underneath, LED fascia on its edge
+    box(fx + e * 1.9, top + 1.1, 0, 1.6, 0.2, 8.2, M.ROOF);
+    box(fx + e * 1.9, top + 0.88, 0, 1.3, 0.02, 7.6, M.DOWNLIGHT, 0, 8);
+    box(fx + e * 3.52, top + 1.1, 0, 0.02, 0.12, 8.2, M.LED, 1, 1 | 2);
+    // guideway support just outside the opening: a tapered column with a cap under the beam
+    const gyb = yb - 1.6; // beam underside inside the station
+    const [cx, cz] = W(fx + e * 3.0, 0);
+    const gc = world.heightAt(cx, cz) - 1;
+    if (gc < gyb - 2) {
+      box(fx + e * 3.0, (gyb - 0.6 + gc) / 2, 0, 0.7, (gyb - 0.6 - gc) / 2, 0.9, M.CONCRETE);
+      box(fx + e * 3.0, gyb - 0.3, 0, 1.0, 0.3, 1.3, M.CONCRETE);
+    }
+    const [lx, lz] = W(fx + e * 2.2, 0);
+    lights.push([lx, top - 0.3, lz, 12, 26, 20, 13, 0]);
+  }
+  // light bars along the station ceiling over the track: give the opening depth from outside
+  for (let X = -HX + 2; X <= HX - 2; X += 4) box(X, yU - 0.25, 0, 1.4, 0.06, 0.25, M.DOWNLIGHT, 0, 8);
   // roof: parapet, machine room, water tank
   box(0, yTop + 0.6, HZ - 0.15, HX, 0.6, 0.15, M.SLAB);
   box(0, yTop + 0.6, -HZ + 0.15, HX, 0.6, 0.15, M.SLAB);
@@ -620,23 +716,44 @@ function buildCableway(mb, world, lights, signs, col) {
     signs.push({ x: s.x, y: top - 2.5, z: s.z, nx: ez[0], nz: ez[1], w: 16, h: 3.2, text: '长江索道', kind: 'fascia', color: [1.0, 0.15, 0.12], offset: HW + 0.05 });
     signs.push({ x: s.x, y: top - 2.5, z: s.z, nx: -ez[0], nz: -ez[1], w: 16, h: 3.2, text: '长江索道', kind: 'fascia', color: [1.0, 0.15, 0.12], offset: HW + 0.05 });
   }
-  // cables: per path one track rope and one haul rope (catenary)
-  const cable = { a: tops[0], b: tops[1], sag: 26, offsets: [5.5, -5.5], ex, ez };
-  for (const o of cable.offsets) {
-    for (const [dy, r] of [[0, 0.07], [-1.3, 0.05]]) {
-      let prev = null;
-      for (let k = 0; k <= 48; k++) {
-        const u = k / 48;
-        const p = cablePoint(cable, u, o);
-        p[1] += dy;
-        if (prev) mb.beam(prev, p, r, r, M.CABLE);
-        prev = p;
-      }
+  // Ropes. Each travel path (lateral offset +-5.5) has two parallel track ropes CABLE_GAUGE apart that the cabin
+  // carriage rolls on, and a haul rope HAUL_DROP below them that the cabin grips. All sag in the same parabola
+  // between the portal saddles and run level into the halls, where the haul rope wraps a bullwheel.
+  const cable = { a: tops[0], b: tops[1], sag: 26, offsets: [5.5, -5.5], ex, ez, gauge: CABLE_GAUGE, haulDrop: HAUL_DROP };
+  const SEG = 96;
+  // rope end inside a hall, 8.8 m behind the hall centre (t is a portal top)
+  const hallEnd = (t, o, dy) => [t.cx + (t.x - t.cx) * -0.55 + ez[0] * o, t.y + dy, t.cz + (t.z - t.cz) * -0.55 + ez[1] * o];
+  const rope = (o, dy, r) => {
+    let prev = hallEnd(tops[0], o, dy);
+    for (let k = 0; k <= SEG; k++) {
+      const p = cablePoint(cable, k / SEG, o);
+      p[1] += dy;
+      mb.beam(prev, p, r, r, M.CABLE);
+      prev = p;
     }
+    mb.beam(prev, hallEnd(tops[1], o, dy), r, r, M.CABLE);
+  };
+  for (const o of cable.offsets) {
+    rope(o + CABLE_GAUGE / 2, 0, 0.055);
+    rope(o - CABLE_GAUGE / 2, 0, 0.055);
+    rope(o, -HAUL_DROP, 0.04);
+  }
+  for (const t of tops) {
+    // saddle beam under the ropes on the portal frame, with a shoe under each track rope
+    mb.ybox(t.x, t.y - 0.35, t.z, 0.45, 0.25, HW - 1, ang, M.CABLETOWER, 0);
+    for (const o of cable.offsets) for (const g of [-1, 1]) {
+      mb.ybox(t.x + ez[0] * (o + g * CABLE_GAUGE / 2), t.y - 0.1, t.z + ez[1] * (o + g * CABLE_GAUGE / 2), 0.9, 0.06, 0.12, ang, M.BLACK, 0);
+    }
+    // haul rope bullwheel at the back of the hall (its radius is the half distance between the two paths)
+    const bx = t.cx + (t.x - t.cx) * -0.55, bz = t.cz + (t.z - t.cz) * -0.55;
+    mb.prism(bx, bz, t.y - HAUL_DROP - 0.25, t.y - HAUL_DROP + 0.25, cable.offsets[0], 24, M.CABLETOWER, 0, true);
+    mb.prism(bx, bz, t.y - HAUL_DROP + 0.25, t.y + 1.2, 0.5, 8, M.BLACK, 0, true);
   }
   world.shared.cableway = cable;
   return cable;
 }
+
+export const CABLE_GAUGE = 0.6, HAUL_DROP = 0.9;
 
 export function cablePoint(c, u, off) {
   const x = c.a.x + (c.b.x - c.a.x) * u + c.ez[0] * off;

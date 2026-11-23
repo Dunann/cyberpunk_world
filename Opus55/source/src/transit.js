@@ -5,7 +5,7 @@
 
 import { MeshBuilder, VERTEX_LAYOUT, storageLayout, bindBuffers } from './trafficGeom.js';
 import { buildTracks, STEP } from './transitLayout.js';
-import { buildTransitStatic, TRANSIT_STATIC_WGSL, cablePoint } from './transitStatic.js';
+import { buildTransitStatic, TRANSIT_STATIC_WGSL, cablePoint, CABLE_GAUGE, HAUL_DROP } from './transitStatic.js';
 
 // ---------------------------------------------------------------- car meshes (local: x left, y up, z forward)
 
@@ -66,12 +66,34 @@ function metroCar(L) {
   return mb;
 }
 
+// Wheel (cylinder) with its axis along x: centre, radius, half width, sides.
+function wheelX(mb, cx, cy, cz, r, hw, n, mat) {
+  for (let i = 0; i < n; i++) {
+    const a0 = (i / n) * Math.PI * 2, a1 = ((i + 1) / n) * Math.PI * 2, am = (a0 + a1) / 2;
+    const p = (a, x) => [x, cy + Math.cos(a) * r, cz + Math.sin(a) * r];
+    const uv = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    mb.quad(p(a0, cx - hw), p(a1, cx - hw), p(a1, cx + hw), p(a0, cx + hw), [0, Math.cos(am), Math.sin(am)], uv, mat);
+    mb.tri([cx + hw, cy, cz], p(a0, cx + hw), p(a1, cx + hw), [1, 0, 0], uv, mat);
+    mb.tri([cx - hw, cy, cz], p(a1, cx - hw), p(a0, cx - hw), [-1, 0, 0], uv, mat);
+  }
+}
+
 function cabinMesh() {
   const mb = new MeshBuilder();
   extrudeZ(mb, CABIN_PROFILE, [-3.2, -3.0, 3.0, 3.2], 9, 1);
-  mb.box([0, -0.15, 0], X, Y, Z, 0.4, 0.45, 1.5, 1);                    // carriage on the track rope
-  for (const z of [-1.1, 1.1]) mb.box([0, 0.12, z], X, Y, Z, 0.12, 0.3, 0.3, 1); // sheave wheels
-  mb.beam([0, -0.5, 0], [0, -3.4, 0], 0.11, 0.11, 1);                   // hanger
+  // Carriage: y = 0 is the centre of the two track ropes (x = +-gauge/2). Each rope carries a bogie with two
+  // grooved wheels resting on top of it; side plates wrap around the outside of the ropes down to a crossbar, and
+  // a grip clamps the haul rope below.
+  const g = CABLE_GAUGE / 2, wr = 0.2, ry = 0.055 + wr;
+  for (const sx of [-1, 1]) {
+    const x = sx * g;
+    for (const z of [-0.75, 0.75]) wheelX(mb, x, ry, z, wr, 0.05, 10, 1);
+    mb.box([x, ry + 0.12, 0], X, Y, Z, 0.05, 0.07, 1.05, 1);                 // bogie beam over the wheels
+    mb.box([x + sx * 0.12, 0.05, 0], X, Y, Z, 0.03, 0.32, 0.9, 1);           // outer side plate down past the rope
+  }
+  mb.box([0, -0.3, 0], X, Y, Z, g + 0.15, 0.06, 0.7, 1);                    // crossbar under the ropes
+  mb.box([0, -HAUL_DROP, 0], X, Y, Z, 0.12, 0.1, 0.35, 1);                  // grip on the haul rope
+  mb.beam([0, -0.3, 0], [0, -3.4, 0], 0.1, 0.1, 1);                        // hanger
   mb.box([0, -3.45, 0], X, Y, Z, 1.2, 0.12, 0.25, 1);
   mb.beam([0, -3.45, -0.3], [0, -3.45, -2.4], 0.08, 0.08, 1);
   mb.beam([0, -3.45, 0.3], [0, -3.45, 2.4], 0.08, 0.08, 1);

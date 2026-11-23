@@ -4,7 +4,7 @@
 
 import { DISTRICTS, DT } from './world.js';
 import { rng } from './math.js';
-import { SHOP_WORDS, BUND_WORDS, STEPPE_CN, MONGOL_WORDS, MONGOL_PAIRS, LATIN_WORDS, BIG_WORDS } from './signAtlas.js';
+import { SHOP_WORDS, BUND_WORDS, STEPPE_CN, MONGOL_WORDS, MONGOL_PAIRS, LATIN_WORDS, BIG_WORDS, CYRILLIC_MN, UYGHUR_WORDS } from './signAtlas.js';
 
 const MONGOL_BI = MONGOL_PAIRS.map(([m, c]) => m + c);
 
@@ -207,12 +207,54 @@ export function placeSigns(world, atlas, quality) {
     if (mid) lightC.push([ex + nx * 1.5, mid[1] - 0.4, ez + nz * 1.5, 14, 30, 7, 2, 0, 8]);
   }
 
+  // Night market stall boards (pose 6 lane): the stalls face across the lane, so a board parallel to the stall
+  // front is seen edge-on from the lane. Hang double-sided boards across the stall front instead, readable from
+  // both lane ends, in the market's four scripts: Chinese, vertical Mongolian, Cyrillic Mongolian and Uyghur.
+  const market = world.poses[5] && world.poses[5].resolved ? (() => {
+    const C = world.poses[5].resolved, T = world.poses[5].target;
+    const dx = T[0] - C.x, dz = T[2] - C.z, len = Math.hypot(dx, dz);
+    return { x: C.x, z: C.z, ux: dx / len, uz: dz / len };
+  })() : null;
+  const inMarket = (x, z) => {
+    if (!market) return false;
+    const rx = x - market.x, rz = z - market.z;
+    const along = rx * market.ux + rz * market.uz, across = -rx * market.uz + rz * market.ux;
+    return along > 8 && along < 180 && Math.abs(across) < 9;
+  };
+  const marketBoard = (sl) => {
+    // board plane spans the across-lane direction; its normal runs along the lane
+    const fx = market.ux, fz = market.uz;
+    const r = R();
+    const c1 = color(pick(PALETTE_STEPPE)), c2 = R() < 0.5 ? c1 : color(pick(PALETTE_STEPPE));
+    let e, w, h;
+    if (r < 0.25) {
+      // vertical Mongolian blade hanging from the canopy edge
+      e = atlas.find(pick(MONGOL_WORDS), true);
+      if (!e) return;
+      w = 0.75; const m = 0.09;
+      h = Math.min((w - 2 * m) / e.aspect + 2 * m, 1.9);
+      w = Math.min(w, (h - 2 * m) * e.aspect + 2 * m);
+      // hangs just in front of the canopy edge, bottom above head height
+      emit(KIND.DOUBLE, sl.x + sl.nx * 0.7, sl.y + 1.0 - h / 2, sl.z + sl.nz * 0.7, fx, fz, w, h, e, c1, c2, 0, 1, 0.12, 0, 0, m);
+      return;
+    }
+    const words = r < 0.5 ? STEPPE_CN : r < 0.68 ? CYRILLIC_MN : r < 0.84 ? UYGHUR_WORDS : MONGOL_BI;
+    e = atlas.find(pick(words), false);
+    if (!e) return;
+    h = 0.55 + R() * 0.25; const m = 0.08;
+    w = (h - 2 * m) * e.aspect + 2 * m;
+    if (w > 2.0) { w = 2.0; h = (w - 2 * m) / e.aspect + 2 * m; }
+    // stands on the canopy ridge so the canopy does not hide it
+    emit(KIND.DOUBLE, sl.x, sl.y + 0.1 + h / 2, sl.z, fx, fz, w, h, e, c1, c2, flickSeed(), R() < 0.7 ? 0 : 1, 0.12, 0, 0, m);
+  };
+
   // slots from the buildings module
   if (useSlots) {
     for (const sl of world.signSlots) {
       const g = sl.y;
       const nx = sl.nx, nz = sl.nz;
       const style = typeof sl.style === 'string' ? sl.style : '';
+      if (sl.style === DT.STEPPE && inMarket(sl.x, sl.z)) { marketBoard(sl); continue; }
       if (style.includes('screen')) {
         emit(KIND.SCREEN, sl.x + nx * 0.6, sl.y, sl.z + nz * 0.6, nx, nz, sl.w, sl.h, atlas.find(pick(BIG_WORDS), false), color(pick(PALETTE_STREET)), color(pick(PALETTE_STREET)), 0, (R() * 4) | 0, 1.6, -0.2, 0, 0.35);
         continue;

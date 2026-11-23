@@ -276,8 +276,29 @@ struct VOut {
 
 export function buildRuns(world) {
   const runs = [];
+  // A street is blocked where a building footprint (collider reaching down to the ground) covers it. Landmark site
+  // circles are far larger than their towers and contain painted streets, so test the real footprints.
+  const mk = world.poses && world.poses[5] && world.poses[5].resolved;
+  const market = mk ? { x: mk.x, z: mk.z, ux: world.poses[5].target[0] - mk.x, uz: world.poses[5].target[2] - mk.z } : null;
+  if (market) { const l = Math.hypot(market.ux, market.uz); market.ux /= l; market.uz /= l; }
   const blockedAt = (x, z) => {
-    for (const L of LANDMARKS) if (L.r > 0 && Math.hypot(x - L.x, z - L.z) < L.r + 4) return true;
+    if (market) {
+      // the night market lane (pose 6) is pedestrian only
+      const rx = x - market.x, rz = z - market.z;
+      const along = rx * market.ux + rz * market.uz, across = -rx * market.uz + rz * market.ux;
+      if (along > -5 && along < 185 && Math.abs(across) < 12) return true;
+    }
+    const cs = world.collidersNear ? world.collidersNear(x, z) : null;
+    if (cs) {
+      const g = world.heightAt(x, z);
+      for (const k of cs) {
+        const dx = x - k.cx, dz = z - k.cz;
+        const lx = dx * k.cos + dz * k.sin, lz = -dx * k.sin + dz * k.cos;
+        if (Math.abs(lx) < k.hx + 1.5 && Math.abs(lz) < k.hz + 1.5 && k.cy - k.hy < g + 4) return true;
+      }
+    } else {
+      for (const L of LANDMARKS) if (L.r > 0 && Math.hypot(x - L.x, z - L.z) < L.r + 4) return true;
+    }
     if (Math.hypot(x - MONORAIL_STATION.x, z - MONORAIL_STATION.z) < 40) return true;
     const lt = world.shared.lizibaTower;
     if (lt && Math.hypot(x - lt.x, z - lt.z) < 34) return true;
@@ -291,7 +312,8 @@ export function buildRuns(world) {
     const blockOk = (bi, bj) => {
       const [x, z] = toW((bi + 0.5) * D.block, (bj + 0.5) * D.block);
       const dom = world.districtAt(x, z);
-      return dom.index === di && dom.weight >= 0.5;
+      // the terrain paints city streets from a district weight of about 0.3 (see terrainShade.js), so run cars there too
+      return dom.index === di && dom.weight >= 0.3;
     };
     for (let axis = 0; axis < 2; axis++) {
       for (let i = -nI; i <= nI; i++) {
@@ -315,7 +337,8 @@ export function buildRuns(world) {
               const x = a[0] + (b[0] - a[0]) * s / 4, z = a[1] + (b[1] - a[1]) * s / 4;
               const h = world.heightAt(x, z);
               if (h < 2.0 || world.waterDist(x, z) < 6 || blockedAt(x, z)) ok = false;
-              if (hPrev !== null && Math.abs(h - hPrev) / (D.block / 4) > 0.3) ok = false;
+              // steep hillside streets are drawn up to ~0.5 grade; cars pitch with the terrain
+              if (hPrev !== null && Math.abs(h - hPrev) / (D.block / 4) > 0.5) ok = false;
               hPrev = h;
             }
           }
@@ -439,6 +462,7 @@ export class Cars {
     this.computeDesc = { timestampWrites: undefined };
     this.wg = Math.ceil(this.count / 128);
     world.shared.roadRuns = runs.length;
+    this.runs = runs;
     world.shared.carCount = this.count;
   }
 

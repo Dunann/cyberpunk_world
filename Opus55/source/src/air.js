@@ -6,6 +6,7 @@ import { MeshBuilder, VERTEX_LAYOUT } from './trafficGeom.js';
 import { TRANSIT_STATIC_WGSL } from './transitStatic.js';
 import { buildShapes } from './airShapes.js';
 import { rng } from './math.js';
+import { DISTRICTS, DT, LANDMARKS } from './world.js';
 
 // sky lanes [ax, az, bx, bz, altitude]
 const LANES = [
@@ -143,7 +144,7 @@ fn fogT(p: vec3f, dist: f32) -> f32 {
   let c = corners[vi % 6u];
   // per type: half span, lamp radius, min pixel radius
   var span = 2.4; var r = 0.3; var pxMin = 1.5;
-  if (ty > 0.5 && ty < 1.5) { span = 0.5; r = 0.15; pxMin = 1.1; }
+  if (ty > 0.5 && ty < 1.5) { span = 0.5; r = 0.22; pxMin = 1.7; }
   if (ty > 1.5 && ty < 2.5) { span = 1.3; r = 0.35; pxMin = 1.5; }
   if (ty > 2.5 && ty < 3.5) { span = 18.0; r = 0.9; pxMin = 1.3; }
   if (ty > 3.5) { span = 1.6; r = 0.3; pxMin = 1.1; }
@@ -232,6 +233,7 @@ struct VOut { @builtin(position) cp: vec4f, @location(0) wp: vec3f, @location(1)
 }
 `;
 
+const KNOT_N = 360; // drones in the second formation
 const SHOW_WGSL = /* wgsl */ `
 struct Pt { p: vec4f, c: vec4f };
 struct ShowU { a: vec4f, b: vec4f, c: vec4f, d: vec4f }; // a: shapeA, shapeB, morph, stagger  b: time, intensity, beatPhase, N  c: center xyz, scale  d: anim time
@@ -284,21 +286,29 @@ fn drone(ii: u32) -> Drone {
   return o;
 }
 // Reflection of each drone in the river: mirrored about the water plane, vertically smeared by the ripples.
+// Neighbouring drones would give parallel streaks of equal length that read as a lattice, so each streak gets its
+// own length, sideways offset and width, the streaks are wide and faint enough to merge into a soft glow band, and
+// the brightness is broken up by moving ripple noise on the water instead of a regular wave.
 @vertex fn vsRefl(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
   var o: VOut;
   let D = drone(ii * 2u);
-  // a glitter path on rippled water: from the water surface under the drone down to its mirror image
-  let top = vec3f(D.wp.x, 0.0, D.wp.z);
-  let bot = vec3f(D.wp.x, -min(D.wp.y, 30.0), D.wp.z);
-  let dist = length(F.camPos.xyz - top);
+  let h1 = hash11u(ii * 977u + 3u);
+  let h2 = hash11u(ii * 613u + 17u);
+  let h3 = hash11u(ii * 389u + 29u);
+  // a glitter path on rippled water: from the water surface under the drone toward its mirror image
+  let dist = length(F.camPos.xyz - vec3f(D.wp.x, 0.0, D.wp.z));
   let px = dist * 2.0 * F.camRight.w * F.res.w;
-  let rr = max(0.8, 1.6 * px);
+  let rr = max(0.8, 1.6 * px) * (0.8 + 0.8 * h3);
+  let shift = F.camRight.xyz * (h2 - 0.5) * rr * 3.0;
+  let top = vec3f(D.wp.x, 0.0, D.wp.z) + shift;
+  let bot = vec3f(D.wp.x, -min(D.wp.y, 30.0) * (0.35 + 0.65 * h1), D.wp.z) + shift;
   var corners = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let c = corners[vi];
-  let p = select(bot, top, c.y > 0.0) + F.camRight.xyz * c.x * rr * 1.2;
+  let p = select(bot, top, c.y > 0.0) + F.camRight.xyz * c.x * rr * 1.4;
   o.cp = F.viewProj * vec4f(p, 1.0);
   o.q = vec2f(c.x * 1.6, c.y);
-  o.col = D.col * 0.9 * U.b.y * pow(0.55 / rr, 0.8);
+  // wider streaks carry the same energy spread thinner, so overlaps add up to a glow rather than bright bars
+  o.col = D.col * 0.8 * U.b.y * pow(0.55 / rr, 0.8) / (0.8 + 0.8 * h3);
   return o;
 }
 @fragment fn fsRefl(i: VOut) -> @location(0) vec4f {
@@ -313,8 +323,14 @@ fn drone(ii: u32) -> Drone {
   let zScene = linearDepth(max(sceneDepthAt(vec2i(i.cp.xy)), 1e-7));
   if (zScene < zPlane - 2.0) { discard; }
   let fg = textureSampleLevel(fogTex, sampClamp, vec3f(uv, clamp(fogSlice(tw), 0.0, 1.0)), 0.0).a;
-  let along = 0.5 + 0.5 * i.q.y; // 1 at the water line, 0 at the mirror point
-  let a = exp(-i.q.x * i.q.x * 1.6) * along * along * (0.55 + 0.45 * sin(hit.z * 1.7 + hit.x * 0.9 + time() * 2.5));
+  let along = 0.5 + 0.5 * i.q.y; // 1 at the water line, 0 at the far end
+  // ripple noise at the scales of the water's wave layers (38 m, 9.5 m, 3.3 m), drifting with the wind
+  let t = time();
+  let w = gnoise2(hit.xz * (1.0 / 38.0) + vec2f(t * 0.03, 0.0)) * 0.45
+        + gnoise2(hit.xz * (1.0 / 9.5) + vec2f(0.0, t * 0.08)) * 0.35
+        + gnoise2(hit.xz * (1.0 / 3.3) + vec2f(t * 0.17, t * 0.05)) * 0.3;
+  let glitter = smoothstep(-0.35, 0.6, w);
+  let a = exp(-i.q.x * i.q.x * 1.3) * along * (0.15 + 0.85 * along) * glitter;
   return vec4f(i.col * max(a, 0.0) * fg, 0.0);
 }
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
@@ -354,11 +370,79 @@ fn drone(ii: u32) -> Drone {
   o.col = col;
   return o;
 }
+// Second, smaller formation south of the main show: a slowly turning (2,3) torus knot of drones with a colour
+// wave running along it (fills the southern sky seen from the Bund promenade).
+const KNOT_C = vec3f(2700.0, 380.0, -300.0);
+@vertex fn vsKnot(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
+  var o: VOut;
+  let t = U.d.x;
+  let s = f32(ii) / ${KNOT_N}.0 * TAU;
+  let R = 62.0; let r = 22.0;
+  var lp = vec3f((R + r * cos(3.0 * s)) * cos(2.0 * s), (R + r * cos(3.0 * s)) * sin(2.0 * s), r * sin(3.0 * s));
+  // spin in its own plane, then tilt and face north-west toward the Bund
+  let a = t * 0.12;
+  lp = vec3f(lp.x * cos(a) - lp.y * sin(a), lp.x * sin(a) + lp.y * cos(a), lp.z);
+  let tl = 0.35;
+  lp = vec3f(lp.x, lp.y * cos(tl) - lp.z * sin(tl), lp.y * sin(tl) + lp.z * cos(tl));
+  let yaw = 0.75;
+  let wp = KNOT_C + vec3f(lp.x * cos(yaw) + lp.z * sin(yaw), lp.y, -lp.x * sin(yaw) + lp.z * cos(yaw));
+  let wave = 0.5 + 0.5 * sin(s * 2.0 - t * 1.3);
+  var col = mix(vec3f(1.0, 0.25, 0.65), vec3f(0.2, 0.85, 1.0), wave);
+  col = mix(col, vec3f(1.0, 0.8, 0.35), pow(0.5 + 0.5 * sin(s * 3.0 + t * 2.1), 8.0));
+  let dist = length(F.camPos.xyz - wp);
+  let px = dist * 2.0 * F.camRight.w * F.res.w;
+  let r0 = 0.55;
+  let rr = max(r0, 1.25 * px);
+  col *= 9.0 * U.b.y * pow(r0 / rr, 1.25) * fogT(wp, dist);
+  var corners = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
+  let c = corners[vi];
+  o.cp = F.viewProj * vec4f(wp + (F.camRight.xyz * c.x + F.camUp.xyz * c.y) * rr * 2.0, 1.0);
+  o.q = c * 2.0;
+  o.col = col;
+  return o;
+}
 @fragment fn fs(i: VOut) -> @location(0) vec4f {
   let r2 = dot(i.q, i.q);
   return vec4f(i.col * (exp(-r2 * 1.5) + 0.06 * exp(-r2 * 0.4)), 0.0);
 }
 `;
+
+// Straight corridors across the CBD at 150-350 m that keep 20 m clear of every tower taller than the corridor
+// (tested against the building colliders and the landmark sites). Returns [ax, az, bx, bz, altitude] rows.
+function cbdCorridors(world, rnd) {
+  const D = DISTRICTS.find((d) => d.type === DT.CBD);
+  if (!D || !world.collidersNear) return [];
+  const blocked = (x, z, y) => {
+    for (const L of LANDMARKS) if (L.r > 0 && L.h > y - 40 && Math.hypot(x - L.x, z - L.z) < L.r + 20) return true;
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const cs = world.collidersNear(x + ox * 40, z + oz * 40);
+      if (!cs) continue;
+      for (const k of cs) {
+        if (k.cy + k.hy < y - 25) continue;
+        const dx = x - k.cx, dz = z - k.cz;
+        const lx = dx * k.cos + dz * k.sin, lz = -dx * k.sin + dz * k.cos;
+        if (Math.abs(lx) < k.hx + 20 && Math.abs(lz) < k.hz + 20) return true;
+      }
+    }
+    return false;
+  };
+  // one corridor per altitude band so the traffic is layered through the skyline
+  const out = [];
+  for (const band of [165, 195, 225, 255, 285, 315, 345]) for (let tries = 0; tries < 300; tries++) {
+    const a = rnd() * Math.PI * 2, b = a + Math.PI + (rnd() - 0.5) * 1.6;
+    const ax = D.cx + Math.cos(a) * D.rx * 1.1, az = D.cz + Math.sin(a) * D.rz * 1.1;
+    const bx = D.cx + Math.cos(b) * D.rx * 1.1, bz = D.cz + Math.sin(b) * D.rz * 1.1;
+    const y = band + (rnd() - 0.5) * 20;
+    const len = Math.hypot(bx - ax, bz - az);
+    let ok = true;
+    for (let s = 0; s <= len && ok; s += 15) {
+      const u = s / len;
+      if (blocked(ax + (bx - ax) * u, az + (bz - az) * u, y)) ok = false;
+    }
+    if (ok) { out.push([ax, az, bx, bz, y]); break; }
+  }
+  return out;
+}
 
 function evtolMesh() {
   const mb = new MeshBuilder();
@@ -403,6 +487,20 @@ export class Air {
       other.push([p, dir, rnd() * paths[p][6], 14 + rnd() * 10, 1, dir * (25 + rnd() * 20), -LANES[p][4] + 120 + rnd() * 80, rnd()]);
     }
     for (let i = 0; i < AIRLINERS.length; i++) other.push([airBase + i, 1, rnd() * paths[airBase + i][6], 230, 3, 0, 0, rnd()]);
+    // CBD corridors: air taxis and beacon drones threading between the supertalls at 150-350 m
+    const cbdBase = paths.length;
+    for (const L of cbdCorridors(ctx.world, rnd)) paths.push([L[0], L[1], L[2], L[3], L[4], 0, Math.hypot(L[2] - L[0], L[3] - L[1]), 0]);
+    const nCbd = paths.length - cbdBase;
+    if (nCbd > 0) {
+      for (let i = 0; i < [24, 44, 64][q]; i++) {
+        const p = cbdBase + ((rnd() * nCbd) | 0), dir = rnd() < 0.5 ? 1 : -1;
+        mesh.push([p, dir, rnd() * paths[p][6], 30 + rnd() * 14, 0, dir * (6 + rnd() * 5), (rnd() - 0.5) * 12, rnd()]);
+      }
+      for (let i = 0; i < [60, 100, 150][q]; i++) {
+        const p = cbdBase + ((rnd() * nCbd) | 0), dir = rnd() < 0.5 ? 1 : -1;
+        other.push([p, dir, rnd() * paths[p][6], 10 + rnd() * 8, 1, dir * (12 + rnd() * 8), (rnd() - 0.5) * 24, rnd()]);
+      }
+    }
     this.meshCount = mesh.length;
     this.total = mesh.length + other.length;
     const pd = new Float32Array(paths.flat());
@@ -439,6 +537,7 @@ export class Air {
       { binding: 0, visibility: VS, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: VS, buffer: { type: 'uniform' } }] });
     this.showGroup = d.createBindGroup({ layout: this.showLayout, entries: [{ binding: 0, resource: { buffer: this.showBuf } }, { binding: 1, resource: { buffer: this.showUBuf } }] });
     this.showPipe = R.forwardPipeline({ label: 'drone-show', code: SHOW_WGSL, groups: [this.showLayout], blend: 'add' });
+    this.knotPipe = R.forwardPipeline({ label: 'drone-knot', code: SHOW_WGSL, vs: 'vsKnot', groups: [this.showLayout], blend: 'add' });
     this.reflPipe = R.forwardPipeline({ label: 'drone-reflections', code: SHOW_WGSL, vs: 'vsRefl', fs: 'fsRefl', groups: [this.showLayout], blend: 'add', depthTest: false });
     this.center = [2380, 215, -1000];
     const I = sh.index;
@@ -537,6 +636,8 @@ export class Air {
       pass.draw(6, this.N);
       pass.setPipeline(this.reflPipe);
       pass.draw(6, this.N >> 1);
+      pass.setPipeline(this.knotPipe);
+      pass.draw(6, KNOT_N);
     }
   }
 }
