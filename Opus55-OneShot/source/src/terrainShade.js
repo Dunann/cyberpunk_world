@@ -1,0 +1,409 @@
+// Terrain WGSL: height access for the far field, CDLOD vertex shader and the ground material.
+
+import { FAR } from './terrainGen.js';
+
+// Height including the far field. Needs `farH` (r32float texture) declared by the including shader.
+export const THEIGHT_WGSL = /* wgsl */ `
+const FAR_SIZE = ${FAR.SIZE}.0;
+const FAR_RES = ${FAR.RES}.0;
+const FAR_ORIGIN = ${FAR.ORIGIN}.0;
+const NEAR_EDGE0 = 5600.0;
+const NEAR_EDGE1 = 6100.0;
+fn farHeight(xz: vec2f) -> f32 {
+  let t = (xz - FAR_ORIGIN) / FAR_SIZE * FAR_RES - 0.5;
+  let i = vec2i(floor(t));
+  let f = t - floor(t);
+  let m = i32(FAR_RES) - 1;
+  let h00 = textureLoad(farH, clamp(i, vec2i(0), vec2i(m)), 0).x;
+  let h10 = textureLoad(farH, clamp(i + vec2i(1, 0), vec2i(0), vec2i(m)), 0).x;
+  let h01 = textureLoad(farH, clamp(i + vec2i(0, 1), vec2i(0), vec2i(m)), 0).x;
+  let h11 = textureLoad(farH, clamp(i + vec2i(1, 1), vec2i(0), vec2i(m)), 0).x;
+  return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
+}
+fn nearWeight(xz: vec2f) -> f32 {
+  let m = max(abs(xz.x), abs(xz.y));
+  return 1.0 - smoothstep(NEAR_EDGE0, NEAR_EDGE1, m);
+}
+fn tHeight(xz: vec2f) -> f32 {
+  let w = nearWeight(xz);
+  if (w >= 1.0) { return terrainHeight(xz); }
+  let hf = farHeight(xz);
+  if (w <= 0.0) { return hf; }
+  return mix(hf, terrainHeight(xz), w);
+}
+`;
+
+// Street layout + street lamp placement rules, shared by the terrain shader and the lamp validation pass.
+export const STREET_WGSL = /* wgsl */ `
+struct Road { across: f32, along: f32, axis: f32, hw: f32, cross: f32, blk: f32, line: f32 };
+
+// Street layout at p for district di (grid lines at multiples of the block size).
+fn roadLayout(p: vec2f, di: i32) -> Road {
+  let D = W.d[di];
+  let lp = rot2(-D.b.x) * (p - D.a.xy);
+  let blk = D.b.y;
+  let fq = (fract(lp / blk + 0.5) - 0.5) * blk;
+  let ax = abs(fq.x); let az = abs(fq.y);
+  var r: Road;
+  r.hw = D.b.z * 0.5;
+  r.blk = blk;
+  let alongZ = ax < az;           // nearest road runs along local z (x = const)
+  r.axis = select(0.0, 1.0, alongZ);
+  r.across = select(fq.y, fq.x, alongZ);
+  r.along = select(lp.x, lp.y, alongZ);
+  r.cross = select(ax, az, alongZ);   // distance to the crossing road centre line
+  r.line = round(select(lp.y, lp.x, alongZ) / blk);
+  return r;
+}
+
+// Lamps per block edge and their along-road spacing.
+fn lampCount(blk: f32) -> f32 { return max(round(blk / 34.0), 1.0); }
+
+// World position (xz) of lamp j (global index along the road) on road line 'line' of district di.
+fn lampPos(di: i32, axis: f32, line: f32, j: f32, hw: f32) -> vec3f {
+  let D = W.d[di];
+  let blk = D.b.y;
+  let n = lampCount(blk);
+  let sp = blk / n;
+  let along = (j + 0.5) * sp;
+  let side = select(-1.0, 1.0, (i32(j) + i32(line)) % 2 == 0);
+  let off = line * blk + side * (hw + 0.7);
+  let lp = select(vec2f(along, off), vec2f(off, along), axis > 0.5);
+  return vec3f(rot2(D.b.x) * lp + D.a.xy, side);
+}
+
+fn lampValid(p: vec2f, di: i32) -> bool {
+  let info = worldInfo(p);
+  return i32(info.y + 0.5) == di && info.z > 0.55 && info.x > 14.0;
+}
+
+// 0 = warm sodium, 1 = cool LED (per road line)
+fn lampKind(di: i32, axis: f32, line: f32) -> f32 {
+  let h = hash21(vec2f(line * 3.0 + axis * 101.0, f32(di) * 17.0));
+  let t = W.d[di].b.w;
+  let ledBias = select(0.25, 0.75, t == 1.0 || t == 3.0);   // CBD and Bund prefer LED
+  return select(0.0, 1.0, h < ledBias);
+}
+fn lampColor(kind: f32) -> vec3f { return select(vec3f(1.0, 0.52, 0.18), vec3f(0.72, 0.84, 1.0), kind > 0.5); }
+const LAMP_H = 6.9;
+const LAMP_I = 95.0;
+const LAMP_R = 24.0;
+`;
+
+export function terrainDrawWGSL({ N, K, LEAF, MORPH0, simple }) {
+  return /* wgsl */ `
+@group(1) @binding(0) var<storage, read> patches: array<vec4f>;
+@group(1) @binding(1) var farH: texture_2d<f32>;
+@group(1) @binding(2) var nearA: texture_2d<f32>;
+@group(1) @binding(3) var nearN: texture_2d<f32>;
+@group(1) @binding(4) var farA: texture_2d<f32>;
+@group(1) @binding(5) var farN: texture_2d<f32>;
+@group(1) @binding(6) var tSamp: sampler;
+@group(1) @binding(7) var tNoise: texture_2d<f32>;
+@group(1) @binding(8) var tCanopy: texture_2d<f32>;
+@group(1) @binding(9) var sRep: sampler;
+@group(1) @binding(10) var<uniform> TU: vec4f;   // x = real street-lamp light range (m)
+${THEIGHT_WGSL}
+${STREET_WGSL}
+
+const GRID_N = ${N}.0;
+const LOD_K = ${K};
+const LEAF = ${LEAF}.0;
+const MORPH0 = ${MORPH0};
+
+struct VOut {
+  @builtin(position) pos: vec4f,
+  @location(0) wp: vec3f,
+};
+
+@vertex fn vs(@location(0) g: vec2f, @builtin(instance_index) inst: u32) -> VOut {
+  let P = patches[inst];
+  let spacing = P.z / GRID_N;
+  var xz = P.xy + g * spacing;
+  let h0 = tHeight(xz);
+  let d = distance(vec3f(xz.x, h0, xz.y), F.camPos.xyz);
+  let R = LOD_K * LEAF * exp2(P.w);
+  let morph = saturate((d - MORPH0 * R) / ((1.0 - MORPH0) * R));
+  xz -= fract(g * 0.5) * 2.0 * spacing * morph;
+  var o: VOut;
+  o.wp = vec3f(xz.x, tHeight(xz), xz.y);
+  o.pos = F.viewProj * vec4f(o.wp, 1.0);
+  return o;
+}
+
+${GROUND_WGSL}
+
+@fragment fn fs(i: VOut) -> GOut {
+  let p = i.wp;
+  // texture gradients (computed in uniform control flow)
+  let dX = dpdx(p.xz); let dY = dpdy(p.xz);
+  ${simple ? 'return gbuf(vec3f(0.05), 0.8, vec3f(0.0, 1.0, 0.0), 0.0, vec3f(0.0), 1.0, vec2f(0.0), 3.0, 0.3);' : 'return groundShade(p, dX, dY);'}
+}
+`;
+}
+
+// Ground material. Uses the terrain bind group textures.
+const GROUND_WGSL = /* wgsl */ `
+fn decodeN(t: vec4f) -> vec3f {
+  let x = t.r * 2.0 - 1.0; let z = t.g * 2.0 - 1.0;
+  return vec3f(x, sqrt(max(1.0 - x * x - z * z, 0.02)), z);
+}
+// Baked tileable noise at world scale s (cycles of the 256 tile per meter).
+fn nz(p: vec2f, s: f32, dX: vec2f, dY: vec2f) -> vec4f { return textureSampleGrad(tNoise, sRep, p * s, dX * s, dY * s); }
+
+// Rain ripples on puddles: expanding rings in a jittered grid. Returns a normal offset (xz).
+fn rainRipples(p: vec2f, t: f32) -> vec2f {
+  var acc = vec2f(0.0);
+  for (var l = 0; l < 2; l++) {
+    let sc = select(0.7, 1.13, l == 1);
+    let q = p * sc + f32(l) * 17.3;
+    let c = floor(q);
+    let f = q - c - 0.5;
+    let h = hash22(c + f32(l) * 31.0);
+    let ph = fract(t * (0.9 + h.x * 0.5) + h.y);
+    let o = f - (h - 0.5) * 0.6;
+    let r = length(o);
+    let ring = ph * 0.55;
+    let w = exp(-pow((r - ring) * 22.0, 2.0)) * (1.0 - ph) * (1.0 - ph);
+    acc += o / max(r, 1e-3) * w * sin((r - ring) * 60.0);
+  }
+  return acc * 0.35;
+}
+
+// Analytic street-lamp light for lamps beyond the real-light range (terrain only).
+// Mirrors the deferred point-light model (falloff, GGX, wet-ground adjustments).
+fn lampFake(p: vec3f, n: vec3f, v: vec3f, albedo: vec3f, rough: f32, lp: vec3f, kind: f32) -> vec3f {
+  let lv = lp - p;
+  let d2 = dot(lv, lv);
+  if (d2 > LAMP_R * LAMP_R) { return vec3f(0.0); }
+  let camD = distance(lp, F.camPos.xyz);
+  let fake = smoothstep(TU.x * 0.75, TU.x, camD);
+  if (fake <= 0.0) { return vec3f(0.0); }
+  let ld = sqrt(d2);
+  let l = lv / ld;
+  let nl = dot(n, l);
+  if (nl <= 0.0) { return vec3f(0.0); }
+  let x = ld / LAMP_R;
+  let fall = saturate(1.0 - x * x * x * x);
+  let rad = lampColor(kind) * LAMP_I * fall * fall / (d2 + 1.0);
+  let h = normalize(v + l);
+  let NdotH = max(dot(n, h), 0.0);
+  let NdotV = max(dot(n, v), 1e-3);
+  let a = rough * rough; let a2 = a * a;
+  let dd = NdotH * NdotH * (a2 - 1.0) + 1.0;
+  let D = a2 / (PI * dd * dd);
+  let k = (rough + 1.0) * (rough + 1.0) / 8.0;
+  let G = nl / (nl * (1.0 - k) + k) * NdotV / (NdotV * (1.0 - k) + k);
+  let Fs = 0.04 + 0.96 * pow(1.0 - max(dot(v, h), 0.0), 5.0);
+  let spec = min(D * G * Fs / (4.0 * nl * NdotV + 1e-4), 60.0);
+  return (albedo / PI * (1.0 - Fs) + spec) * rad * nl * fake;
+}
+
+fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
+  let toCam = F.camPos.xyz - p;
+  let dist = length(toCam);
+  let v = toCam / dist;
+  let wN = nearWeight(p.xz);
+  var A = vec4f(0.0); var Nt = vec4f(0.5, 0.5, 0.5, 0.0);
+  if (wN > 0.0) {
+    let uv = (p.xz - T_ORIGIN) / T_SIZE;
+    A = textureSampleGrad(nearA, tSamp, uv, dX / T_SIZE, dY / T_SIZE);
+    Nt = textureSampleGrad(nearN, tSamp, uv, dX / T_SIZE, dY / T_SIZE);
+  }
+  if (wN < 1.0) {
+    let uv = (p.xz - FAR_ORIGIN) / FAR_SIZE;
+    let Af = textureSampleGrad(farA, tSamp, uv, dX / FAR_SIZE, dY / FAR_SIZE);
+    let Nf = textureSampleGrad(farN, tSamp, uv, dX / FAR_SIZE, dY / FAR_SIZE);
+    A = mix(Af, A, wN); Nt = mix(Nf, Nt, wN);
+  }
+  var albedo = A.rgb * A.rgb;
+  var n = decodeN(Nt);
+  let terr = A.a;
+  let forest = Nt.a;
+  let cav = (Nt.b - 0.5) * 50.0;
+  var ao = saturate(0.75 + cav * 0.02);
+  var rough = 0.85;
+  var emis = vec3f(0.0);
+  var mat = 3.0;
+  var wet = 0.35;
+  let px = max(length(dX), length(dY));     // pixel footprint in meters
+  let slope = 1.0 - n.y;
+  let N1 = nz(p.xz, 1.0 / 40.0, dX, dY);    // 5 m .. 0.6 m features
+  let N2 = nz(p.xz, 1.0 / 6.0, dX, dY);     // 0.75 m .. 0.1 m features
+
+  // ---- natural detail
+  if (forest > 0.05) {
+    // tree crowns (baked dome texture, mip-filtered so it fades into the canopy colour far away)
+    let C = textureSampleGrad(tCanopy, sRep, p.xz / 104.0, dX / 104.0, dY / 104.0);
+    let cf = forest * (1.0 - smoothstep(4.0, 12.0, px));
+    let dn = (C.rg * 2.0 - 1.0) * 1.6 * cf;
+    n = normalize(n + vec3f(dn.x, 0.0, dn.y));
+    let tint = mix(vec3f(0.85, 1.0, 0.78), vec3f(1.2, 1.08, 0.72), C.a);
+    albedo *= mix(vec3f(1.0), tint * (0.35 + 0.95 * C.b), forest);
+    ao *= mix(1.0, 0.45 + 0.55 * C.b, forest);
+    rough = mix(rough, 0.72, forest);
+    wet = mix(wet, 0.5, forest);
+    if (forest > 0.5) { mat = 1.0; }
+  }
+  let rockW = smoothstep(0.30, 0.52, slope) * (1.0 - forest);
+  if (rockW > 0.01) {
+    // rock strata ledges and wet mossy stone
+    let f = 1.0 - smoothstep(0.4, 2.0, px);
+    let band = p.y * 1.7 + (N1.r - 0.5) * 4.0;
+    let ledge = fract(band);
+    let lg = smoothstep(0.0, 0.12, ledge) - smoothstep(0.85, 1.0, ledge);
+    let nn = (N2.rg - 0.5) * 2.0;
+    n = normalize(n + vec3f(nn.x, 0.0, nn.y) * 0.4 * f * rockW - vec3f(0.0, (lg - 0.5) * 0.35 * f * rockW, 0.0));
+    albedo *= 1.0 + (hash21(vec2f(floor(band), 3.0)) - 0.5) * 0.5 * f * rockW;
+    albedo = mix(albedo, vec3f(0.035, 0.05, 0.025), smoothstep(0.55, 0.7, N1.g) * rockW * 0.7); // moss
+    rough = mix(rough, 0.5, rockW);
+    wet = mix(wet, 0.85, rockW);
+  }
+  if (terr > 0.3) {
+    // terraces: flat beds (some flooded rice paddies that mirror the sky) and grassy risers
+    let st = p.y / 2.6;
+    let fl = fract(st);
+    let flat = 1.0 - smoothstep(0.7, 0.8, fl);
+    let hid = hash21(vec2f(floor(st), floor(p.x * 0.01) + floor(p.z * 0.01) * 7.0));
+    let flooded = step(0.8, hid) * flat * smoothstep(0.3, 0.6, terr);
+    albedo = mix(albedo, albedo * vec3f(0.6, 0.75, 0.5), 1.0 - flat);
+    // tea rows on the dry beds
+    let row = sin(dot(p.xz, vec2f(0.7, 0.7)) * 3.0) * 0.5 + 0.5;
+    albedo *= mix(1.0, 0.75 + 0.5 * row, flat * (1.0 - flooded) * (1.0 - smoothstep(0.2, 0.6, px)));
+    albedo = mix(albedo, vec3f(0.02, 0.025, 0.02), flooded);
+    rough = mix(rough, 0.03, flooded);
+    wet = mix(wet, 1.0, flooded);
+    n = normalize(mix(n, vec3f(0.0, 1.0, 0.0), flooded));
+  }
+  // near-camera ground grain
+  let nPre = n;
+  let gn = (N2.ba - 0.5) * 2.0 * (1.0 - smoothstep(0.05, 0.3, px));
+  n = normalize(n + vec3f(gn.x, 0.0, gn.y) * 0.15);
+  albedo *= 0.85 + 0.3 * N1.b;
+
+  // shore & river beds are wet
+  let info = worldInfo(p.xz);
+  if (wN > 0.0) {
+    wet = mix(wet, 1.0, 1.0 - smoothstep(0.0, 6.0, info.x));
+    if (p.y < 0.2) { rough = 0.4; wet = 1.0; mat = 3.0; }
+  }
+
+  // ---- West Lake causeways and islands (land raised inside the lake)
+  if (wN > 0.0 && info.x < 3.0 && info.w > 0.5 && p.y > 0.15) {
+    let top = smoothstep(1.32, 1.38, p.y) * (1.0 - smoothstep(0.08, 0.25, slope));
+    let edge = 1.0 - smoothstep(0.55, 0.95, p.y);
+    var c = mix(vec3f(0.040, 0.060, 0.028), vec3f(0.055, 0.065, 0.032), N1.r);
+    let slab = fract(p.xz * 0.9);
+    let sj = 1.0 - smoothstep(0.0, 0.08, min(min(slab.x, 1.0 - slab.x), min(slab.y, 1.0 - slab.y)));
+    let path = vec3f(0.11, 0.105, 0.10) * (0.8 + 0.4 * hash21(floor(p.xz * 0.9))) * (1.0 - sj * 0.4);
+    c = mix(c, path, top);
+    let blk = fract(vec2f(dot(p.xz, vec2f(0.7, 0.7)) * 1.1, p.y * 2.5));
+    let bj = 1.0 - smoothstep(0.0, 0.1, min(min(blk.x, 1.0 - blk.x), min(blk.y, 1.0 - blk.y)));
+    c = mix(c, vec3f(0.09, 0.088, 0.085) * (1.0 - bj * 0.5), edge);
+    let w = smoothstep(0.15, 0.3, p.y);
+    albedo = mix(albedo, c, w);
+    rough = mix(rough, mix(mix(0.8, 0.5, top), 0.45, edge), w);
+    wet = mix(wet, mix(0.6, 0.9, max(top, edge)), w);
+    mat = 3.0;
+  }
+
+  // ---- city ground: asphalt, markings, crosswalks, sidewalks with curbs, puddles, street-lamp pools
+  let di = i32(info.y + 0.5);
+  var urban = 0.0;
+  if (wN > 0.0 && di >= 0 && di < i32(W.count.x)) {
+    if (W.d[di].b.y > 0.0) { urban = smoothstep(0.35, 0.6, info.z) * smoothstep(6.0, 14.0, info.x) * (1.0 - smoothstep(0.35, 0.5, slope)); }
+  }
+  if (urban > 0.0) {
+    let rd = roadLayout(p.xz, di);
+    let hw = rd.hw;
+    let a = abs(rd.across);
+    let aa = max(px * 0.7, 0.01);     // antialias width
+    let onRoad = 1.0 - smoothstep(hw - aa, hw + aa, a);
+    // asphalt with aggregate and patch repairs
+    var asph = vec3f(0.024, 0.024, 0.027) * (0.9 + 0.2 * N2.r) * mix(1.0, 0.72, smoothstep(0.62, 0.64, N1.a));
+    var mark = 0.0; var markCol = vec3f(0.55, 0.55, 0.52);
+    let notInter = smoothstep(hw - 0.2, hw + 0.4, rd.cross);
+    if (hw >= 7.0) {
+      let cl = 1.0 - smoothstep(0.07 - aa, 0.07 + aa, abs(a - 0.18));
+      mark = max(mark, cl * notInter);
+      markCol = mix(markCol, vec3f(0.6, 0.42, 0.08), cl);
+      let ld = (1.0 - smoothstep(0.06 - aa, 0.06 + aa, abs(a - hw * 0.5))) * step(0.55, fract(rd.along / 9.0));
+      mark = max(mark, ld * notInter);
+    } else {
+      let cl = (1.0 - smoothstep(0.06 - aa, 0.06 + aa, a)) * step(0.5, fract(rd.along / 6.0));
+      mark = max(mark, cl * notInter);
+    }
+    mark = max(mark, (1.0 - smoothstep(0.06 - aa, 0.06 + aa, abs(a - (hw - 0.55)))) * notInter);
+    // crosswalk zebra just outside each intersection, stop line behind it
+    let cw = step(hw + 0.6, rd.cross) * (1.0 - step(hw + 4.2, rd.cross)) * step(a, hw - 0.9);
+    mark = max(mark, smoothstep(0.5 - aa, 0.5 + aa, fract(rd.across / 1.1 + 0.25)) * cw);
+    mark = max(mark, (1.0 - smoothstep(0.2 - aa, 0.2 + aa, abs(rd.cross - (hw + 5.0)))) * step(a, hw - 0.9));
+    mark *= (1.0 - smoothstep(0.3, 1.0, px)) * (0.65 + 0.35 * N2.g);
+    let road = mix(asph, markCol, mark);
+
+    // sidewalk paving with granite curb
+    let tile = fract(p.xz / 0.6);
+    let joint = (1.0 - smoothstep(0.0, 0.06, min(min(tile.x, 1.0 - tile.x), min(tile.y, 1.0 - tile.y)))) * (1.0 - smoothstep(0.05, 0.2, px));
+    let tid = hash21(floor(p.xz / 0.6));
+    var pave = vec3f(0.075, 0.072, 0.07) * (0.85 + 0.3 * tid) * (1.0 - joint * 0.5);
+    let curbW = smoothstep(hw - aa, hw + aa, a) * (1.0 - smoothstep(hw + 0.3 - aa, hw + 0.3 + aa, a));
+    pave = mix(pave, vec3f(0.12, 0.115, 0.11), curbW);
+    var col = mix(pave, road, onRoad);
+    let interior = step(hw + 3.0, a) * step(hw + 3.0, rd.cross);
+    col = mix(col, vec3f(0.06, 0.058, 0.056) * (0.8 + 0.4 * tid), interior);
+
+    // puddles: road dips, gutters, uneven paving
+    let gutter = (1.0 - smoothstep(0.0, 0.9, hw - a)) * onRoad;
+    let rut = (1.0 - smoothstep(0.25, 0.6, abs(abs(a - hw * 0.5) - 0.9))) * onRoad * 0.12;
+    let pn = N1.r * 0.75 + N2.b * 0.25;
+    let pud = smoothstep(0.64, 0.67, pn + gutter * 0.16 + rut - interior * 0.1) * (1.0 - curbW);
+    var un = normalize(nPre + vec3f(gn.x, 0.0, gn.y) * 0.03);
+    // curb face tilts toward the road
+    let cs = sign(rd.across);
+    let cdir = rot2(W.d[di].b.x) * select(vec2f(0.0, cs), vec2f(cs, 0.0), rd.axis > 0.5);
+    un = normalize(un + vec3f(cdir.x, 0.0, cdir.y) * (1.0 - smoothstep(0.0, 0.08, abs(a - hw))) * 1.5);
+    var rip = vec2f(0.0);
+    if (dist < 40.0) { rip = rainRipples(p.xz, time()) * F.params.x; }
+    un = normalize(mix(un, normalize(vec3f(rip.x, 1.0, rip.y)), pud));
+    var r = mix(mix(0.72, 0.62, 1.0 - onRoad), 0.45, mark) + (N2.g - 0.5) * 0.2;
+    r = mix(r, 0.015, pud);
+    col = mix(col, col * 0.6, pud);
+    albedo = mix(albedo, col, urban);
+    rough = mix(rough, r, urban);
+    n = normalize(mix(n, un, urban));
+    wet = mix(wet, mix(0.85, 1.0, pud), urban);
+    ao = mix(ao, 1.0, urban);
+    if (urban > 0.5) { mat = 3.0; }
+
+    // street-lamp pools beyond the real-light range: the two nearest lamps along this road
+    if (dist > TU.x * 0.7) {
+      let blk = rd.blk;
+      let sp = blk / lampCount(blk);
+      let j0 = floor(rd.along / sp - 0.5);
+      let kind = lampKind(di, rd.axis, rd.line);
+      // effective wet surface, as the lighting pass will see it
+      let wf = saturate(F.params.z * wet);
+      let ea = albedo * mix(1.0, 0.55, wf);
+      let er = mix(rough, 0.05, wf * smoothstep(0.6, 0.95, n.y));
+      for (var k = 0; k < 2; k++) {
+        let L = lampPos(di, rd.axis, rd.line, j0 + f32(k), hw);
+        let headOff = rot2(W.d[di].b.x) * select(vec2f(0.0, -L.z), vec2f(-L.z, 0.0), rd.axis > 0.5) * 1.6;
+        let lxz = L.xy + headOff;
+        if (lampValid(L.xy, di)) {
+          emis += lampFake(p, n, v, ea, er, vec3f(lxz.x, p.y + LAMP_H, lxz.y), kind) * urban;
+        }
+      }
+    }
+  }
+
+  // ---- aerial perspective for the far ranges: fade toward the horizon haze
+  let hz = 1.0 - exp(-max(dist - 3500.0, 0.0) / 16000.0);
+  if (hz > 0.0) {
+    let dir = -v;
+    let sky = skyBase(normalize(vec3f(dir.x, max(dir.y, 0.0) * 0.5 + 0.02, dir.z)));
+    emis += sky * hz * 0.9;
+    albedo *= 1.0 - hz;
+  }
+  return gbuf(albedo, rough, n, 0.0, emis, ao, motionVector(p, p), mat, wet);
+}
+`;
