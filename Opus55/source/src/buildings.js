@@ -12,7 +12,7 @@
 import { rng } from './math.js';
 import { DT } from './world.js';
 import { PART_WGSL, CULL_WGSL, DRAW_WGSL, PART_FLOATS } from './buildings_wgsl.js';
-import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges } from './buildings_gen.js';
+import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges, walkways } from './buildings_gen.js';
 import { prepareLots, genLandmarks, genMarket } from './buildings_landmarks.js';
 import { WGSL_LIB, WGSL_FRAME, GBUFFER_OUT } from './common.js';
 import { WGSL_LIGHT, GBUFFER_FORMATS, DEPTH_FORMAT } from './renderer.js';
@@ -70,6 +70,7 @@ function generate(ctx) {
     }
   }
   B.bridges = skybridges(B, rng(5150));
+  B.walkways = walkways(B, rng(5151));
   return B;
 }
 
@@ -112,7 +113,7 @@ export default {
     world.shared.towerTops = lm.concat(cbd, bund).map((t) => ({ x: t.x, y: t.y, z: t.z }));
     world.shared.ledFacades = B.led;
     world.shared.landmarkSites = B.sites;
-    world.shared.buildingStats = { parts: P.count, props: B.props, bridges: B.bridges, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
+    world.shared.buildingStats = { parts: P.count, props: B.props, bridges: B.bridges, walkways: B.walkways, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
 
     // ---------------- GPU resources
     const verts = [], idx = [];

@@ -15,8 +15,8 @@ const SKY_CITY = vec2f(300.0, -300.0);
 const SKY_CBD = vec2f(3300.0, -1250.0);
 const SKY_CLOUD_BASE = 1800.0;
 const SKY_MOON_COL = vec3f(0.62, 0.70, 1.0);
-const SKY_ZENITH = vec3f(0.0018, 0.0028, 0.0085);
-const SKY_HORIZON = vec3f(0.011, 0.0095, 0.022);
+const SKY_ZENITH = vec3f(0.0036, 0.0058, 0.017);
+const SKY_HORIZON = vec3f(0.026, 0.025, 0.048);
 const SKY_COVER_AVG = 0.62;
 
 // City light reflected by the underside of the cloud deck above world position xz (linear HDR radiance).
@@ -38,15 +38,16 @@ fn skyMoonHalo(md: f32) -> vec3f {
   let m = max(md, 0.0);
   let m2 = m * m; let m4 = m2 * m2; let m8 = m4 * m4; let m16 = m8 * m8;
   let m64 = m16 * m16 * m16 * m16;
-  return SKY_MOON_COL * F.moon.w * (m8 * 0.012 + m64 * 0.03);
+  return SKY_MOON_COL * F.moon.w * (m8 * 0.008 + m64 * 0.02);
 }
 
 // Cheap horizon colour (no cloud detail): used below the horizon and blended in near it.
 fn skyHorizon(dir: vec3f) -> vec3f {
   let h = normalize(dir.xz + vec2f(1e-5, 0.0));
   // atmospheric in-scatter of the city light toward the horizon: the glow a few km away along the view
-  let far = skyCityGlow(F.camPos.xz + h * 3500.0);
-  return SKY_HORIZON + far * 1.05 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6;
+  // a glow gradient on the horizon toward the city, visible from the gardens and the mountains too
+  let far = max(skyCityGlow(F.camPos.xz + h * 2000.0), skyCityGlow(F.camPos.xz + h * 5500.0));
+  return SKY_HORIZON + far * 1.15 + skyMoonHalo(dot(vec3f(h.x, 0.0, h.y), F.moon.xyz)) * 0.6;
 }
 
 fn skyAmbient(dir: vec3f) -> vec3f {
@@ -56,6 +57,10 @@ fn skyAmbient(dir: vec3f) -> vec3f {
   let hz = SKY_HORIZON + over * 0.8;
   var c = mix(hz, dome, sqrt(up));
   c += skyMoonHalo(dot(dir, F.moon.xyz)) * 1.5;
+  // moonlight diffused by the overcast: keeps nature areas readable away from the city lights
+  // (stronger when the camera is out in the gardens or the mountains, where nothing else lights the scene)
+  let nature = smoothstep(1400.0, 3600.0, length(F.camPos.xz - SKY_CITY));
+  c += SKY_MOON_COL * F.moon.w * (0.08 + 0.08 * nature) * (0.55 + 0.45 * up);
   if (dir.y < 0.0) { c *= mix(1.0, 0.35, saturate(-dir.y * 3.0)); }
   return c;
 }
@@ -115,7 +120,8 @@ fn skyRadiance(dir: vec3f) -> vec3f {
   let thin = cov * (1.0 - dens);
   let mm = max(md, 0.0);
   let m2 = mm * mm; let m4 = m2 * m2; let m8 = m4 * m4; let m16 = m8 * m8; let m32 = m16 * m16;
-  cloud += SKY_MOON_COL * F.moon.w * (0.022 + thin * (m32 * 0.3 + m8 * 0.045) + (1.0 - dens) * m4 * 0.015);
+  // moonlight: diffuse through the deck, silver on thin cloud edges everywhere, a bright corona near the moon
+  cloud += SKY_MOON_COL * F.moon.w * (0.042 + thin * (0.04 + m32 * 0.13 + m8 * 0.02) + (1.0 - dens) * m4 * 0.008);
 
   // clear sky behind the clouds: gradient, moon halo, moon disk, sparse stars in the gaps
   var clear = mix(SKY_HORIZON, SKY_ZENITH, sqrt(y)) + skyMoonHalo(md);
@@ -134,7 +140,11 @@ fn skyRadiance(dir: vec3f) -> vec3f {
   var c = mix(clear, cloud, cov);
   // moon disk (~0.6 deg) dimmed by the cloud in front of it
   let disk = smoothstep(0.99993, 0.99996, md);
-  c += SKY_MOON_COL * disk * exp(-dens * 7.0 * cov) * F.moon.w * 18.0;
+  // while it rains the disc stays hidden behind the overcast; only a diffuse glow shows through
+  let rk = smoothstep(0.02, 0.3, F.params.x);
+  c += SKY_MOON_COL * disk * exp(-dens * 7.0 * cov) * F.moon.w * 9.5 * (1.0 - rk);
+  let m128 = m32 * m32 * m32 * m32;
+  c += SKY_MOON_COL * F.moon.w * (m128 * 0.5 + m32 * 0.025) * rk;
   // blend into the horizon haze (continuous with the dir.y <= 0 branch)
   let hb = smoothstep(0.0, 0.12, y);
   c = mix(hz, c + (hz - SKY_HORIZON) * (1.0 - smoothstep(0.0, 0.35, y)) * 0.6, hb);

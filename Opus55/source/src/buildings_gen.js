@@ -73,7 +73,8 @@ export class Builder {
     this.led = [];
     this.sites = {};             // landmark anchor points published to world.shared.landmarkSites
     this.hillTowers = [];        // hillside tower shafts, used to add skybridges
-    this.propBudget = quality >= 2 ? 70000 : quality === 1 ? 40000 : 15000;
+    this.hillPods = [];          // terraced hillside podiums, used to add elevated walkways
+    this.propBudget = quality >= 2 ? 90000 : quality === 1 ? 50000 : 18000;
     this.props = 0;
   }
 
@@ -178,10 +179,34 @@ function crown(B, R, o) {
     return top + 6;
   }
   if (type === 'lit') {
-    const h = 8 + R() * Math.min(25, m * 0.8);
-    B.part({ x, y0: top, z, a, hw: hw * 0.94, hd: hd * 0.94, h, kind, prm, taper: 0.8 + R() * 0.15, mat: MAT.CROWN, col: pick(R, PAL.crown), param: 1.1 + R() * 1.2, flags: FLAG.NOTOP });
-    B.part({ x, y0: top + 0.5, z, a, hw: hw * 0.8, hd: hd * 0.8, h: h - 1, kind, prm, mat: MAT.CONCRETE, col: [0.1, 0.1, 0.1] });
-    return top + h;
+    // stepped, up-lit crown: 2-3 setback tiers, each a glowing core ringed by dark fins leaning inward
+    const col = pick(R, PAL.crown);
+    const tiers = 2 + (R() < 0.45 ? 1 : 0);
+    const H = 10 + R() * Math.min(26, m * 0.9);
+    let y = top, s = 0.94;
+    const c = Math.cos(a), sn = Math.sin(a);
+    for (let t = 0; t < tiers; t++) {
+      const th = H * (t === 0 ? 0.45 : t === 1 ? 0.33 : 0.22);
+      const thw = hw * s, thd = hd * s;
+      B.part({ x, y0: y, z, a, hw: thw * 0.86, hd: thd * 0.86, h: th, kind, prm, taper: 0.92, mat: MAT.CROWN, col, param: 1.0 + R() * 0.8, seed: R() * 999 });
+      // ledge with a lit lip
+      B.part({ x, y0: y - 0.4, z, a, hw: thw + 0.4, hd: thd + 0.4, h: 0.5, kind, prm, mat: MAT.EMIT, col, param: 2.2, flags: FLAG.BOTTOM });
+      // fins around the perimeter (only on box-like plans, max ~20 per tier)
+      if (kind !== 2 || prm <= 8) {
+        const nx = Math.max(2, Math.min(4, Math.round(thw / 4.5))), nz = Math.max(2, Math.min(3, Math.round(thd / 4.5)));
+        const fins = [];
+        for (let i = 0; i < nx; i++) { const u = -thw + (i + 0.5) * 2 * thw / nx; fins.push([u, thd], [u, -thd]); }
+        for (let i = 0; i < nz; i++) { const v = -thd + (i + 0.5) * 2 * thd / nz; fins.push([thw, v], [-thw, v]); }
+        for (const [lx, lz] of fins) {
+          const wx = x + lx * c - lz * sn, wz = z + lx * sn + lz * c;
+          const ins = 0.16;   // lean toward the centre
+          B.prop({ x: wx, y0: y, z: wz, a: Math.atan2(-(wx - x), wz - z), hw: 0.25, hd: 0.9, h: th * 1.15, taper: 0.6, lx: -(wx - x) * ins, lz: -(wz - z) * ins, mat: MAT.METAL, col: [0.16, 0.16, 0.18] });
+        }
+      }
+      y += th; s *= 0.74;
+    }
+    B.part({ x, y0: y, z, hw: Math.max(0.6, m * 0.05), h: 6 + R() * 10, kind: 2, prm: 8, taper: 0.1, mat: MAT.EMIT, col, param: 3 });
+    return y;
   }
   if (type === 'pagoda') {
     let y = top, s = 0.82;
@@ -237,6 +262,7 @@ function streetFaces(L) {
 }
 
 function lotSigns(B, R, L, podTop, style, density = 1) {
+  const topAt = typeof podTop === 'function' ? podTop : () => podTop;
   const W = B.world;
   const hw = L.w / 2 - 0.5, hd = L.d / 2 - 0.5;
   const faces = rectFaces(hw, hd);
@@ -247,19 +273,45 @@ function lotSigns(B, R, L, podTop, style, density = 1) {
     const p = street[fi] ? 1 : 0.25;
     const nx = F.nx * c - F.nz * s, nz = F.nx * s + F.nz * c;
     const at = (t, out) => { const lx = F.sx + F.dx * t + F.nx * 0.05, lz = F.sz + F.dz * t + F.nz * 0.05; return [L.x + lx * c - lz * s, L.z + lx * s + lz * c]; };
+    // Hong Kong-style street faces (hillside, urban): a blade every few metres, a second taller blade on some,
+    // and a fascia over each shopfront. All stay below the podium top so they sit on a wall.
+    if (street[fi] && (style === DT.HILLSIDE || style === DT.URBAN)) {
+      const hill = style === DT.HILLSIDE;
+      const step = hill ? 4.6 : 7.0;
+      for (let t = 1.5 + R() * 2; t < F.len - 1.5; t += step * (0.7 + R() * 0.6)) {
+        if (R() > 0.85 * density) continue;
+        const [x, z] = at(t);
+        const g = W.heightAt(x, z), top = topAt(x, z) - 0.4;
+        const h1 = Math.min(2.5 + R() * 3.5, top - g - 3.6);
+        if (h1 >= 2) B.slot(x, g + 3.6 + h1 / 2, z, nx, nz, 0.9 + R() * 0.6, h1, true, style);
+        const b2 = g + 7.5 + R() * 2, h2 = Math.min(3 + R() * 5, top - b2);
+        if (R() < (hill ? 0.5 : 0.3) && h2 >= 2.5) {
+          const [x2, z2] = at(Math.min(t + 0.6, F.len - 0.5));
+          B.slot(x2, b2 + h2 / 2, z2, nx, nz, 1.4 + R() * 1.2, h2, true, style);
+        }
+      }
+      for (let t = 0.6; t < F.len - 2;) {
+        const seg = Math.min(4 + R() * 6, F.len - t);
+        const [x, z] = at(t + seg / 2);
+        const g = W.heightAt(x, z);
+        if (R() < 0.85 * density && topAt(x, z) - g > 4.6) B.slot(x, g + 3.0, z, nx, nz, seg - 0.4, 0.9 + R() * 0.5, false, style);
+        t += seg + 0.3;
+      }
+      continue;
+    }
     if (street[fi] && R() < 0.38 * density) {
       const t = F.len * (0.3 + R() * 0.4);
       const [x, z] = at(t);
       const g = W.heightAt(x, z);
       const w = Math.min(F.len * 0.55, 4 + R() * 10);
-      B.slot(x, Math.min(g + 4.0, podTop - 0.8), z, nx, nz, w, 1.1, false, style);
+      B.slot(x, Math.min(g + 4.0, topAt(x, z) - 0.8), z, nx, nz, w, 1.1, false, style);
     }
     if (R() < 0.33 * p * density) {
       const t = R() < 0.5 ? 1.2 + R() * 2 : F.len - 1.2 - R() * 2;
       const [x, z] = at(t);
       const g = W.heightAt(x, z);
       // blade sign on the podium facade: from 3.5 m above the street up to just below the podium top
-      const bottom = g + 3.5, top = Math.min(podTop - 0.4, g + 20);
+      const bottom = g + 3.5, top = Math.min(topAt(x, z) - 0.4, g + 20);
       const h = Math.min(4 + R() * 9, top - bottom);
       if (h >= 2) B.slot(x, bottom + h / 2, z, nx, nz, 1.1 + R() * 0.6, h, true, style);
     }
@@ -272,6 +324,120 @@ function podium(B, R, L, opts) {
   const top = L.gMax + opts.h;
   B.part({ x: L.x, y0, z: L.z, a: L.angle, hw, hd, h: top - y0, mat: opts.mat, col: opts.col, floorH: opts.floorH || 4.2, winW: opts.winW || 3.4, baseY: L.gMin, param: opts.lit || 0.45, flags: opts.flags || 0, seed: R() * 999, solid: true });
   return top;
+}
+
+// Podium that steps down a slope: on steep lots it is split along the fall line into 2-4 strips, each covering
+// its part of the lot and standing at least opts.h above its own highest ground (sign contract still holds).
+// Lit rails mark the terrace edges, and a stair flight runs down a side gap. Returns { top, minTop }.
+function terracedPodium(B, R, L, opts) {
+  const W = B.world;
+  const diff = L.gMax - L.gMin;
+  if (diff < 7) { const top = podium(B, R, L, opts); B.hillPods.push({ L, top, minTop: top }); return { top, minTop: top, topAt: () => top }; }
+  const hw = L.w / 2 - 0.5, hd = L.d / 2 - 0.5;
+  const hAt = (lx, lz) => { const [x, z] = Builder.tw(L.x, L.z, L.angle, lx, lz); return W.heightAt(x, z); };
+  const sx = (hAt(hw, 0) - hAt(-hw, 0)) / (2 * hw), sz = (hAt(0, hd) - hAt(0, -hd)) / (2 * hd);
+  const alongX = Math.abs(sx) * hw >= Math.abs(sz) * hd;
+  const n = Math.min(4, Math.ceil(diff / 6));
+  const len = alongX ? hw : hd, wid = alongX ? hd : hw;
+  const seed = R() * 999;
+  let top = -1e9, minTop = 1e9;
+  const strips = [];
+  for (let i = 0; i < n; i++) {
+    const c0 = -len + (2 * len) * i / n, c1 = -len + (2 * len) * (i + 1) / n;
+    const mid = (c0 + c1) / 2, half = (c1 - c0) / 2;
+    let smin = 1e9, smax = -1e9;
+    for (const u of [c0, mid, c1]) for (const v of [-wid, 0, wid]) {
+      const h = alongX ? hAt(u, v) : hAt(v, u);
+      smin = Math.min(smin, h); smax = Math.max(smax, h);
+    }
+    const t = smax + opts.h;
+    const [cx, cz] = Builder.tw(L.x, L.z, L.angle, alongX ? mid : 0, alongX ? 0 : mid);
+    B.part({ x: cx, y0: smin - 4, z: cz, a: L.angle, hw: alongX ? half : hw, hd: alongX ? hd : half, h: t - smin + 4, mat: opts.mat, col: opts.col, floorH: opts.floorH || 4.2, winW: opts.winW || 3.4, baseY: L.gMin, param: opts.lit || 0.45, flags: opts.flags || 0, seed, solid: true });
+    strips.push({ mid, half, t });
+    top = Math.max(top, t); minTop = Math.min(minTop, t);
+  }
+  // lit guard rail along each terrace edge that drops to a lower neighbour
+  const railC = R() < 0.5 ? [1, 0.7, 0.35] : pick(R, PAL.neon);
+  for (let i = 0; i < n; i++) for (const j of [i - 1, i + 1]) {
+    if (j < 0 || j >= n || strips[j].t >= strips[i].t - 1) continue;
+    const edge = strips[i].mid + Math.sign(strips[j].mid - strips[i].mid) * strips[i].half;
+    const [ex, ez] = Builder.tw(L.x, L.z, L.angle, alongX ? edge : 0, alongX ? 0 : edge);
+    B.prop({ x: ex, y0: strips[i].t + 0.9, z: ez, a: L.angle, hw: alongX ? 0.06 : hw, hd: alongX ? hd : 0.06, h: 0.12, mat: MAT.EMIT, col: railC, param: 2.5, flags: FLAG.BOTTOM });
+  }
+  // stair street down one side gap (not on a road side)
+  const street = streetFaces(L);
+  const sides = alongX ? [[0, 1], [2, -1]] : [[3, 1], [1, -1]];   // faces parallel to the fall line: [faceIndex, sign of offset]
+  const free = sides.filter(([fi]) => !street[fi]);
+  if (diff > 9 && free.length && R() < 0.45) {
+    const sgn = free[0][1];
+    const off = (alongX ? hd : hw) + 2.5;
+    const steps = Math.min(40, Math.round(2 * len / 1.4));
+    for (let k = 0; k < steps; k++) {
+      const u = -len + (k + 0.5) * 2 * len / steps;
+      const lx = alongX ? u : sgn * off, lz = alongX ? sgn * off : u;
+      const [x, z] = Builder.tw(L.x, L.z, L.angle, lx, lz);
+      const g = W.heightAt(x, z);
+      const yt = Math.round((g + 0.2) / 0.3) * 0.3;
+      B.prop({ x, y0: g - 1.5, z, a: L.angle, hw: alongX ? 2 * len / steps / 2 + 0.02 : 1.6, hd: alongX ? 1.6 : 2 * len / steps / 2 + 0.02, h: yt - g + 1.5, mat: MAT.CONCRETE, col: [0.3, 0.29, 0.27] });
+      if (k % 8 === 4) {
+        const [px, pz] = Builder.tw(L.x, L.z, L.angle, alongX ? u : sgn * (off + 1.5), alongX ? sgn * (off + 1.5) : u);
+        B.prop({ x: px, y0: yt, z: pz, hw: 0.06, h: 3, kind: 2, prm: 8, mat: MAT.METAL, col: [0.2, 0.2, 0.22] });
+        B.prop({ x: px, y0: yt + 3, z: pz, hw: 0.18, h: 0.3, kind: 2, prm: 8, mat: MAT.EMIT, col: [1, 0.72, 0.4], param: 4, flags: FLAG.BOTTOM });
+      }
+    }
+  }
+  B.hillPods.push({ L, top, minTop });
+  // podium top at a world point (used to keep sign slots on the terrace they are mounted on)
+  const c = Math.cos(L.angle), s = Math.sin(L.angle);
+  const topAt = (x, z) => {
+    const dx = x - L.x, dz = z - L.z;
+    const u = alongX ? dx * c + dz * s : -dx * s + dz * c;
+    const i = Math.max(0, Math.min(n - 1, Math.floor((u + len) / (2 * len) * n)));
+    return strips[i].t;
+  };
+  return { top, minTop, topAt };
+}
+
+// Elevated pedestrian walkways between facing hillside podiums across a road.
+export function walkways(B, R) {
+  const pods = B.hillPods;
+  const cell = new Map();
+  const key = (x, z) => Math.floor(x / 50) * 7919 + Math.floor(z / 50);
+  pods.forEach((p, i) => { const k = key(p.L.x, p.L.z); if (!cell.has(k)) cell.set(k, []); cell.get(k).push(i); });
+  let n = 0;
+  for (let i = 0; i < pods.length; i++) {
+    const A = pods[i], LA = A.L;
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      const list = cell.get(key(LA.x + dx * 50, LA.z + dz * 50));
+      if (!list) continue;
+      for (const j of list) {
+        if (j <= i || R() > 0.22) continue;
+        const LB = pods[j].L;
+        if (LB.district !== LA.district) continue;
+        const c = Math.cos(LA.angle), s = Math.sin(LA.angle);
+        const ox = LB.x - LA.x, oz = LB.z - LA.z;
+        const lx = ox * c + oz * s, lz = -ox * s + oz * c;
+        const alongX = Math.abs(lx) > Math.abs(lz);
+        if (Math.abs(alongX ? lz : lx) > 4) continue;
+        const gap = Math.abs(alongX ? lx : lz) - (alongX ? (LA.w + LB.w) / 2 : (LA.d + LB.d) / 2);
+        if (gap < 9 || gap > 24) continue;    // across a road, not across an alley
+        const y = Math.min(A.minTop, pods[j].minTop) - 0.3;
+        if (y - Math.max(LA.gMax, LB.gMax) < 5) continue;
+        const mx = LA.x + ox / 2, mz = LA.z + oz / 2;
+        const ang = Math.atan2(oz, ox);
+        const half = Math.hypot(ox, oz) / 2;
+        B.part({ x: mx, y0: y - 0.8, z: mz, a: ang, hw: half, hd: 1.6, h: 0.8, mat: MAT.CONCRETE, col: [0.28, 0.28, 0.3], flags: FLAG.BOTTOM, solid: true });
+        for (const side of [-1, 1]) {
+          const [rx, rz] = Builder.tw(mx, mz, ang, 0, side * 1.55);
+          B.part({ x: rx, y0: y, z: rz, a: ang, hw: half, hd: 0.05, h: 1.05, mat: MAT.METAL, col: [0.25, 0.25, 0.27] });
+          B.prop({ x: rx, y0: y + 1.0, z: rz, a: ang, hw: half, hd: 0.07, h: 0.08, mat: MAT.EMIT, col: [0.4, 0.9, 1], param: 3, flags: FLAG.BOTTOM });
+        }
+        B.part({ x: mx, y0: y - 0.85, z: mz, a: ang, hw: half, hd: 1.0, h: 0.06, mat: MAT.EMIT, col: [1, 0.75, 0.45], param: 2, flags: FLAG.BOTTOM });
+        n++;
+      }
+    }
+  }
+  return n;
 }
 
 // Shop spill light at a street face.
@@ -320,8 +486,9 @@ const CROWNS_CBD = ['lit', 'lit', 'spire', 'helipad', 'antenna', 'spire', 'machi
 
 export function genHillside(B, R, L) {
   const podH = 6 + 3 * Math.floor(R() * 3);
-  const podTop = podium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.6, winW: 3.2, lit: 0.55, flags: R() < 0.3 ? FLAG.ARCADE : 0 });
-  lotSigns(B, R, L, podTop, DT.HILLSIDE);
+  const tp = terracedPodium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.6, winW: 3.2, lit: 0.55, flags: R() < 0.3 ? FLAG.ARCADE : 0 });
+  const podTop = tp.minTop;   // towers start on the lowest terrace (they pass through the higher ones)
+  lotSigns(B, R, L, tp.topAt, DT.HILLSIDE);
   if (R() < 0.55) shopLight(B, R, L, podTop);
   const t = R();
   const maxTop = L.maxTop || 1e9;
@@ -350,6 +517,7 @@ export function genHillside(B, R, L) {
   const two = long && R() < 0.55;
   let floors = 18 + Math.floor(Math.pow(R(), 1.15) * 38);
   if (R() < 0.07) floors = 62 + Math.floor(R() * 22);
+  else if (R() < 0.16) floors = 10 + Math.floor(R() * 7);
   const floorH = 3.0;
   const shapeR = R();
   let kind = 0, prm = 0;
@@ -377,7 +545,9 @@ export function genHillside(B, R, L) {
     const segs = R() < 0.35 ? 2 : 1;
     const tw = tower(B, R, { x: T.x, z: T.z, a: L.angle, y0: podTop, baseY: podTop, hw: T.hw, hd: T.hd, h, segs, kind, prm, mat: MAT.RES, col, floorH, winW, lit, flags, seed: R() * 999 });
     B.hillTowers.push({ x: T.x, z: T.z, a: L.angle, hw: T.hw, hd: T.hd, y0: podTop, top: podTop + h * (segs === 2 ? 0.6 : 1), district: L.district });
-    if (kind === 0 && prm === 0) acUnits(B, R, T.x, T.z, L.angle, T.hw, T.hd, podTop, podTop, podTop + h * (segs === 2 ? 0.6 : 1), floorH, winW, 0.07);
+    if (kind === 0 && prm === 0) acUnits(B, R, T.x, T.z, L.angle, T.hw, T.hd, podTop, podTop, podTop + h * (segs === 2 ? 0.6 : 1), floorH, winW, 0.09);
+    // rooftop neon accent: a coloured parapet line that reads from far viewpoints
+    if (kind !== 2 && R() < 0.28) B.part({ x: T.x, y0: tw.top - 0.7, z: T.z, a: L.angle, hw: tw.hw + 0.15, hd: tw.hd + 0.15, h: 0.35, kind: tw.kind, prm: tw.prm, mat: MAT.EMIT, col: pick(R, PAL.neon), param: 4.5, flags: FLAG.BOTTOM | FLAG.NOTOP });
     if (R() < 0.12 && kind === 0) {
       // cross plan: perpendicular wing
       B.part({ x: T.x, y0: podTop, z: T.z, a: L.angle, hw: T.hw * 0.45, hd: T.hd + 3, h: h * 0.92, mat: MAT.RES, col, floorH, winW, baseY: podTop, param: lit, seed: R() * 999, solid: true });
@@ -419,8 +589,9 @@ export function genUrban(B, R, L) {
     return;
   }
   const podH = 6 + 3.5 * Math.floor(R() * 2);
-  const podTop = podium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.5, winW: 3.2, lit: 0.55, flags: arcade ? FLAG.ARCADE : 0 });
-  lotSigns(B, R, L, podTop, DT.URBAN);
+  const tp = terracedPodium(B, R, L, { h: podH, mat: MAT.SHOP, col: pick(R, PAL.shop), floorH: 3.5, winW: 3.2, lit: 0.55, flags: arcade ? FLAG.ARCADE : 0 });
+  const podTop = tp.minTop;
+  lotSigns(B, R, L, tp.topAt, DT.URBAN);
   if (R() < 0.5) shopLight(B, R, L, podTop);
   const ins = 1.5 + R() * 3;
   const hw = L.w / 2 - ins, hd = L.d / 2 - ins;

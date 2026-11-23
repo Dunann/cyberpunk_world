@@ -187,7 +187,7 @@ export class Post {
     const d = ctx.device;
     this.device = d;
     // Tunable look (adjustable live from the console: __ctx.renderer.post.look)
-    this.look = { bloom: 0.085, sharpen: 0.45, vignette: 0.32, aberration: 0.004, grain: 0.035, saturation: 1.08 };
+    this.look = { bloom: 0.085, sharpen: 0.45, vignette: 0.32, aberration: 0.0012, grain: 0.035, saturation: 1.08 };
     this.rainActive = false;
     this.samp = d.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
     this.layout = d.createBindGroupLayout({ entries: [

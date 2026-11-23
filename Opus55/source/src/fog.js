@@ -31,6 +31,23 @@ const NCX = Math.ceil(FOG.W / CX), NCY = Math.ceil(FOG.H / CY), NCZ = Math.ceil(
 const CL_STRIDE = 64, CL_MAX = 63;
 const NOISE_N = 64;
 
+// Light arriving at a point in the haze from everything except the point lights: night sky and moonlit
+// overcast, the city-lit cloud deck above, the diffuse city glow from the light grid (cooled and partly
+// desaturated so distant districts recede instead of turning into a warm wall) and moon forward scattering.
+// Shared with rain.js, which subtracts it from the radiance volume to keep only the nearby point lights.
+export const FOG_AMBIENT_WGSL = /* wgsl */ `
+fn fogAmbientLi(p: vec3f, dir: vec3f, hA: f32, g: vec3f, glowGain: f32) -> vec3f {
+  var Li = vec3f(0.009, 0.011, 0.02) + skyCityGlow(p.xz) * vec3f(0.26, 0.32, 0.5);
+  var gl = g * glowGain * (exp(-hA / 90.0) * 0.75 + exp(-hA / 600.0) * 0.25);
+  gl /= 1.0 + max(gl.r, max(gl.g, gl.b)) * 4.0; // soft knee: very dense districts must not wash out the haze
+  gl = mix(vec3f(luma(gl)), gl, 0.45) * vec3f(0.78, 0.8, 1.25);
+  let c = dot(dir, F.moon.xyz);
+  let hg = 1.5625 - 1.5 * c;
+  Li += vec3f(0.62, 0.70, 1.0) * F.moon.w * (0.0042 * 0.4375 / (hg * sqrt(hg)) + 0.014);
+  return Li + gl;
+}
+`;
+
 const SHARED = /* wgsl */ `
 struct FogU {
   prevCam: vec4f,   // xyz previous camera position, w history blend factor (1 = reset)
@@ -180,7 +197,7 @@ const MARCH_WGSL = WGSL_FRAME_STRUCT + /* wgsl */ `
 @group(0) @binding(1) var sampRepeat: sampler;
 @group(0) @binding(2) var sampClamp: sampler;
 fn time() -> f32 { return F.camPos.w; }
-` + SKY_WGSL + WGSL_LIGHT + SHARED + /* wgsl */ `
+` + SKY_WGSL + WGSL_LIGHT + FOG_AMBIENT_WGSL + SHARED + /* wgsl */ `
 @group(1) @binding(0) var<uniform> FU: FogU;
 @group(1) @binding(1) var<storage, read> lights: array<Light>;
 @group(1) @binding(2) var<storage, read> clusters: array<u32>;
@@ -222,19 +239,16 @@ fn medium(p: vec3f, dir: vec3f, dist: f32, cnt: u32) -> vec4f {
   sigma += FU.tune.z * (wf * 0.9 + valley * 0.2) * exp(-hA / 18.0) * smoothstep(0.32, 0.8, n) * 1.6;
   // aerial perspective + thick haze toward the world edge (hides the end of the terrain)
   let rc = length(p.xz - SKY_CITY);
-  sigma += 0.000035 * exp(-py / 1500.0) + FU.tune.w * smoothstep(5300.0, 7200.0, rc) * exp(-py / 2000.0);
+  // aerial perspective: horizon-aligned (depends on altitude only), so ridges recede in layers; the radial
+  // term only thickens the air beyond the terrain so the end of the world never shows
+  sigma += 0.00016 * exp(-py / 1800.0) + FU.tune.w * smoothstep(6200.0, 8200.0, rc) * exp(-py / 2500.0);
   sigma *= 1.0 + F.params.x * 0.7;
 
   // ---- incoming light
   // sky dome and the lit cloud deck above (city light reflected down), cool moonlit base
-  var Li = vec3f(0.005, 0.0062, 0.012) + skyCityGlow(p.xz) * vec3f(0.32, 0.36, 0.5);
-  // diffuse city glow from the street lights below (coarse light grid)
   let g = textureSampleLevel(glowTex, sampClamp, (p.xz - GRID_ORIGIN) / GRID_SIZE, 0.0).rgb;
-  var gl = g * FU.tune.y * (exp(-hA / 90.0) * 0.75 + exp(-hA / 600.0) * 0.25);
-  gl /= 1.0 + max(gl.r, max(gl.g, gl.b)) * 4.0; // soft knee: very dense districts must not wash out the haze
-  Li += gl;
+  var Li = fogAmbientLi(p, dir, hA, g, FU.tune.y);
   // moon above a broken cloud deck: forward scattering when looking toward it
-  Li += vec3f(0.62, 0.70, 1.0) * F.moon.w * (0.008 * phaseHG(dot(dir, F.moon.xyz), 0.75) + 0.018);
   // point light halos (lights of this froxel's cluster, cached in workgroup memory with flicker applied)
   var acc = vec3f(0.0);
   for (var k = 0u; k < cnt; k++) {
@@ -498,7 +512,7 @@ export default {
     // Incoming radiance volume for other effects: views[index] was written this frame.
     // rgb = radiance arriving at the point and scattered toward the camera, a = extinction (1/m).
     // Sample it like fogTex: uv = screen uv, w = fogSlice(distance).
-    ctx.fogLi = { views: this.volViews, index: 0 };
+    ctx.fogLi = { views: this.volViews, index: 0, glowView, tune: this.tune };
   },
 
   compute(ctx, enc) {
