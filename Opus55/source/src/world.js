@@ -88,13 +88,13 @@ export const POSES = [
   { name: 'Nanshan overlook',      pos: [200, 325, 2400], rel: false, target: [568, 205, 1478],  t: 40 },
   { name: 'Bund light show',       pos: [2080, 8, -880],  rel: false, target: [3051, 187, -725], t: 45 },
   { name: 'Hillside neon street',  pos: [-1162, 1.7, -255], rel: true, target: [-1058, 98, -568], t: 100 },
-  { name: 'Monorail station',      pos: [-930, 140, -760], rel: false, target: [-1040, 146, -770], t: 15 },
+  { name: 'Monorail station',      pos: [-991.7, 141, -752], rel: false, target: [-1027.9, 142, -766.6], t: 15 },
   { name: 'Lake gardens',          pos: [-2658.1, 2.7, 2609.0], rel: true, target: [-2230, 4, 2189], t: 120 },
   { name: 'Steppe night market',   pos: [760, 2, -2560],  rel: true, target: [900, 60, -2780],   t: 130 },
   { name: 'Among the supertalls',  pos: [2950, 280, -820], rel: false, target: [3450, 220, -1550], t: 50 },
   { name: 'Under the bridge',      pos: [-588, 2.5, 670], rel: false, target: [-609, 46, 464],   t: 60 },
   { name: 'Mountain edge',         pos: [707.1, 2.3, 4597.3], rel: true, target: [1271, 140, 7544], t: 140 },
-  { name: 'Cableway over river',   pos: [-1330, 70, 560], rel: false, target: [600, 120, -100],  t: 70 },
+  { name: 'Cableway over river',   pos: [-1208.6, 64, 760.6], rel: false, target: [-600, 92, 690], t: 70 },
 ];
 
 export const WORLD_BOUND = 5200;     // player is softly pushed back beyond this radius from origin

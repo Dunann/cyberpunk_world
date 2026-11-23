@@ -166,7 +166,7 @@ fn shape(p: vec3f, mat: f32, ty: f32) -> vec3f {
   if (ty > 2.5) {
     // bus: stretch to 12 m and lift the glass house to full width
     q = vec3f(p.x * 1.36, p.y * 1.25, p.z * 2.6);
-    if (mat == 1.0 || mat == 5.0) { q = vec3f(sign(p.x) * 1.2, 1.12 + (p.y - 0.88) * 3.3, clamp(p.z * 4.6, -5.7, 5.85)); }
+    if (mat == 1.0 || mat == 5.0) { q = vec3f(sign(p.x) * 1.2, 1.12 + (p.y - 0.88) * 3.3, select(-5.7, 5.55, p.z > -0.2)); }
   } else if (ty > 1.5) {
     q = vec3f(p.x * 1.08, p.y * 1.18, p.z * 1.04);
   }
@@ -211,11 +211,11 @@ fn paint(ci: f32) -> vec3f {
   var rough = 0.28; var metal = 0.55; var emis = vec3f(0.0); var m = 0.0;
   if (mat == 1.0) {
     // glass house: windows with a thin pillar pattern; buses get lit interiors
-    let pillar = abs(n.y) < 0.6 && fract(i.lp.z * select(1.0, 3.0, ty > 2.5) + 0.1) < 0.08;
+    let pillar = abs(n.y) < 0.6 && (fract(i.lp.z * select(1.0, 3.6, ty > 2.5) + 0.1) < select(0.08, 0.18, ty > 2.5) || (ty > 2.5 && i.lp.y < 0.95));
     if (abs(n.y) > 0.8) { albedo = paint(i.info.z); }
     else if (!pillar) {
       albedo = vec3f(0.01); rough = 0.05; metal = 0.0; m = 2.0;
-      if (ty > 2.5) { emis = vec3f(0.85, 0.95, 1.0) * 0.7 * (0.6 + 0.4 * step(0.5, fract(i.lp.z * 7.0))); }
+      if (ty > 2.5) { emis = vec3f(1.0, 0.9, 0.75) * 0.35; }
     }
   } else if (mat == 2.0) {
     albedo = vec3f(0.02); rough = 0.8; metal = 0.0;
@@ -274,7 +274,7 @@ struct VOut {
 `;
 // ---------------------------------------------------------------- road network
 
-function buildRuns(world) {
+export function buildRuns(world) {
   const runs = [];
   const blockedAt = (x, z) => {
     for (const L of LANDMARKS) if (L.r > 0 && Math.hypot(x - L.x, z - L.z) < L.r + 4) return true;
@@ -386,7 +386,7 @@ export class Cars {
         const v = (r.bridge ? 15 : 9) + rnd() * 5 + lane * 2.5;
         let s = rnd() * 20;
         while (s < r.len - 4) {
-          const ty = rnd() < 0.04 ? 3 : rnd() < 0.18 ? 1 : rnd() < 0.2 ? 2 : 0;
+          const ty = rnd() < (r.type === 2 ? 0 : 0.04) ? 3 : rnd() < 0.18 ? 1 : rnd() < 0.2 ? 2 : 0;
           const color = ty === 1 ? (rnd() < 0.8 ? 5 : 8) : (rnd() * 10) | 0;
           cars.push(ri, dir * (lane + 1), s, v, ty, ty === 1 ? color : color === 5 ? 1 : color, rnd(), 0);
           // platoons: short gaps, occasionally a long gap

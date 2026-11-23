@@ -108,9 +108,9 @@ fn place(st: FState, lp: vec3f) -> vec3f {
   else if (mat == 2.0) { albedo = vec3f(0.03); rough = 0.6; metal = 0.3; }
   else if (mat == 3.0) {
     var c = select(vec3f(0.1, 0.9, 1.0), vec3f(1.0, 0.15, 0.6), seed > 0.5);
-    if (ty > 1.5 && ty < 2.5) { c = select(vec3f(1.0, 0.05, 0.05), vec3f(0.1, 0.2, 1.0), fract(time() * 1.5) > 0.5); }
+    if (ty > 1.5 && ty < 2.5) { c = vec3f(0.02, 0.03, 0.06); }
     if (ty > 3.5) { c = vec3f(0.6, 0.6, 0.6); }
-    emis = c * 6.0; albedo = vec3f(0.1);
+    emis = c * 2.0; albedo = vec3f(0.05);
   }
   return gbuf(albedo, rough, n, metal, emis, 1.0, motionVector(i.wp, i.pwp), m, 0.5);
 }
@@ -154,21 +154,21 @@ fn fogT(p: vec3f, dist: f32) -> f32 {
   let strobe = select(0.0, 1.0, strobeF < 0.05 || (ty > 2.5 && ty < 3.5 && strobeF > 0.13 && strobeF < 0.17));
   if (lamp == 0u) { pos += st.l * span; col = vec3f(1.0, 0.04, 0.03) * 9.0; }
   else if (lamp == 1u) { pos -= st.l * span; col = vec3f(0.05, 1.0, 0.25) * 8.0; }
-  else if (lamp == 2u) { pos += u * 0.6 - st.f * span * 0.4; col = vec3f(1.0) * 45.0 * strobe; }
+  else if (lamp == 2u) { pos += u * 0.6 - st.f * span * 0.4; col = vec3f(1.0) * 20.0 * strobe; }
   else {
     // special lamp: taxi underglow, police beacon, airliner/heli red beacon
     pos -= u * 0.5;
     if (ty < 0.5) { col = select(vec3f(0.1, 0.9, 1.0), vec3f(1.0, 0.15, 0.6), seed > 0.5) * 12.0; }
     else if (ty < 1.5) { col = vec3f(1.0, 0.9, 0.7) * 3.0; }
     else if (ty < 2.5) { col = vec3f(0.0); }
-    else { col = vec3f(1.0, 0.05, 0.02) * 22.0 * smoothstep(0.6, 1.0, sin(t * 6.0 + seed * 9.0)); pos += u * 2.0; }
+    else { col = vec3f(1.0, 0.05, 0.02) * 9.0 * smoothstep(0.6, 1.0, sin(t * 6.0 + seed * 9.0)); pos += u * 2.0; }
   }
   if (ty > 1.5 && ty < 2.5 && lamp < 2u) {
     // police: alternating red / blue strobes
     let ph = fract(t * 2.5 + seed);
     let red = lamp == 0u;
     let on = select(ph >= 0.5, ph < 0.5, red) && fract(ph * 6.0) < 0.6;
-    col = select(vec3f(0.1, 0.25, 1.0), vec3f(1.0, 0.05, 0.05), red) * 30.0 * select(0.0, 1.0, on);
+    col = select(vec3f(0.1, 0.25, 1.0), vec3f(1.0, 0.05, 0.05), red) * 14.0 * select(0.0, 1.0, on);
   }
   col *= st.fade;
   let toCam = F.camPos.xyz - pos;
@@ -185,7 +185,7 @@ fn fogT(p: vec3f, dist: f32) -> f32 {
   return o;
 }
 @fragment fn fs(i: VOut) -> @location(0) vec4f {
-  return vec4f(i.col * exp(-dot(i.q, i.q) * 1.6), 0.0);
+  return vec4f(i.col * exp(-dot(i.q, i.q) * 2.2), 0.0);
 }
 `;
 
@@ -264,6 +264,58 @@ fn evalPt(P: Pt, t: f32) -> vec3f {
     q = vec3f(q.x * cos(a) - q.z * sin(a), q.y, q.x * sin(a) + q.z * cos(a));
   }
   return q;
+}
+struct Drone { wp: vec3f, col: vec3f };
+fn drone(ii: u32) -> Drone {
+  var o: Drone;
+  let N = u32(U.b.w);
+  let A = pts[u32(U.a.x) * N + ii];
+  let B = pts[u32(U.a.y) * N + ii];
+  let t = U.d.x;
+  let h = hash11u(ii * 747u + 11u);
+  var k = U.a.z;
+  if (U.a.w > 0.5) { k = saturate(k * 1.6 - h * 0.6); }
+  k = k * k * (3.0 - 2.0 * k);
+  var lp = mix(evalPt(A, t), evalPt(B, t), k);
+  lp.y += sin(PI * k) * (6.0 + 10.0 * h) * U.a.w;
+  lp.z += sin(PI * k) * (hash11u(ii * 31u + 7u) - 0.5) * 30.0 * U.a.w;
+  o.col = mix(A.c.rgb, B.c.rgb, k);
+  o.wp = U.c.xyz + vec3f(-lp.z, lp.y, lp.x) * U.c.w;
+  return o;
+}
+// Reflection of each drone in the river: mirrored about the water plane, vertically smeared by the ripples.
+@vertex fn vsRefl(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
+  var o: VOut;
+  let D = drone(ii * 2u);
+  // a glitter path on rippled water: from the water surface under the drone down to its mirror image
+  let top = vec3f(D.wp.x, 0.0, D.wp.z);
+  let bot = vec3f(D.wp.x, -min(D.wp.y, 30.0), D.wp.z);
+  let dist = length(F.camPos.xyz - top);
+  let px = dist * 2.0 * F.camRight.w * F.res.w;
+  let rr = max(0.8, 1.6 * px);
+  var corners = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
+  let c = corners[vi];
+  let p = select(bot, top, c.y > 0.0) + F.camRight.xyz * c.x * rr * 1.2;
+  o.cp = F.viewProj * vec4f(p, 1.0);
+  o.q = vec2f(c.x * 1.6, c.y);
+  o.col = D.col * 0.9 * U.b.y * pow(0.55 / rr, 0.8);
+  return o;
+}
+@fragment fn fsRefl(i: VOut) -> @location(0) vec4f {
+  // only where the river surface is the nearest thing at this pixel
+  let uv = i.cp.xy * F.res.zw;
+  let ray = viewRay(uv);
+  if (ray.y > -0.0005) { discard; }
+  let tw = -F.camPos.y / ray.y;
+  let hit = F.camPos.xyz + ray * tw;
+  if (terrainHeight(hit.xz) > -0.5) { discard; }
+  let zPlane = tw * dot(ray, F.camFwd.xyz);
+  let zScene = linearDepth(max(sceneDepthAt(vec2i(i.cp.xy)), 1e-7));
+  if (zScene < zPlane - 2.0) { discard; }
+  let fg = textureSampleLevel(fogTex, sampClamp, vec3f(uv, clamp(fogSlice(tw), 0.0, 1.0)), 0.0).a;
+  let along = 0.5 + 0.5 * i.q.y; // 1 at the water line, 0 at the mirror point
+  let a = exp(-i.q.x * i.q.x * 1.6) * along * along * (0.55 + 0.45 * sin(hit.z * 1.7 + hit.x * 0.9 + time() * 2.5));
+  return vec4f(i.col * max(a, 0.0) * fg, 0.0);
 }
 @vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VOut {
   var o: VOut;
@@ -387,6 +439,7 @@ export class Air {
       { binding: 0, visibility: VS, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: VS, buffer: { type: 'uniform' } }] });
     this.showGroup = d.createBindGroup({ layout: this.showLayout, entries: [{ binding: 0, resource: { buffer: this.showBuf } }, { binding: 1, resource: { buffer: this.showUBuf } }] });
     this.showPipe = R.forwardPipeline({ label: 'drone-show', code: SHOW_WGSL, groups: [this.showLayout], blend: 'add' });
+    this.reflPipe = R.forwardPipeline({ label: 'drone-reflections', code: SHOW_WGSL, vs: 'vsRefl', fs: 'fsRefl', groups: [this.showLayout], blend: 'add', depthTest: false });
     this.center = [2380, 215, -1000];
     const I = sh.index;
     // timeline: [start, from, to, duration, stagger]
@@ -482,6 +535,8 @@ export class Air {
       pass.setPipeline(this.showPipe);
       pass.setBindGroup(2, this.showGroup);
       pass.draw(6, this.N);
+      pass.setPipeline(this.reflPipe);
+      pass.draw(6, this.N >> 1);
     }
   }
 }
