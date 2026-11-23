@@ -139,6 +139,8 @@ export function personMesh(lod) {
     mb.ellipsoid([x * 0.96, ARM_SY - 0.035, 0], 0.056, 0.05, 0.06, nl, Math.max(3, nl - 3), up); // rounded shoulder
     mb.loft([[0.77, 0.02, 0.03, x, 0.005], [0.84, 0.026, 0.04, x, 0.005], [0.895, 0.03, 0.035, x], [0.905, 0.046, 0.048, x], [ARM_EY + 0.02, 0.043, 0.046, x]], nl, fore, false, true);
   }
+  // stool for seated people (part 26, shown only for them): round seat on a tapered base, slightly behind the hips
+  mb.loft([[0.0, 0.15, 0.15, 0, -0.08], [0.34, 0.11, 0.11, 0, -0.08], [0.36, 0.17, 0.17, 0, -0.08], [0.44, 0.17, 0.17, 0, -0.08]], Math.max(n, 6), 26, true);
   // phone in the right hand
   mb.box([-ARM_SX, 0.8, 0.045], X, Y, Z, 0.032, 0.068, 0.007, 8);
 

@@ -30,7 +30,7 @@ export const STATION_WORDS = ['李子坝', '李子坝站', '佛图关', '大坪'
 const CJK_FONTS = ['bold {S}px "Microsoft YaHei", "SimHei", sans-serif', 'bold {S}px "SimHei", "Microsoft YaHei", sans-serif', '{S}px "KaiTi", "STKaiti", "Microsoft YaHei", serif', 'bold {S}px "FangSong", "Microsoft YaHei", serif'];
 const LATIN_FONT = 'bold {S}px "Segoe UI", "Arial", sans-serif';
 const MONGOL_FONT = '{S}px "Mongolian Baiti", "Noto Sans Mongolian", sans-serif';
-const UYGHUR_FONT = 'bold {S}px "Microsoft Uighur", "Segoe UI", "Arial", sans-serif';
+const UYGHUR_FONT = 'bold {S}px "Segoe UI", "Tahoma", "Microsoft Uighur", sans-serif';
 
 export function buildSignAtlas(device) {
   const cv = new OffscreenCanvas(W, H);
@@ -42,15 +42,21 @@ export function buildSignAtlas(device) {
   const specs = [];           // measured first, then packed tallest-first (shelf packing)
   const cjkLen = (t) => [...t].length;
 
+  // Arabic-script text (Uyghur) is laid out right to left so Canvas2D shapes the joined letter forms in order
+  const rtl = (text) => /[؀-ۿ]/.test(text);
   const addH = (text, font, S, stroke) => {
     g.font = font.replace('{S}', S);
+    g.direction = rtl(text) ? 'rtl' : 'ltr';
     const tw = g.measureText(text).width;
     specs.push({ key: 'H:' + text, w: tw + PAD * 2 + 6, h: S * 1.25 + PAD * 2, e: { text, vertical: false, n: cjkLen(text) }, draw: (r) => {
       g.font = font.replace('{S}', S);
+      g.direction = rtl(text) ? 'rtl' : 'ltr';
       g.lineWidth = Math.max(2, S * 0.07); g.lineJoin = 'round';
       if (stroke) g.strokeText(text, r.x + r.w / 2, r.y + r.h / 2 + S * 0.04);
       else g.fillText(text, r.x + r.w / 2, r.y + r.h / 2 + S * 0.04);
+      g.direction = 'ltr';
     } });
+    g.direction = 'ltr';
   };
   const addV = (text, font, S) => {
     const chars = [...text];

@@ -94,7 +94,7 @@ export const POSES = [
   { name: 'Among the supertalls',  pos: [2950, 280, -820], rel: false, target: [3450, 220, -1550], t: 50 },
   { name: 'Under the bridge',      pos: [-588, 2.5, 670], rel: false, target: [-609, 46, 464],   t: 60 },
   { name: 'Mountain edge',         pos: [708.6, 2.2, 4605.2], rel: true, target: [1272.5, -255, 7544], t: 140 },
-  { name: 'Cableway over river',   pos: [-1199.6, 62.8, 780.6], rel: false, target: [-772, 63, 360], t: 70 },
+  { name: 'Cableway over river',   pos: [-1177.5, 52.8, 889.5], rel: false, target: [-903, 78, 473], t: 70 },
 ];
 
 export const WORLD_BOUND = 5200;     // player is softly pushed back beyond this radius from origin

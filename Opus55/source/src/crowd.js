@@ -183,6 +183,7 @@ fn pose(p: vec3f, part: f32, style: u32, phase: f32, amp: f32) -> vec3f {
   let cloth = (style >> 13u) & 3u;
   let head = (style >> 15u) & 3u;
   let longHair = ((style >> 17u) & 1u) != 0u;
+  let sitting = ((style >> 18u) & 1u) != 0u;
   var hide = false;
   switch (pi) {
     case 6u, 7u, 9u: { hide = !umb; }
@@ -195,13 +196,20 @@ fn pose(p: vec3f, part: f32, style: u32, phase: f32, amp: f32) -> vec3f {
     case 19u: { hide = cloth != 1u; }
     case 20u: { hide = cloth != 2u; }
     case 21u: { hide = cloth != 3u; }
+    case 26u: { hide = !sitting; }
     default: {}
   }
   if (hide) { return vec3f(0.0, -1000.0, 0.0); }
+  if (pi == 26u) { return p; } // stool stays on the ground
   let sw = sin(phase) * 0.55 * amp;
   let armSw = sw * select(0.8, 0.3, cloth == 2u);
   var q = p;
-  if (pi == 2u) { q = rotX(p, 0.84, sw); }
+  if (sitting && (pi == 2u || pi == 3u)) { q = rotX(p, 0.84, select(-1.05, -1.25, pi == 2u)); }
+  else if (sitting && (pi == 4u || pi == 23u || ((pi == 5u || pi == 24u || pi == 8u) && !phone))) {
+    // hands resting on the lap
+    q = arm(p, pi != 4u && pi != 5u, -0.45, -0.95);
+  }
+  else if (pi == 2u) { q = rotX(p, 0.84, sw); }
   else if (pi == 3u) { q = rotX(p, 0.84, -sw); }
   else if (pi == 4u || pi == 23u) {
     // left arm: swings, or grips the umbrella pole in front of the chest
@@ -219,8 +227,9 @@ fn pose(p: vec3f, part: f32, style: u32, phase: f32, amp: f32) -> vec3f {
     let k = saturate((0.95 - p.y) / 0.8);
     q.z += sin(phase) * 0.06 * amp * k * sign(p.x) * select(1.0, 0.6, pi == 21u);
   }
-  // gentle body bob while walking
+  // gentle body bob while walking; sitters drop onto the stool (hips at 0.44 m)
   q.y += abs(sin(phase)) * 0.035 * amp;
+  if (sitting) { q.y -= 0.4; }
   return q;
 }
 
@@ -370,6 +379,7 @@ fn hairCol(h: f32) -> vec3f {
     }
     case 6u: { albedo = umbCol((style >> 8u) & 7u); rough = 0.25; }
     case 7u: { albedo = vec3f(0.05); metal = 0.8; rough = 0.3; }
+    case 26u: { albedo = select(vec3f(0.3, 0.18, 0.09), vec3f(0.5, 0.08, 0.06), h2 > 0.6); rough = 0.6; }
     case 8u: { albedo = vec3f(0.02); emis = vec3f(0.6, 0.8, 1.0) * 3.0; }
     case 9u: {
       albedo = vec3f(0.1);
@@ -426,7 +436,7 @@ function buildAgents(world, transit, q) {
     if (o.steppe && S() < (cloth === 3 ? 0.65 : 0.25)) head = 3;
     const longHair = S() < 0.35;
     return (umb ? 1 : 0) | (led ? 2 : 0) | (phone ? 4 : 0) | (o.raised ? 8 : 0) | (coatCol << 4) | (umbCol << 8) |
-      (ledCol << 11) | (cloth << 13) | (head << 15) | (longHair ? 1 << 17 : 0);
+      (ledCol << 11) | (cloth << 13) | (head << 15) | (longHair ? 1 << 17 : 0) | (o.sitting ? 1 << 18 : 0);
   };
   const isSteppe = (x, z) => {
     const d = world.districtAt(x, z);
@@ -434,7 +444,10 @@ function buildAgents(world, transit, q) {
   };
   const push = (ax, az, dx, dz, b0, b1, b2, b3, mode, o = {}) => {
     if (o.steppe === undefined) o.steppe = isSteppe(ax, az);
-    A.push(ax, az, dx, dz, b0, b1, b2, b3, mode, R(), style(o), 0.92 + R() * 0.16);
+    let scale = 0.92 + R() * 0.16;
+    // the market crowd mixes heights more widely and includes children (own stream, keeps other placements)
+    if (o.steppe && o.varied !== false) { const r = S(); scale = r < 0.07 ? 0.6 + S() * 0.12 : 0.86 + S() * 0.24; }
+    A.push(ax, az, dx, dz, b0, b1, b2, b3, mode, R(), style(o), scale);
   };
   const blocked = (x, z) => {
     const c = world.collidersNear(x, z);
@@ -481,23 +494,67 @@ function buildAgents(world, transit, q) {
     const C = pose6.resolved, T = pose6.target;
     const dx = T[0] - C.x, dz = T[2] - C.z, len = Math.hypot(dx, dz);
     const ux = dx / len, uz = dz / len, px = -uz, pz = ux;
-    for (let k = 0; k < 420 * dens; k++) {
-      const t = 10 + R() * 165, o = (R() - 0.5) * 7.5;
-      const x = C.x + ux * t + px * o, z = C.z + uz * t + pz * o;
-      if (world.waterDist(x, z) < 8) continue;
-      const across = R() < 0.35;
-      const ddx = across ? px : ux, ddz = across ? pz : uz;
-      if (R() < 0.3) { const a = R() * 6.283; push(x, z, Math.cos(a), Math.sin(a), 0, -2000, R(), 0, 2, { steppe: true, umbrella: 0.75 }); }
-      else push(x, z, ddx, ddz, 3 + R() * 9, -2000, R(), 0.6 + R() * 0.6, 1, { steppe: true, umbrella: 0.75 });
+    const at = (t, o) => [C.x + ux * t + px * o, C.z + uz * t + pz * o];
+    const ok = (x, z) => world.waterDist(x, z) >= 8;
+    const M = { steppe: true, umbrella: 0.75 };
+    const face = (a) => [Math.cos(a), Math.sin(a)];
+    const lane = Math.atan2(uz, ux), cross = Math.atan2(pz, px);
+    // queues in front of some stalls: a short line reaching into the lane, everyone facing the counter
+    for (let t = 14; t < 175; t += 5.5) for (const side of [-1, 1]) {
+      if (R() > 0.45 * dens + 0.1) continue;
+      const n = 2 + ((R() * 3) | 0), ta = t + (R() - 0.5) * 1.5;
+      for (let k = 0; k < n; k++) {
+        const [x, z] = at(ta + (R() - 0.5) * 0.4, side * (3.7 - 0.75 * k));
+        if (!ok(x, z)) continue;
+        const [fx, fz] = face(cross + (side > 0 ? 0 : Math.PI) + (R() - 0.5) * 0.4);
+        push(x, z, fx, fz, 0, -2000, R(), 0, 2, M);
+      }
     }
+    // small groups chatting in the lane: two or three people facing each other
+    for (let k = 0; k < 26 * dens; k++) {
+      const t = 12 + R() * 160, o = (R() - 0.5) * 5;
+      const n = 2 + (R() < 0.4 ? 1 : 0);
+      for (let j = 0; j < n; j++) {
+        const a = (j / n) * Math.PI * 2 + R();
+        const [x, z] = at(t + Math.cos(a) * 0.55, o + Math.sin(a) * 0.55);
+        if (!ok(x, z)) continue;
+        // face the group centre: local offset (cos a, sin a) in (along, across), so look back along it
+        push(x, z, -(Math.cos(a) * ux + Math.sin(a) * px), -(Math.cos(a) * uz + Math.sin(a) * pz), 0, -2000, R(), 0, 2, M);
+      }
+    }
+    // people sitting on stools between the stalls, facing the lane or each other
+    for (let t = 16.75; t < 175; t += 5.5) for (const side of [-1, 1]) {
+      if (R() > 0.4) continue;
+      const n = 1 + ((R() * 3) | 0);
+      for (let j = 0; j < n; j++) {
+        const [x, z] = at(t + (j - (n - 1) / 2) * 0.8, side * (4.9 + R() * 0.4));
+        if (!ok(x, z)) continue;
+        const [fx, fz] = face(cross + (side > 0 ? Math.PI : 0) + (R() - 0.5) * 1.2);
+        push(x, z, fx, fz, 0, -2000, R(), 0, 2, { steppe: true, indoor: true, sitting: true });
+      }
+    }
+    // browsing: pacing a few meters along the lane or across to a stall
+    for (let k = 0; k < 150 * dens; k++) {
+      const t = 10 + R() * 165, o = (R() - 0.5) * 7;
+      const [x, z] = at(t, o);
+      if (!ok(x, z)) continue;
+      const across = R() < 0.35;
+      push(x, z, across ? px : ux, across ? pz : uz, 3 + R() * 7, -2000, R(), 0.5 + R() * 0.6, 1, M);
+    }
+    // walking through the whole market in both directions
+    for (let k = 0; k < 70 * dens; k++) {
+      const v = (0.9 + R() * 0.6) * (R() < 0.5 ? 1 : -1);
+      const [x, z] = at(8, 0);
+      push(x, z, ux, uz, 172, (R() - 0.5) * 6, R() * 172, v, 0, M);
+    }
+    // vendors behind the counters: half of them sit on a stool
     for (let t = 14; t < 175; t += 5.5) for (const side of [-1, 1]) {
       if (R() < 0.25) continue;
-      const o = side * 7.4;
-      const x = C.x + ux * t + px * o, z = C.z + uz * t + pz * o;
-      push(x, z, -px * side, -pz * side, 0, -2000, R(), 0, 2, { steppe: true, indoor: true });
+      const [x, z] = at(t + (R() - 0.5) * 2, side * 7.4);
+      const sit = R() < 0.5;
+      push(x, z, -px * side, -pz * side, 0, -2000, R(), 0, 2, { steppe: true, indoor: true, sitting: sit });
     }
   }
-
   // 4. people waiting on station platforms (facing the tracks)
   if (transit) {
     for (const T of transit.tracks) {
