@@ -92,7 +92,7 @@ export const POSES = [
   { name: 'Lake gardens',          pos: [-1500, 3, 2120], rel: true, target: [-2000, 40, 2900],  t: 120 },
   { name: 'Steppe night market',   pos: [760, 2, -2560],  rel: true, target: [900, 60, -2780],   t: 130 },
   { name: 'Among the supertalls',  pos: [2950, 280, -820], rel: false, target: [3450, 220, -1550], t: 50 },
-  { name: 'Under the bridge',      pos: [-760, 2.5, 520], rel: false, target: [-590, 26, 640],   t: 60 },
+  { name: 'Under the bridge',      pos: [-588, 2.5, 670], rel: false, target: [-609, 46, 464],   t: 60 },
   { name: 'Mountain edge',         pos: [600, 25, 4300],  rel: true, target: [900, 300, 6000],   t: 140 },
   { name: 'Cableway over river',   pos: [-1330, 70, 560], rel: false, target: [600, 120, -100],  t: 70 },
 ];

@@ -13,7 +13,7 @@ const STYLE = {
   'Chaotianmen Arch': { steel: [0.5, 0.52, 0.55], a: [1.0, 0.72, 0.25], b: [1.0, 0.95, 0.85], tower: 'none' },
   'Bund Suspension': { steel: [0.45, 0.07, 0.06], a: [1.0, 0.18, 0.55], b: [0.6, 0.2, 1.0], tower: 'portal' },
   'Old Town Bridge': { steel: [0.55, 0.18, 0.06], a: [1.0, 0.3, 0.1], b: [1.0, 0.75, 0.2], tower: 'none' },
-  'North Cable Bridge': { steel: [0.6, 0.62, 0.6], a: [0.15, 1.0, 0.6], b: [0.1, 0.6, 1.0], tower: 'H' },
+  'North Cable Bridge': { steel: [0.86, 0.85, 0.8], a: [1.0, 0.55, 0.12], b: [1.0, 0.88, 0.6], tower: 'single' },
 };
 
 // Shared WGSL: LED color animation (uses F.show during the light show).
@@ -154,7 +154,7 @@ struct ROut {
   side = normalize(side);
   let pix = dist * 2.0 * F.camRight.w * F.res.w;
   let r = R.a.w;
-  let w = max(r, pix * 0.8);
+  let w = max(r, pix * 1.5);
   var o: ROut;
   o.wp = pe + side * w * sg;
   o.pos = F.viewProj * vec4f(o.wp, 1.0);
@@ -173,9 +173,9 @@ struct ROut {
   let x = clamp(i.xc, -1.0, 1.0);
   let n = normalize(i.side * x + i.toCam * sqrt(max(1.0 - x * x, 0.0)));
   let t = time();
-  var albedo = mix(st.steel.rgb, vec3f(0.7), 0.3);
+  var albedo = mix(st.steel.rgb, vec3f(0.7), 0.3) * mix(0.15, 1.0, saturate(i.cover));
   var emis = vec3f(0.0);
-  var rough = 0.35;
+  var rough = mix(0.9, 0.35, saturate(i.cover));
   if (kind == 0u) {
     emis = bridgeLed(bid, i.sh.x, i.sh.y, t) * 2.2 * i.cover;
   } else if (kind == 1u) {
@@ -249,21 +249,20 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
   for (let i = 0; i <= n; i++) if (WD[i] < 0) { if (w0 < 0) w0 = i; w1 = i; }
   if (w0 < 0) { w0 = Math.floor(n * 0.3); w1 = Math.ceil(n * 0.7); }
   const sw0 = S[w0], sw1 = S[w1];
-  // deck profile: level over the water (gentle camber), straight ramps to the ends, then smoothed
+  // deck profile: level deck with smoothstep ramps at both ends. This is exactly the profile the traffic module drives
+  // on (trafficCars.js: ends at max(ground, 0), ramp length min(120, 0.2 L), cars at deck + 0.15), so cars sit on
+  // the road surface.
   const Y = new Float64Array(n + 1);
-  const gA = Math.max(G[0], 0.5), gB = Math.max(G[n], 0.5);
+  const yA = Math.max(world.heightAt(B.ax, B.az), 0), yB = Math.max(world.heightAt(B.bx, B.bz), 0);
+  const ramp = Math.min(120, len * 0.2);
+  const ss = (x) => { const t = Math.min(Math.max(x, 0), 1); return t * t * (3 - 2 * t); };
   for (let i = 0; i <= n; i++) {
     const s = S[i];
-    let y = Hd + 1.5 * Math.sin(Math.PI * Math.min(Math.max((s - sw0) / Math.max(sw1 - sw0, 1), 0), 1));
-    if (s < sw0) y = gA + (Hd - gA) * Math.min(s / Math.max(sw0 - 10, 20), 1);
-    if (s > sw1) y = gB + (Hd - gB) * Math.min((len - s) / Math.max(len - sw1 - 10, 20), 1);
+    let y = Hd;
+    if (s < ramp) y = yA + (Hd - yA) * ss(s / ramp);
+    if (s > len - ramp) y = yB + (Hd - yB) * ss((len - s) / ramp);
     Y[i] = y;
   }
-  for (let pass = 0; pass < 10; pass++) {
-    for (let i = 1; i < n; i++) Y[i] = Y[i] * 0.5 + (Y[i - 1] + Y[i + 1]) * 0.25;
-  }
-  for (let i = 0; i <= n; i++) Y[i] = Math.max(Y[i], G[i] + 0.35);
-  Y[0] = Math.max(G[0] + 0.05, 0.3); Y[n] = Math.max(G[n] + 0.05, 0.3);
   const P = (s, lat, dy) => {
     const f = Math.min(Math.max(s / step, 0), n - 1e-6);
     const i = Math.floor(f), t = f - i;
@@ -336,7 +335,18 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
   for (let i = 0; i <= n; i++) { const p = P(S[i], 0, 0); pts.push({ x: p[0], y: p[1], z: p[2], s: S[i] }); }
 
   // ---- piers under the approaches (not inside the main span)
-  const mainA = sw0 + (sw1 - sw0) * 0.12, mainB = sw1 - (sw1 - sw0) * 0.12;
+  let mainA = sw0 + (sw1 - sw0) * 0.12, mainB = sw1 - (sw1 - sw0) * 0.12;
+  const single = B.type === 'cable' && style.tower === 'single';
+  // single leaning pylon near one bank, harp cables over the water
+  const pylonS = sw0 + (sw1 - sw0) * 0.08;
+  const reachS = Math.min((sw1 - sw0) * 0.78, 380);
+  if (single) { mainA = pylonS; mainB = pylonS + reachS; }
+  const towers = [];
+  // lit band at the waterline around a pier or leg (base below water) and a light washing it upward
+  const waterline = (x, z, r, s) => {
+    mesh.beam([x, 0.2, z], [x, 1.4, z], along, r + 0.35, r + 0.35, 8, bid, s, 0);
+    lightsOut.push([x - vx * (r + 3), 2.0, z - vz * (r + 3), 22, style.a[0] * 18, style.a[1] * 18, style.a[2] * 18]);
+  };
   const isArch = B.type === 'arch';
   const pierSpacing = 42;
   for (let s = pierSpacing; s < len - 20; s += pierSpacing) {
@@ -352,7 +362,10 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
     const c0 = P(s, -hw * 0.6, -3.2), c1 = P(s, hw * 0.6, -3.2);
     mesh.beam(add(c0, [0, -1.2, 0]), add(c1, [0, -1.2, 0]), along, 1.2, 1.2, 0, bid, s);
     // accent light washing the pier and the deck underside
-    if (y - Math.max(g, 0) > 9) {
+    if (g < -0.5) {
+      const c = P(s, hw * 0.42, 0);
+      waterline(c[0], c[2], 1.1, s);
+    } else if (y - Math.max(g, 0) > 9) {
       const pl = P(s, 0, -6);
       lightsOut.push([pl[0], pl[1], pl[2], 24, style.a[0] * 14, style.a[1] * 14, style.a[2] * 14]);
     }
@@ -362,7 +375,45 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
   const rib = (p0, p1, r, kind, s0, s1, h0 = 0) => ribs.push([p0[0], p0[1], p0[2], r, p1[0], p1[1], p1[2], kind, s0, s1, bid, h0]);
   const groundAt = (s) => { const g = world.heightAt(ax + ux * s, az + uz * s); return g < 0.5 ? -3 : g - 1; };
 
-  if (B.type === 'cable') {
+  if (single) {
+    // leaning portal pylon (two legs outside the deck, tilted back toward the near bank), harp cables on one side
+    const yd = deckY(pylonS);
+    const H = Math.max(150, reachS * 0.42);
+    const lean = 0.42;
+    const base = groundAt(pylonS);
+    const c = P(pylonS, 0, 0);
+    const at = (lat, ds, y) => [c[0] + vx * lat + ux * ds, y, c[2] + vz * lat + uz * ds];
+    const legTop = (sd) => at(sd * (hw + 2.0), -H * lean, yd + H);
+    for (const sd of [-1, 1]) {
+      const b0 = at(sd * (hw + 2.6), 0, base);
+      mesh.beam(b0, legTop(sd), lateral, 2.4, 2.0, 7, bid, pylonS, 0);
+      rib(at(sd * (hw + 5.1), 0, base + 3), add(legTop(sd), mul(lateral, sd * 2.5)), 0.24, 1, pylonS, pylonS, 0);
+      if (base < 0) waterline(b0[0], b0[2], 2.6, pylonS);
+      lightsOut.push([b0[0] + ux * 6, yd + 4, b0[2] + uz * 6, 30, style.a[0] * 30, style.a[1] * 30, style.a[2] * 30]);
+    }
+    for (const f of [1.0, 0.82]) {
+      const yy = yd + H * f, dd = -H * lean * f;
+      mesh.beam(at(-(hw + 2.0), dd, yy), at(hw + 2.0, dd, yy), along, 1.6, 1.8, 7, bid, pylonS);
+    }
+    mesh.beam(at(-(hw + 2.5), 0, yd - 4.5), at(hw + 2.5, 0, yd - 4.5), along, 1.6, 1.4, 7, bid, pylonS);
+    lightsOut.push([c[0] - ux * H * lean * 0.9, yd + H * 0.9, c[2] - uz * H * lean * 0.9, 34, style.b[0] * 26, style.b[1] * 26, style.b[2] * 26]);
+    towers.push({ x: c[0], z: c[2], top: yd + H });
+    // harp: parallel cables, farther deck anchors attach higher up the legs
+    const N = 16;
+    for (let k = 1; k <= N; k++) {
+      const f = 0.3 + 0.68 * k / N;
+      const sd2 = pylonS + reachS * k / N;
+      for (const sd of [-1, 1]) {
+        const pa = at(sd * (hw + 2.0 + 0.6 * (1 - f)), -H * lean * f, yd + H * f);
+        rib(P(sd2, sd * (hw - 0.4), 0.3), pa, 0.13, 0, sd2, pylonS, 0);
+      }
+    }
+    // backstays to the near bank anchorage
+    for (const sd of [-1, 1]) {
+      const anc = P(Math.max(pylonS - H * lean * 1.4, 10), sd * (hw - 1), 0.3);
+      rib(anc, add(legTop(sd), [0, -2, 0]), 0.3, 0, pylonS, pylonS, 0);
+    }
+  } else if (B.type === 'cable') {
     const span = mainB - mainA;
     const Ht = Math.max(95, span * 0.28);
     const towerS = [mainA, mainB];
@@ -408,9 +459,11 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
           }
         }
       }
-      // flood light glow at the tower base
+      // pylon uplights at deck level and the top, lit band and light at the waterline
       lightsOut.push([c[0], yd + 3, c[2], 30, style.a[0] * 30, style.a[1] * 30, style.a[2] * 30]);
       lightsOut.push([c[0], top - 6, c[2], 26, style.b[0] * 22, style.b[1] * 22, style.b[2] * 22]);
+      if (base < 0) for (const sd of [-1, 1]) { const b0 = at(sd * (hw + 4), base); waterline(b0[0], b0[2], 2.4, ts); }
+      towers.push({ x: c[0], z: c[2], top });
     }
   } else if (B.type === 'suspension') {
     const span = mainB - mainA;
@@ -438,6 +491,8 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
       }
       lightsOut.push([c[0], yd + 3, c[2], 32, style.a[0] * 30, style.a[1] * 30, style.a[2] * 30]);
       lightsOut.push([c[0], top - 10, c[2], 30, style.b[0] * 26, style.b[1] * 26, style.b[2] * 26]);
+      if (base < 0) for (const sd of [-1, 1]) { const b0 = at(sd * (hw + 3), base); waterline(b0[0], b0[2], 2.4, ts); }
+      towers.push({ x: c[0], z: c[2], top });
     }
     // main cables (parabola between towers) and back stays to anchorages, hangers every 10 m
     const sag = deckY((mainA + mainB) / 2) + 3.5;
@@ -501,6 +556,7 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
       for (const s of [sa, sb]) {
         const g = groundAt(s);
         mesh.beam(at(s, g - 2), at(s, yS + 2), along, 4.5, 4, 0, bid, s);
+        if (g < 0) { const b0 = at(s, 0); waterline(b0[0], b0[2], 4.5, s); }
       }
       // hangers above the deck, struts below it
       for (let s = sa + 12; s < sb - 6; s += 12) {
@@ -527,7 +583,7 @@ function buildBridge(world, B, bid, mesh, ribs, lightsOut, colliders) {
   }
 
   return { name: B.name, type: B.type, ax: B.ax, az: B.az, bx: B.bx, bz: B.bz, width: B.width, deck: Hd,
-    points: pts, length: len, yAt: (t) => deckY(Math.min(Math.max(t, 0), 1) * len) };
+    points: pts, length: len, towers, yAt: (t) => deckY(Math.min(Math.max(t, 0), 1) * len) };
 }
 
 export default {
