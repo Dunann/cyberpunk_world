@@ -275,7 +275,7 @@ function pathSample(p, s, out) {
   const t = (s - p.s[lo]) / Math.max(p.s[hi] - p.s[lo], 1e-6);
   out[0] = p.x[lo] + (p.x[hi] - p.x[lo]) * t;
   out[1] = p.z[lo] + (p.z[hi] - p.z[lo]) * t;
-  const dx = p.x[hi] - p.x[lo], dz = p.z[hi] - p.z[lo], l = Math.hypot(dx, dz) || 1;
+  const dx = p.x[hi] - p.x[lo], dz = p.z[hi] - p.z[lo], l = Math.sqrt(dx * dx + dz * dz) || 1;
   out[2] = dx / l; out[3] = dz / l;
   out[4] = p.w[lo] + (p.w[hi] - p.w[lo]) * t;
   return out;
@@ -454,9 +454,9 @@ export default {
       const ch = Math.cos(cur[2]), sh = Math.sin(cur[2]);
       const idt = 1 / (dt > 0 ? dt : 1 / 60);
       const vx = (cur[0] - prv[0]) * idt, vz = (cur[1] - prv[1]) * idt;
-      const spd = Math.hypot(vx, vz);
+      const spd = Math.sqrt(vx * vx + vz * vz);
       // wakes: only boats near the camera are sent to the water shader
-      if (Math.hypot(cur[0] - cam.x, cur[1] - cam.z) < 1700) {
+      if ((cur[0] - cam.x) * (cur[0] - cam.x) + (cur[1] - cam.z) * (cur[1] - cam.z) < 1700 * 1700) {
         const w = 4 + (nw++) * 8;
         W[w] = cur[0]; W[w + 1] = cur[1]; W[w + 2] = ch; W[w + 3] = sh;
         W[w + 4] = Math.min(spd, 12); W[w + 5] = T.L * 0.5; W[w + 6] = T.B * 0.5; W[w + 7] = 1;

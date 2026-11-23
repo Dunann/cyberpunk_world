@@ -347,7 +347,7 @@ export class Transit {
     this._trackPos(T, uc + halfL * 0.7, a);
     this._trackPos(T, uc - halfL * 0.7, b);
     let fx = a[0] - b[0], fy = a[1] - b[1], fz = a[2] - b[2];
-    const l = Math.hypot(fx, fy, fz) || 1;
+    const l = Math.sqrt(fx * fx + fy * fy + fz * fz) || 1;
     const o = i * 16 + (prev ? 8 : 0);
     D[o] = (a[0] + b[0]) / 2; D[o + 1] = (a[1] + b[1]) / 2; D[o + 2] = (a[2] + b[2]) / 2;
     D[o + 4] = fx / l; D[o + 5] = fy / l; D[o + 6] = fz / l;

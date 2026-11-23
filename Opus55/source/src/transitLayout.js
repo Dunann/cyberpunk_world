@@ -218,7 +218,7 @@ export class Track {
     out.y = this.y[i] + (this.y[i + 1] - this.y[i]) * t;
     out.z = this.z[i] + (this.z[i + 1] - this.z[i]) * t;
     const tx = this.tx[i] + (this.tx[i + 1] - this.tx[i]) * t, tz = this.tz[i] + (this.tz[i + 1] - this.tz[i]) * t;
-    const l = Math.hypot(tx, tz) || 1;
+    const l = Math.sqrt(tx * tx + tz * tz) || 1;
     out.tx = tx / l; out.tz = tz / l;
     return out;
   }

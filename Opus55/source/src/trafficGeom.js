@@ -183,6 +183,6 @@ export function makeCamTest() {
     const sr = r / d, cr = Math.sqrt(Math.max(0, 1 - sr * sr));
     return c > s.cosA * cr - s.sinA * sr;
   };
-  s.dist = (x, y, z) => Math.hypot(x - s.x, y - s.y, z - s.z);
+  s.dist = (x, y, z) => { const dx = x - s.x, dy = y - s.y, dz = z - s.z; return Math.sqrt(dx * dx + dy * dy + dz * dz); };
   return s;
 }

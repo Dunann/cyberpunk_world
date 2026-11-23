@@ -347,8 +347,16 @@ class Cells {
   cull(test, maxDist, nearDist = 1e9, midDist = 1e9) {
     let d = 0, fd = 0;
     for (let i = 0; i < this.n; i++) {
-      const dist = test.dist(this.cx[i], this.cy[i], this.cz[i]) - this.cr[i];
-      if (dist > maxDist || !test.visible(this.cx[i], this.cy[i], this.cz[i], this.cr[i])) continue;
+      // inlined test.dist / test.visible (hot loop over all cells; avoids per-call number boxing)
+      const dx = this.cx[i] - test.x, dy = this.cy[i] - test.y, dz = this.cz[i] - test.z, r = this.cr[i];
+      const dc = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const dist = dc - r;
+      if (dist > maxDist) continue;
+      if (dc >= r) {
+        const c = (dx * test.fx + dy * test.fy + dz * test.fz) / dc;
+        const sr = r / dc, crr = Math.sqrt(Math.max(0, 1 - sr * sr));
+        if (!(c > test.cosA * crr - test.sinA * sr)) continue;
+      }
       if (dist < nearDist) {
         if (d > 0 && this.drawFirst[d - 1] + this.drawCount[d - 1] === this.first[i]) this.drawCount[d - 1] += this.count[i];
         else { this.drawFirst[d] = this.first[i]; this.drawCount[d] = this.count[i]; d++; }
