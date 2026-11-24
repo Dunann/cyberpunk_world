@@ -2,6 +2,7 @@
 id: I-021
 title: Grounded groves - trees that stand on the ground, crowns that differ, parks planted like parks, plazas built as places
 status: rejected
+score: 4.83 (review-1 5.00, review-2 4.67; mean; below 7)
 direction: Attack the weakness (judge- and critic-named vegetation and park defects that are still open)
 family: vegetation and park planting: tree meshes, LODs, grounding, planting layout, plaza geometry
 parent: I-016 (its parks and park trees)
