@@ -1,0 +1,18 @@
+[
+  {"id": "H1", "note": "Nan'an bank looking at the CBD and the pad (round 1)", "cam": [1650, 30, 430, -0.8762, 0.1536, 210]},
+  {"id": "H1b", "note": "as H1 during an ascent (round 1)", "cam": [1650, 30, 430, -0.8762, 0.1536, 163]},
+  {"id": "H2", "note": "Nan'an west (round 1)", "cam": [-150, 60, 1000, -0.7509, 0.3375, 60]},
+  {"id": "H3", "note": "west hills (round 1)", "cam": [-2700, 130, -100, -2.8480, 0.1174, 60]},
+  {"id": "H4", "note": "steppe quarter (round 1)", "cam": [1100, 95, -2500, -1.8158, 0.1425, 210]},
+  {"id": "Q1", "note": "near the Bund-CBD ship (round 1)", "cam": [2032.8, 285, -1617.4, -0.8972, 0.3028, 210]},
+  {"id": "Q2", "note": "pad at ignition (round 1)", "cam": [3474, 60, -2339, -1.5708, 0.2544, 151]},
+  {"id": "S1", "note": "above a ship, beam (round 1)", "cam": [2241.3, 340, -1097.0, -0.0588, -0.3111, 300]},
+  {"id": "R1", "note": "round 3 rule: ship 1 abeam (right side, same height) at 3.5 km (about 60 px)", "ship": 1, "dist": 3500, "bearing": 270, "dy": 0, "t": 210},
+  {"id": "R2", "note": "round 3 rule: ship 0 end-on from astern at 3 km", "ship": 0, "dist": 3000, "bearing": 180, "dy": -250, "t": 210},
+  {"id": "R3", "note": "round 3 rule: ship 2 at 45 deg at 6 km (about 30 px)", "ship": 2, "dist": 6000, "bearing": 45, "dy": -200, "t": 210},
+  {"id": "R4", "note": "round 3 rule: ship 1 at 70 deg at 700 m (ticker, mid-range)", "ship": 1, "dist": 700, "bearing": 70, "dy": -60, "t": 210},
+  {"id": "R5", "note": "round 3 rule: ship 0 at 110 deg at 1.2 km (ticker, fins)", "ship": 0, "dist": 1200, "bearing": 110, "dy": -120, "t": 230},
+  {"id": "T1", "note": "round 3 rule: from the city centre (300, 150, -300) at the pad, ascent (age 13 s)", "site": true, "from": [300, 150, -300], "t": 163},
+  {"id": "T2", "note": "round 3 rule: from the city centre at the pad, trail age 80 s", "site": true, "from": [300, 150, -300], "t": 230},
+  {"id": "T3", "note": "round 3 rule: from (2000, 400, 800) at the pad, trail age 140 s while the next rocket waits", "site": true, "from": [2000, 400, 800], "t": 290}
+]
