@@ -1,0 +1,14 @@
+[
+  {"id": "H1", "note": "I-009 round 1: Nan'an bank looking at the CBD", "cam": [1650, 30, 430, -0.8762, 0.1536, 210]},
+  {"id": "H2", "note": "I-009 round 1: Nan'an west", "cam": [-150, 60, 1000, -0.7509, 0.3375, 60]},
+  {"id": "H3", "note": "I-009 round 1: west hills", "cam": [-2700, 130, -100, -2.8480, 0.1174, 60]},
+  {"id": "H4", "note": "I-009 round 1: steppe quarter", "cam": [1100, 95, -2500, -1.8158, 0.1425, 210]},
+  {"id": "R1", "note": "I-009 round 3 rule: ship 1 abeam (right side, same height) at 3.5 km", "ship": 1, "dist": 3500, "bearing": 270, "dy": 0, "t": 210},
+  {"id": "R2", "note": "I-009 round 3 rule: ship 0 end-on from astern at 3 km", "ship": 0, "dist": 3000, "bearing": 180, "dy": -250, "t": 210},
+  {"id": "R3", "note": "I-009 round 3 rule: ship 2 at 45 deg at 6 km", "ship": 2, "dist": 6000, "bearing": 45, "dy": -200, "t": 210},
+  {"id": "R4", "note": "I-009 round 3 rule: ship 1 at 70 deg (left side) at 700 m (ticker, mid-range)", "ship": 1, "dist": 700, "bearing": 70, "dy": -60, "t": 210},
+  {"id": "R5", "note": "I-009 round 3 rule: ship 0 at 110 deg (left side) at 1.2 km (ticker, fins)", "ship": 0, "dist": 1200, "bearing": 110, "dy": -120, "t": 230},
+  {"id": "R6", "note": "I-020: ship 1 at 250 deg (right side, the mirror-image side) at 450 m (ticker)", "ship": 1, "dist": 450, "bearing": 250, "dy": -40, "t": 215},
+  {"id": "R7", "note": "I-020: ship 2 at 285 deg (right side) at 600 m (ticker)", "ship": 2, "dist": 600, "bearing": 285, "dy": -80, "t": 245},
+  {"id": "R8", "note": "I-020: ship 2 at 80 deg (left side) at 400 m (ticker)", "ship": 2, "dist": 400, "bearing": 80, "dy": -30, "t": 248}
+]

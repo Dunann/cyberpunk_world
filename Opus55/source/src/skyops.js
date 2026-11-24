@@ -1,16 +1,13 @@
-// Sky operations (idea I-009, prototype): three advertising airships holding racetracks over the rivers, and a
-// spaceport on the eastern mountains that launches a rocket every 150 s, leaving a smoke trail that drifts and
-// spreads in a sheared wind for 240 s and lighting the cloud deck as it passes through (via F.launch in sky.js).
+// Sky operations (idea I-020, the airships of I-009 without the launch): three advertising airships holding
+// racetracks over the rivers, with LED bands, lit outlines and searchlights.
 //
 // Rendering:
-//   In afterLighting, two passes of this module, timed on their own (skyops-gbuffer, skyops-fwd), before the water's
-//   SSR so the river reflects the ships, the plume and the trail:
-//   1. opaque pass: airships, rocket and spaceport shade themselves (moon, sky, city glow from below, local floods,
-//      emissive, fog) and write the lit colour, G-buffer normal, motion (with previous-frame transforms) and depth.
-//   2. transparent pass: smoke trails (premultiplied alpha) and the plume (additive).
+//   In afterLighting, before the water's SSR so the river reflects the ships, an opaque pass of this module (timed
+//   as skyops-gbuffer): the airships shade themselves (moon, sky, city glow from below, emissive, fog) and write the
+//   lit colour, G-buffer normal, motion (with previous-frame transforms) and depth.
 //   In the shared forward pass, after the water (the `skyopsLate` entry in main.js): searchlight beams and light
 //   sprites (additive). Drawn earlier, the water's opaque plane would paint over them wherever it lies behind them.
-// Lights: 3 searchlight hit points (at most one lit at a time) + 1 plume light (dynamic).
+// Lights: 3 searchlight hit points (at most one lit at a time).
 // Placement and timing rules live in skyopsLayout.js.
 
 import { VERTEX_LAYOUT, makeCamTest } from './trafficGeom.js';
@@ -19,16 +16,12 @@ import { HDR_FORMAT, DEPTH_FORMAT } from './renderer.js';
 import { shader } from './gpu.js';
 import { LANES, CIRCLES } from './air.js';
 import * as L from './skyopsLayout.js';
-import { airshipMesh, rocketMesh, spaceportMesh, shipOutlineLights } from './skyopsMesh.js';
-import { buildSkyAtlas } from './skyopsAtlas.js';
-import { SKY_OPAQUE_WGSL, SKY_SPRITE_WGSL, SKY_BEAM_WGSL, SKY_PLUME_WGSL, SKY_TRAIL_WGSL } from './skyopsWgsl.js';
+import { airshipMesh, shipOutlineLights } from './skyopsMesh.js';
+import { buildSkyAtlas, pageRow, PAGES_PER_SHIP } from './skyopsAtlas.js';
+import { SKY_OPAQUE_WGSL, SKY_SPRITE_WGSL, SKY_BEAM_WGSL } from './skyopsWgsl.js';
 
 const NSHIP = 3;
 const INST_F = 32;              // floats per instance (8 vec4)
-const I_ROCKET = 3, I_PORT = 4; // instance slots
-const NSPR = 144;
-const NTRAJ = 160;
-const NPUFF = 192, PUFF_DS = 9.25; // must match SKY_TRAIL_WGSL
 const SHOW_DIM_R = 1500;        // ships this close to the drone-show centre dim during the show
 const HUE = [0.52, 0.11, 0.36]; // LED palette offset per ship: cyan, amber, green (no magenta, judge fix 3)
 // Searchlights (judge fix 2): at most one beam in the sky. Ships take turns in BEAM_SLOT s slots (fading over
@@ -42,80 +35,45 @@ const CITY_R0 = 60, CITY_R1 = 200, CITY_W0 = 1, CITY_W1 = 3;
 const OUTLINE_COL = [[7, 6.4, 5.6], [7, 4.3, 1.8], [5.6, 6.2, 7.4]];
 const OUTLINE = shipOutlineLights();
 const NOUT = OUTLINE.length / 4;
-const ROCKET_TOP = 82;
+// LED band pages (I-020): each page shows for PAGE_PERIOD s, then the band switches to the next page. Each ship
+// starts at its own phase, so the three ships do not change pages together.
+const PAGE_PERIOD = 5;
 
 // ship-local light positions (x left, y up, z forward)
 const R = L.HULL_R;
 const NAV = [
   [R + 0.7, -1.0, 10], [-(R + 0.7), -1.0, 10], [0, 0, -91.8], [0, R + 1.4, 12], [0, -R - 6.2, 18], [0, -R - 5.3, 30.6], [0, R + 7.4, 50],
 ];
+const NSPR = NSHIP * (NAV.length + NOUT); // light sprites: nav and outline lights of each ship
 
 const skyops = {
   name: 'skyops',
 
   async init(ctx) {
-    const d = ctx.device, Rr = ctx.renderer, w = ctx.world;
+    const d = ctx.device, Rr = ctx.renderer;
     this.cam = makeCamTest();
-    // ---- spaceport (site by rule; never chosen from cameras)
-    this.site = L.chooseSite(w);
-    this.plan = L.deckPlan(w, this.site);
-    const sp = spaceportMesh(this.site, this.plan);
-    this.port = sp;
-    this.pad = sp.rocketBase;
-    const tr = L.trajectory(this.pad);
-    this.traj = tr;
-    this.sDeck = tr.sDeck;
-    const td = new Float32Array(NTRAJ * 4);
-    for (let i = 0; i < NTRAJ; i++) {
-      const s = this.sDeck * i / (NTRAJ - 1);
-      const f = Math.min(s / 5, tr.s.length - 1.001), k = Math.floor(f), u = f - k;
-      td[i * 4] = tr.x[k] + (tr.x[k + 1] - tr.x[k]) * u;
-      td[i * 4 + 1] = tr.y[k] + (tr.y[k + 1] - tr.y[k]) * u;
-      td[i * 4 + 2] = tr.z[k] + (tr.z[k + 1] - tr.z[k]) * u;
-      td[i * 4 + 3] = s;
-    }
-    this.trajBuf = d.createBuffer({ label: 'skyops-traj', size: td.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    d.queue.writeBuffer(this.trajBuf, 0, td);
-    const S = this.site, dy = this.plan.deckY;
-    w.addCollider(S.x, dy - 1.6, S.z, L.DECK_HALF, 1.6, L.DECK_HALF, 0);
-    w.addCollider(S.x, dy + 80, S.z - 17, 6, 80, 6, 0);
-    w.addCollider(S.x - 46, dy + 24, S.z + 40, 18, 24, 14, 0);
-    // half: half the deck's side; vegetation keeps trees off the deck footprint
-    w.shared.spaceport = { x: S.x, z: S.z, deckY: dy, half: L.DECK_HALF, period: L.LAUNCH_PERIOD };
-
     // ---- meshes
     const ship = airshipMesh();
     this.shipTris = ship.idx.length / 3;
     this.shipMesh = ship.upload(d, 'airship');
-    this.rocketMesh = rocketMesh().upload(d, 'rocket');
-    this.portMesh = sp.mb.upload(d, 'spaceport');
     this.atlas = buildSkyAtlas(d);
 
     // ---- buffers
-    this.inst = new Float32Array(5 * INST_F);
+    this.inst = new Float32Array(NSHIP * INST_F);
     this.instBuf = d.createBuffer({ label: 'skyops-inst', size: this.inst.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    this.U = new Float32Array(40);
-    this.UBuf = d.createBuffer({ label: 'skyops-u', size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.spr = new Float32Array(NSPR * 8);
     this.sprBuf = d.createBuffer({ label: 'skyops-spr', size: this.spr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.beam = new Float32Array(24);
     this.beamBuf = d.createBuffer({ label: 'skyops-beams', size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.LU = new Float32Array(36);
-    this.LUBuf = d.createBuffer({ label: 'skyops-launch', size: 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    // spaceport instance: identity transform
-    this._setXf(I_PORT, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, false);
-    this._setXf(I_PORT, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, true);
-    this.inst[I_PORT * INST_F + 24] = 2; this.inst[I_PORT * INST_F + 27] = -1e9;
 
     // ---- pipelines
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
     this.opLayout = d.createBindGroupLayout({ entries: [
       { binding: 0, visibility: VF, buffer: { type: 'read-only-storage' } },
-      { binding: 1, visibility: VF, buffer: { type: 'uniform' } },
-      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
     ] });
     this.opGroup = d.createBindGroup({ layout: this.opLayout, entries: [
-      { binding: 0, resource: { buffer: this.instBuf } }, { binding: 1, resource: { buffer: this.UBuf } }, { binding: 2, resource: this.atlas.view },
+      { binding: 0, resource: { buffer: this.instBuf } }, { binding: 1, resource: this.atlas.view },
     ] });
     const mod = shader(d, WGSL_LIB + WGSL_FRAME + SKY_OPAQUE_WGSL, 'skyops-opaque');
     this.opPipe = d.createRenderPipeline({
@@ -132,44 +90,19 @@ const skyops = {
     this.beamLayout = d.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: { type: 'uniform' } }] });
     this.beamGroup = d.createBindGroup({ layout: this.beamLayout, entries: [{ binding: 0, resource: { buffer: this.beamBuf } }] });
     this.beamPipe = Rr.forwardPipeline({ label: 'skyops-beams', code: SKY_BEAM_WGSL, groups: [this.beamLayout], blend: 'add' });
-    this.lauLayout = d.createBindGroupLayout({ entries: [
-      { binding: 0, visibility: VF, buffer: { type: 'uniform' } }, { binding: 1, visibility: VF, buffer: { type: 'read-only-storage' } }] });
-    this.lauGroup = d.createBindGroup({ layout: this.lauLayout, entries: [{ binding: 0, resource: { buffer: this.LUBuf } }, { binding: 1, resource: { buffer: this.trajBuf } }] });
-    this.plumePipe = Rr.forwardPipeline({ label: 'skyops-plume', code: SKY_PLUME_WGSL, groups: [this.lauLayout], blend: 'add' });
-    this.trailPipe = Rr.forwardPipeline({ label: 'skyops-trail', code: SKY_TRAIL_WGSL, groups: [this.lauLayout], blend: 'premul' });
 
     // ---- pass descriptors (views filled in resize)
     this.opAtt = [{ view: null, loadOp: 'load', storeOp: 'store' }, { view: null, loadOp: 'load', storeOp: 'store' }, { view: null, loadOp: 'load', storeOp: 'store' }];
     this.opDesc = { colorAttachments: this.opAtt, depthStencilAttachment: { view: null, depthLoadOp: 'load', depthStoreOp: 'store' }, timestampWrites: undefined };
-    this.fwAtt = [{ view: null, loadOp: 'load', storeOp: 'store' }, { view: null, loadOp: 'load', storeOp: 'store' }];
-    this.fwDesc = { colorAttachments: this.fwAtt, depthStencilAttachment: { view: null, depthReadOnly: true }, timestampWrites: undefined };
 
-    // ---- lights: 3 searchlight hit points, 1 plume light
-    this.lightBase = ctx.lights.reserve(NSHIP + 1);
-    // cloud-deck launch glow, read by the renderer into F.launch (x, z, radius, intensity)
-    this.glow = new Float32Array(4);
-    ctx.env.launch = this.glow;
-
-    // spaceport sprites, after the ships' nav and outline lights: red obstruction lights on the tower (the top one
-    // flashes, see update), flood glare, white work lights up the tower (judge fix 1: a visible source) and the
-    // glow of the floodlit pad in the haze above it, which shows over the ridges
-    let k0 = NSHIP * (NAV.length + NOUT);
-    this.sprPort = k0;
-    for (const p of sp.redLights) this._sprite(k0++, p[0], p[1], p[2], 0.9, 12, 0.5, 0.2, 1.3);
-    for (const p of sp.floods) this._sprite(k0++, p[0], p[1], p[2], 3.0, 24, 23, 21, 1.6);
-    for (const p of sp.towerLights) this._sprite(k0++, p[0], p[1], p[2], 1.4, 16, 15.5, 14.5, 1.5);
-    this.sprDome = k0;
-    this._sprite(k0++, S.x, this.plan.deckY + 60, S.z, 170, 0.012, 0.0103, 0.0079, 1);
-    if (k0 > NSPR) throw new Error('skyops: too many sprites');
+    // ---- lights: 3 searchlight hit points
+    this.lightBase = ctx.lights.reserve(NSHIP);
 
     this.ships = null;
     this._owner = 0; this._slotW = 0.5;
     this._lv = new Float64Array(8); this._vp = new Float64Array(3); this._cq = new Float64Array(2);
-    this.vis = new Uint8Array(5);
-    this.ages = new Float64Array(2);
-    this.launchIdx = new Int32Array(2);
+    this.vis = new Uint8Array(NSHIP);
     this._st = { u: 0.5 }; this._pt = { u: 0.5 };
-    this._r = { x: 0, y: 0, z: 0, ux: 0, uy: 1, uz: 0, lx: 1, ly: 0, lz: 0 };
     this._p3 = new Float64Array(3);
     // nav light colours: red port, green starboard, white tail, strobe A, strobe B, searchlight lamp, beacon
     this._navCol = new Float32Array([10, 0.5, 0.3, 0.5, 9, 2.2, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
@@ -180,8 +113,8 @@ const skyops = {
     }
   },
 
-  // Dev only (review-1 fix 2): projected size of each airship hull and of each live smoke trail in the current
-  // frame, counting only samples that are on screen and not hidden by nearer opaque geometry (depth read back).
+  // Dev only (review-1 fix 2): projected size of each airship hull in the current frame, counting only samples that
+  // are on screen and not hidden by nearer opaque geometry (depth read back).
   async _metrics(ctx) {
     const d = ctx.device, Rr = ctx.renderer;
     const W = Rr.width, H = Rr.height, M = Rr.viewProjNJ, t = ctx.time;
@@ -192,19 +125,6 @@ const skyops = {
       for (let k = 0; k <= 24; k++) {
         const z = -L.HULL_LEN / 2 + L.HULL_LEN * k / 24;
         pts.push([st.x + st.fx * z, st.y + st.fy * z, st.z + st.fz * z, L.HULL_R + 6, i]);
-      }
-    }
-    const n = L.liveLaunches(t, this.ages), dr = [0, 0];
-    for (let k = 0; k < n; k++) {
-      const A = this.ages[k], sEnd = Math.min(L.rocketS(A), this.sDeck);
-      for (let j = 0; j <= 40; j++) {
-        const s = sEnd * j / 40;
-        const f = Math.min(s / 5, this.traj.s.length - 1.001), q = Math.floor(f), u = f - q;
-        const x = this.traj.x[q] + (this.traj.x[q + 1] - this.traj.x[q]) * u, y = this.traj.y[q] + (this.traj.y[q + 1] - this.traj.y[q]) * u;
-        const age = A - L.emitAge(s);
-        if (age < 0 || L.smokeOpacity(age) < 0.2 || y > L.CLOUD_BASE) continue;
-        L.windDrift(y, age, ctx.env.windX, ctx.env.windZ, dr);
-        pts.push([x + dr[0], y, this.pad[2] + dr[1], L.smokeRadius(age), NSHIP + k]);
       }
     }
     const scr = pts.map((p) => {
@@ -244,7 +164,7 @@ const skyops = {
     rdB.unmap(); inB.destroy(); outB.destroy(); rdB.destroy();
     const near = ctx.cam.near || 0.25;
     const groups = [];
-    for (let g = 0; g < NSHIP + 2; g++) groups.push({ name: g < NSHIP ? this.ships[g].name : `trail${g - NSHIP}`, vis: [] });
+    for (let g = 0; g < NSHIP; g++) groups.push({ name: this.ships[g].name, vis: [] });
     pts.forEach((p, i) => {
       const s = scr[i];
       if (!s) return;
@@ -262,8 +182,6 @@ const skyops = {
     const v = ctx.views;
     this.opAtt[0].view = v.scene; this.opAtt[1].view = v.normal; this.opAtt[2].view = v.motion;
     this.opDesc.depthStencilAttachment.view = v.depth;
-    this.fwAtt[0].view = v.scene; this.fwAtt[1].view = v.motion;
-    this.fwDesc.depthStencilAttachment.view = v.depth;
   },
 
   // Airship altitudes need the air-traffic corridors, which traffic.init creates after this module's init.
@@ -300,13 +218,7 @@ const skyops = {
     ctx.world.shared.airships = this.ships.map((s) => ({ name: s.name, alt: s.alt, lap: s.track.length }));
   },
 
-  // instance transform: columns l, u, f with the position in w; prev = previous frame slot
-  _setXf(i, px, lx, ly, lz, py, ux, uy, uz, pz, fx, fy, fz, prev) {
-    const o = i * INST_F + (prev ? 12 : 0), D = this.inst;
-    D[o] = lx; D[o + 1] = ly; D[o + 2] = lz; D[o + 3] = px;
-    D[o + 4] = ux; D[o + 5] = uy; D[o + 6] = uz; D[o + 7] = py;
-    D[o + 8] = fx; D[o + 9] = fy; D[o + 10] = fz; D[o + 11] = pz;
-  },
+  // Instance transform (columns l, u, f with the position in w; prev = previous frame slot).
   // Per-frame writers take objects and integers only: update() is too large for V8 to inline helpers, and every
   // double passed to a call that is not inlined is boxed (a heap allocation).
   _shipXf(i, st, prev) {
@@ -315,44 +227,9 @@ const skyops = {
     D[o + 4] = st.ux; D[o + 5] = st.uy; D[o + 6] = st.uz; D[o + 7] = st.y;
     D[o + 8] = st.fx; D[o + 9] = st.fy; D[o + 10] = st.fz; D[o + 11] = st.z;
   },
-  _rocketXf(prev) {
-    const o = I_ROCKET * INST_F + (prev ? 12 : 0), D = this.inst, r = this._r;
-    D[o] = r.lx; D[o + 1] = r.ly; D[o + 2] = r.lz; D[o + 3] = r.x;
-    D[o + 4] = r.ux; D[o + 5] = r.uy; D[o + 6] = r.uz; D[o + 7] = r.y;
-    D[o + 8] = 0; D[o + 9] = 0; D[o + 10] = 1; D[o + 11] = r.z;
-  },
-
-  // rocket base position and axis at launch age a; returns false when hidden. Writes this._r.
-  // While it climbs through the cloud deck, the opaque shader clips it at 1800 m per pixel (nose first).
-  _rocket(a) {
-    const r = this._r;
-    const P = this.pad;
-    r.clip = -1.5e9;
-    if (a < L.IGNITION || a >= L.ROCKET_RETURN0) {
-      r.x = P[0]; r.y = P[1]; r.z = P[2];
-      r.ux = 0; r.uy = 1; r.uz = 0; r.lx = 1; r.ly = 0; r.lz = 0;
-      if (a >= L.ROCKET_RETURN0) {
-        // the next rocket rises out of the deck on its elevator
-        const k = Math.min((a - L.ROCKET_RETURN0) / (L.ROCKET_RETURN1 - L.ROCKET_RETURN0), 1);
-        r.y = P[1] - (ROCKET_TOP + 8) * (1 - k * k * (3 - 2 * k));
-        r.clip = this.plan.deckY + 0.05;
-      }
-      return true;
-    }
-    const s = L.rocketS(a);
-    if (s >= this.sDeck) return false;
-    const T = this.traj;
-    const f = Math.min(s / 5, T.s.length - 1.001), k = Math.floor(f), u = f - k;
-    r.x = T.x[k] + (T.x[k + 1] - T.x[k]) * u; r.y = T.y[k] + (T.y[k + 1] - T.y[k]) * u; r.z = T.z[k];
-    const g = s < L.GT_START ? 0 : L.GT_MAX * (1 - Math.exp(-(s - L.GT_START) / L.GT_SCALE));
-    r.ux = Math.sin(g); r.uy = Math.cos(g); r.uz = 0;
-    r.lx = Math.cos(g); r.ly = -Math.sin(g); r.lz = 0;
-    return r.y < L.CLOUD_BASE;
-  },
-
   // Lit city around the point (this._cq x, z): a smooth, distance-weighted sum of the building footprints whose
   // centres lie within CITY_R1 m (full weight inside CITY_R0). A footprint of 20 x 20 m counts 1 (at most 4).
-  // Buildings are colliders over 8 m tall and 6-80 m across both ways, which leaves out bridge decks, the spaceport,
+  // Buildings are colliders over 8 m tall and 6-80 m across both ways, which leaves out bridge decks,
   // embankment promenades and parapets, and transit pillars. Each collider is counted once, from the 64 m cell that
   // holds its centre. The sum is continuous as the point moves, so the beam never steps in brightness.
   _cityWeight(w) {
@@ -399,12 +276,6 @@ const skyops = {
   // scale a sprite's colour (the searchlight lamp follows its beam)
   _lampW(k, wgt) { const o = k * 8 + 4, S = this.spr; S[o] *= wgt; S[o + 1] *= wgt; S[o + 2] *= wgt; },
 
-  _sprite(k, x, y, z, r, cr, cg, cb, pxMin) {
-    const o = k * 8, S = this.spr;
-    S[o] = x; S[o + 1] = y; S[o + 2] = z; S[o + 3] = r;
-    S[o + 4] = cr; S[o + 5] = cg; S[o + 6] = cb; S[o + 7] = pxMin;
-  },
-
   // One airship per call (kept apart from update so V8 optimizes it): transforms, nav and outline lights,
   // searchlight. Takes the sprite slot to start at and returns the next one.
   _updateShip(ctx, i, sp) {
@@ -420,8 +291,11 @@ const skyops = {
     const dim = nearShow ? Math.min(showI * 20, 1) : 0;
     const led = 1 - 0.7 * dim, beamOn = 1 - dim;
     const o = i * INST_F + 24, D = this.inst;
-    D[o] = 0; D[o + 1] = i; D[o + 2] = led; D[o + 3] = -1e9;
-    D[o + 4] = this.atlas.extents[i]; D[o + 5] = t * 6.0; D[o + 6] = HUE[i]; D[o + 7] = 0;
+    // LED band page shown now
+    const pk = Math.floor((t + sh.seed * PAGE_PERIOD * PAGES_PER_SHIP) / PAGE_PERIOD);
+    const page = ((pk % PAGES_PER_SHIP) + PAGES_PER_SHIP) % PAGES_PER_SHIP;
+    D[o] = 0; D[o + 1] = i; D[o + 2] = led; D[o + 3] = 0;
+    D[o + 4] = pageRow(i, page); D[o + 5] = 0; D[o + 6] = HUE[i]; D[o + 7] = 0;
     const vp = this._vp; vp[0] = st.x; vp[1] = st.y; vp[2] = st.z;
     this.vis[i] = this._inView(110) ? 1 : 0;
 
@@ -490,91 +364,6 @@ const skyops = {
     return sp;
   },
 
-  // Launch cycle (kept apart from update so V8 optimizes it): rocket, plume, trails, cloud glow, pad lights.
-  _updateLaunch(ctx) {
-    const t = ctx.time, dt = ctx.dt, Li = ctx.lights, S = this.spr;
-    // ---- launch cycle
-    const P = L.LAUNCH_PERIOD;
-    const a = ((t % P) + P) % P;
-    const r = this._r;
-    const D = this.inst, ro = I_ROCKET * INST_F;
-    const shown = this._rocket(a);
-    let nx = r.x, ny = r.y, nz = r.z, ux = r.ux, uy = r.uy;
-    this._rocketXf(false);
-    D[ro + 24] = 1; D[ro + 25] = 0; D[ro + 26] = 1; D[ro + 27] = r.clip;
-    this._rocket(((a - dt) % P + P) % P); // previous frame's pose, for the motion vectors
-    this._rocketXf(true);
-    const vp = this._vp;
-    vp[0] = nx; vp[1] = ny + 40; vp[2] = nz;
-    this.vis[I_ROCKET] = shown && this._inView(60) ? 1 : 0;
-    vp[0] = this.site.x; vp[1] = this.plan.deckY + 40; vp[2] = this.site.z;
-    this.vis[I_PORT] = this._inView(190) ? 1 : 0;
-
-    // plume and ignition flash
-    let flame = 0, flen = 40, flash = 0;
-    if (a < L.IGNITION + 1.5) flash = Math.min(a / 0.4, 1) * (1 - Math.min(Math.max((a - 2.5) / 2, 0), 1)) * 1.5;
-    if (a < L.IGNITION) { flame = 0.55 * Math.min(a / 2.5, 1); flen = 25 + 15 * a; }
-    else if (shown) { const v = L.ACCEL * (a - L.IGNITION); flame = 1; flen = 60 + Math.min(v * 0.45, 100); }
-    const LU = this.LU;
-    LU[16] = nx; LU[17] = ny; LU[18] = nz; LU[19] = flame;
-    LU[20] = -ux; LU[21] = -uy; LU[22] = 0; LU[23] = flen;
-    LU[24] = nx - ux * 30; LU[25] = ny - uy * 30; LU[26] = nz; LU[27] = 3.0 * flame + 2.0 * flash;
-    const wl = Math.sqrt(ctx.env.windX * ctx.env.windX + ctx.env.windZ * ctx.env.windZ) || 1;
-    LU[28] = ctx.env.windX / wl; LU[29] = ctx.env.windZ / wl; LU[30] = this.sDeck; LU[31] = NTRAJ;
-    LU[32] = flash; LU[33] = 1; LU[34] = t; LU[35] = 0;
-    // trails: up to two launches with live smoke; puff spacing level from the smoke radius at mid-trail
-    const n = L.liveLaunches(t, this.ages, this.launchIdx);
-    for (let k = 0; k < 2; k++) {
-      const A = this.ages[k];
-      const live = k < n && A > L.IGNITION;
-      const sEnd = live ? Math.min(L.rocketS(A), this.sDeck) : 0;
-      LU[k * 4] = A; LU[k * 4 + 1] = sEnd; LU[k * 4 + 2] = L.trailSeed(this.launchIdx[k]); LU[k * 4 + 3] = live ? 1 : 0;
-      const rMid = L.smokeRadius(A - L.emitAge(sEnd * 0.5));
-      const lev = Math.log2(Math.max(1.2 * rMid / PUFF_DS, 1)); // target spacing 1.2 x the smoke radius (elongated puffs)
-      const kf = Math.floor(lev);
-      LU[8 + k * 4] = PUFF_DS * Math.pow(2, kf); LU[8 + k * 4 + 1] = lev - kf;
-    }
-    D[ro + 31] = flame;
-
-    // cloud-deck glow: brightest as the plume reaches the deck, then fading by 40 s
-    const G = this.glow;
-    let gi = 0.3 * flash;
-    if (flame > 0 && a >= L.IGNITION) { const h = (L.CLOUD_BASE - ny) / 400; gi += 2.5 / (1 + h * h); }
-    else if (a >= L.IGNITION) {
-      const aDeck = L.emitAge(this.sDeck);
-      gi += 2.5 * Math.exp(-(a - aDeck) / 6) * (1 - Math.min(Math.max((a - 30) / 10, 0), 1));
-    }
-    if (a >= L.IGNITION && !shown) { G[0] = this.traj.x[this.traj.x.length - 1]; G[1] = this.pad[2]; G[2] = 350; }
-    else { G[0] = nx; G[1] = nz; G[2] = 300 + 0.5 * Math.max(L.CLOUD_BASE - ny, 0); }
-    G[3] = a < 40 ? gi : 0;
-
-    // plume light on the pad and the terrain below the climbing rocket
-    const pi = flame * 1.0 + flash * 0.6;
-    const lv = this._lv;
-    if (pi > 0 && ny < this.plan.deckY + 400) { lv[0] = nx - ux * 25; lv[1] = ny - uy * 25; lv[2] = nz; lv[3] = 180; lv[4] = 9000 * pi; lv[5] = 5200 * pi; lv[6] = 2400 * pi; }
-    else { lv[0] = 0; lv[1] = -1e5; lv[2] = 0; lv[3] = 0; lv[4] = 0; lv[5] = 0; lv[6] = 0; }
-    lv[7] = 0;
-    this._putLight(Li, this.lightBase + NSHIP);
-
-    // local lights for the spaceport's own shading: 3 floods + the plume
-    const U = this.U;
-    for (let k = 0; k < 3; k++) {
-      const f = this.port.floods[k];
-      U[k * 8] = f[0]; U[k * 8 + 1] = f[1]; U[k * 8 + 2] = f[2]; U[k * 8 + 3] = 170;
-      U[k * 8 + 4] = 22000; U[k * 8 + 5] = 21000; U[k * 8 + 6] = 19500; U[k * 8 + 7] = 0;
-    }
-    U[24] = nx - ux * 20; U[25] = ny - uy * 20; U[26] = nz; U[27] = pi > 0 ? 700 : 0;
-    U[28] = 2.2e5 * pi; U[29] = 1.2e5 * pi; U[30] = 0.5e5 * pi; U[31] = 0;
-    U[32] = this.site.x; U[33] = this.site.z; U[34] = this.plan.deckY; U[35] = t;
-
-    // spaceport sprites (placed in init): the top obstruction light flashes; the pad glow follows the engines
-    const on = ((t * 0.75) % 1) < 0.5 ? 1 : 0.05, ro0 = this.sprPort * 8;
-    S[ro0 + 4] = 12 * on; S[ro0 + 5] = 0.5 * on; S[ro0 + 6] = 0.2 * on;
-    const dome = 0.012 + 0.2 * flame + 0.15 * flash, dm = this.sprDome * 8;
-    S[dm + 4] = dome; S[dm + 5] = dome * 0.86; S[dm + 6] = dome * 0.66;
-
-  },
-
   update(ctx) {
     if (!this.ships) this._planShips(ctx);
     const t = ctx.time;
@@ -589,41 +378,24 @@ const skyops = {
     this._slotW = fi * (1 - fo);
     for (let i = 0; i < NSHIP; i++) sp = this._updateShip(ctx, i, sp);
 
-    this._updateLaunch(ctx);
-
     const q = ctx.device.queue;
     q.writeBuffer(this.instBuf, 0, this.inst);
-    q.writeBuffer(this.UBuf, 0, this.U);
     q.writeBuffer(this.sprBuf, 0, this.spr);
     q.writeBuffer(this.beamBuf, 0, this.beam);
-    q.writeBuffer(this.LUBuf, 0, this.LU);
   },
 
   afterLighting(ctx, enc) {
     if (!this.ships || !this.opAtt[0].view) return;
     const Rr = ctx.renderer;
     const vis = this.vis;
-    if (vis[0] || vis[1] || vis[2] || vis[I_ROCKET] || vis[I_PORT]) {
-      this.opDesc.timestampWrites = ctx.prof.ts('skyops-gbuffer');
-      const p = enc.beginRenderPass(this.opDesc);
-      p.setBindGroup(0, Rr.frameGroup);
-      p.setBindGroup(1, this.opGroup);
-      p.setPipeline(this.opPipe);
-      p.setVertexBuffer(0, this.shipMesh.vb); p.setIndexBuffer(this.shipMesh.ib, 'uint32');
-      for (let i = 0; i < NSHIP; i++) if (vis[i]) p.drawIndexed(this.shipMesh.count, 1, 0, 0, i);
-      if (vis[I_ROCKET]) { p.setVertexBuffer(0, this.rocketMesh.vb); p.setIndexBuffer(this.rocketMesh.ib, 'uint32'); p.drawIndexed(this.rocketMesh.count, 1, 0, 0, I_ROCKET); }
-      if (vis[I_PORT]) { p.setVertexBuffer(0, this.portMesh.vb); p.setIndexBuffer(this.portMesh.ib, 'uint32'); p.drawIndexed(this.portMesh.count, 1, 0, 0, I_PORT); }
-      p.end();
-    }
-    this.fwDesc.timestampWrites = ctx.prof.ts('skyops-fwd');
-    const p = enc.beginRenderPass(this.fwDesc);
+    if (!(vis[0] || vis[1] || vis[2])) return;
+    this.opDesc.timestampWrites = ctx.prof.ts('skyops-gbuffer');
+    const p = enc.beginRenderPass(this.opDesc);
     p.setBindGroup(0, Rr.frameGroup);
-    p.setBindGroup(1, ctx.forwardGroup);
-    p.setBindGroup(2, this.lauGroup);
-    p.setPipeline(this.trailPipe);
-    p.draw(6, 2 * NPUFF);
-    p.setPipeline(this.plumePipe);
-    p.draw(6, 2);
+    p.setBindGroup(1, this.opGroup);
+    p.setPipeline(this.opPipe);
+    p.setVertexBuffer(0, this.shipMesh.vb); p.setIndexBuffer(this.shipMesh.ib, 'uint32');
+    for (let i = 0; i < NSHIP; i++) if (vis[i]) p.drawIndexed(this.shipMesh.count, 1, 0, 0, i);
     p.end();
   },
 
@@ -644,7 +416,7 @@ const skyops = {
 export default skyops;
 
 // Second entry in the module list, placed after `water`: its forward hook draws the beams and sprites after the
-// water's opaque plane. (skyops itself stays before `water`, so the water's SSR still sees the ships and the trail.)
+// water's opaque plane. (skyops itself stays before `water`, so the water's SSR still sees the ships.)
 export const skyopsLate = {
   name: 'skyops-late',
   forward(ctx, pass) { skyops.drawLate(ctx, pass); },

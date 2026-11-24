@@ -1,7 +1,9 @@
-// Unit checks for the sky operations layout rules (src/skyopsLayout.js). Runs in Node with a mock world:
+// Unit checks for the airship layout rules (src/skyopsLayout.js) and the LED band pages (src/skyopsAtlas.js).
+// Runs in Node with a mock world:
 //   node tools/skyops-test.mjs
 import assert from 'node:assert/strict';
 import * as L from '../src/skyopsLayout.js';
+import * as A from '../src/skyopsAtlas.js';
 import { LANDMARKS } from '../src/world.js';
 
 // mock world: rolling terrain, one tall collider next to the confluence, no other buildings
@@ -63,55 +65,35 @@ ok('ship state frame is orthonormal and banked at most 2 deg', () => {
     assert.ok(o.uy > Math.cos(3 * Math.PI / 180));
   }
 });
-ok('site inside the valid heightmap and the search sector', () => {
-  const s = L.chooseSite(world);
-  assert.ok(s);
-  const r = Math.hypot(s.x - L.CITY[0], s.z - L.CITY[1]);
-  assert.ok(r >= 4499 && r <= 5501, `r ${r}`);
-  assert.ok(Math.abs(s.x) <= 5900 && Math.abs(s.z) <= 5900);
+ok('landmarks exist', () => assert.ok(LANDMARKS.length > 0));
+ok('LED pages: two per ship, each in its own atlas row', () => {
+  const texts = A.pageTexts();
+  assert.equal(texts.length, A.SKY_WORDS.length * A.PAGES_PER_SHIP);
+  const rows = new Set();
+  for (let i = 0; i < A.SKY_WORDS.length; i++) for (let p = 0; p < A.PAGES_PER_SHIP; p++) rows.add(A.pageRow(i, p));
+  assert.equal(rows.size, texts.length);
+  for (const r of rows) assert.ok(r >= 0 && r < A.PAGE_ROWS);
+  assert.ok(texts[2].includes('天舟航天') && texts[3] === 'TIANZHOU ORBITAL');
 });
-ok('trajectory: >= 35 deg from vertical at the cloud deck, ends at the deck', () => {
-  const tr = L.trajectory([5000, 450, -1500]);
-  assert.ok(tr.angleAtDeck >= 35 * Math.PI / 180, `angle ${(tr.angleAtDeck * 180 / Math.PI).toFixed(1)}`);
-  assert.ok(Math.abs(tr.y[tr.y.length - 1] - L.CLOUD_BASE) < 6);
-  for (let i = 1; i < tr.x.length; i++) assert.ok(tr.x[i] >= tr.x[i - 1]);
+ok('LED pages fit inside the fully lit band (z -36..58)', () => {
+  // the widest page spans BAND_MID +- TEXT_HALF_M along the hull, and fitSize keeps every page that narrow
+  assert.ok(A.BAND_MID - A.TEXT_HALF_M >= -36 && A.BAND_MID + A.TEXT_HALF_M <= 58);
+  for (const w of [200, 880, 881, 1500, 3000]) assert.ok(w * A.fitSize(w) / 108 <= A.TEXT_MAX + 1e-9);
 });
-ok('smoke timing: opacity curve, radius cap, always a young trail', () => {
-  assert.equal(L.SMOKE_LIFE, 240); // locked by review-1 fix 3
-  assert.equal(L.smokeOpacity(0), 1);
-  assert.ok(Math.abs(L.smokeOpacity(L.SMOKE_LIFE / 2) - Math.pow(0.5, 0.7)) < 1e-9);
-  assert.equal(L.smokeOpacity(L.SMOKE_LIFE), 0);
-  assert.equal(L.smokeRadius(0), L.SMOKE_R0);
-  assert.equal(L.smokeRadius(1000), L.SMOKE_RMAX);
-  // a trail never dwarfs the city: at most 200 m wide
-  assert.ok(2 * L.SMOKE_RMAX <= 200);
-  const ages = new Float64Array(2);
-  for (let t = 0; t < 1000; t += 0.7) {
-    const k = L.liveLaunches(t, ages);
-    assert.ok(k >= 1 && k <= 2);
-    assert.ok(ages[0] < L.LAUNCH_PERIOD);
-  }
-});
-ok('launch index of each live trail is exact (no one-frame seed flips)', () => {
-  const ages = new Float64Array(2), idx = new Int32Array(2);
-  for (let f = 0; f < 3000 * 60; f++) {
-    const t = f / 60;
-    const k = L.liveLaunches(t, ages, idx);
-    for (let i = 0; i < k; i++) {
-      assert.ok(Math.abs(t - idx[i] * L.LAUNCH_PERIOD - ages[i]) < 1e-6, `t ${t} trail ${i}`);
-      assert.equal(idx[i], Math.round((t - ages[i]) / L.LAUNCH_PERIOD));
-      // the seed is a function of the launch alone: equal for every frame of that launch
-      assert.equal(L.trailSeed(idx[i]), L.trailSeed(Math.round((t - ages[i]) / L.LAUNCH_PERIOD)));
+ok('LED text reads left to right from both sides of the hull (mirror-safe)', () => {
+  const ships = L.planAirships(world, { lanes: [], circles: [], corridors: [] });
+  const o = {};
+  for (const sh of ships) for (let t = 0; t < 300; t += 37) {
+    L.shipState(sh, t, o);
+    for (const side of [1, -1]) {
+      // viewer abeam on this side (x > 0 is the port side), looking at the hull; screen right = view x up
+      const vx = -side * o.lx, vy = -side * o.ly, vz = -side * o.lz;
+      const rx = vy * 0 - vz * 1, ry = vz * 0 - vx * 0, rz = vx * 1 - vy * 0;
+      // direction of increasing band position s on the hull surface: d(world)/ds = f * dz/ds
+      const z0 = 10, dzds = (A.bandS(side, z0 + 1) - A.bandS(side, z0)) > 0 ? 1 : -1;
+      const along = (o.fx * rx + o.fy * ry + o.fz * rz) * dzds;
+      assert.ok(along > 0.9, `${sh.name} t=${t} side ${side}: text runs ${along.toFixed(2)} along screen right`);
     }
   }
 });
-ok('wind shear: speed doubles and the direction turns 75 deg between 300 and 1800 m', () => {
-  const a = [0, 0], b = [0, 0];
-  L.windDrift(300, 10, 0.6, 0.25, a); L.windDrift(1800, 10, 0.6, 0.25, b);
-  const la = Math.hypot(a[0], a[1]), lb = Math.hypot(b[0], b[1]);
-  assert.ok(Math.abs(lb / la - 2) < 1e-6);
-  const ang = Math.acos((a[0] * b[0] + a[1] * b[1]) / (la * lb)) * 180 / Math.PI;
-  assert.ok(Math.abs(ang - 75) < 1e-6);
-});
-ok('landmarks exist', () => assert.ok(LANDMARKS.length > 0));
 console.log(`${n} checks passed`);

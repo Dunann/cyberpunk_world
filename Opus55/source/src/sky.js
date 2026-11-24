@@ -32,13 +32,7 @@ fn skyCityGlow(xz: vec2f) -> vec3f {
   let warm = vec3f(1.0, 0.40, 0.48);
   let vio = vec3f(0.58, 0.20, 0.95);
   let col = mix(warm, vio, smoothstep(700.0, 4200.0, d));
-  var glow = (col * m + vec3f(0.85, 0.30, 0.95) * b * 0.6) * 0.095;
-  // rocket launch (skyops): the plume lights the deck from below around F.launch.xy (uniform branch, free when off)
-  if (F.launch.w > 0.0) {
-    let lq = (xz - F.launch.xy) / F.launch.z;
-    glow += vec3f(1.0, 0.56, 0.26) * F.launch.w * exp(-dot(lq, lq));
-  }
-  return glow;
+  return (col * m + vec3f(0.85, 0.30, 0.95) * b * 0.6) * 0.095;
 }
 
 // 0 in the city, 1 out in the gardens / mountains. Computed on the CPU from the camera position and the

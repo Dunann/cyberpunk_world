@@ -1,7 +1,7 @@
-// Sky operations (I-009) checks in the real app (needs out/dev.html):
-//   node tools/skyops-check.mjs info                     placement chosen by the rules (site, deck, ship altitudes)
+// Sky operations (I-009 airships, I-020) checks in the real app (needs out/dev.html):
+//   node tools/skyops-check.mjs info                     placement chosen by the rules (ship altitudes, laps)
 //   node tools/skyops-check.mjs targets --poses-file ../eval/poses-v1.json
-//        review-1 fix 2: projected hull length / trail height (px) at each pose, occlusion tested with the depth buffer
+//        review-1 fix 2: projected hull length (px) at each pose, occlusion tested with the depth buffer
 //   node tools/skyops-check.mjs burst --cam x,y,z,yaw,pitch,t --name foo [--out dir]
 //        4 consecutive frames with the scene animating (temporal check)
 //   node tools/skyops-check.mjs beams                   searchlight rule over 600 s: share of time each ship's beam
@@ -22,8 +22,6 @@ if (mode === 'info') {
   const info = await page.evaluate(() => {
     const s = window.__skyops;
     return {
-      site: s.site, deckY: s.plan.deckY, piles: s.plan.piles.map((p) => +(s.plan.deckY - p.ground).toFixed(1)),
-      trajectory: { sDeck: s.sDeck, angleAtDeckDeg: s.traj.angleAtDeck * 180 / Math.PI, downrangeAtDeck: s.traj.x[s.traj.x.length - 1] - s.pad[0] },
       shipTriangles: s.shipTris,
       ships: s.ships.map((q) => ({ name: q.name, alt: q.alt, towerTop: +q.top.toFixed(1), bands: q.bands, lap: +q.track.length.toFixed(0), phase: +q.phase.toFixed(1), dir: q.dir })),
     };
@@ -42,13 +40,10 @@ if (mode === 'info') {
     }, p);
     await page.evaluate(() => window.__frames(12));
     const m = await page.evaluate(() => window.__skyopsMetrics());
-    const ships = m.filter((g) => !g.name.startsWith('trail'));
-    const trails = m.filter((g) => g.name.startsWith('trail'));
-    const bestShip = ships.reduce((a, b) => (b.lengthPx > a.lengthPx ? b : a));
-    const bestTrail = trails.length ? trails.reduce((a, b) => (b.heightPx > a.heightPx ? b : a)) : { name: '-', heightPx: 0 };
-    const target = bestShip.lengthPx >= 150 || bestTrail.heightPx >= 250;
-    rows.push({ id: p.id, t: p.t, ship: `${bestShip.name} ${bestShip.lengthPx}`, trail: `${bestTrail.name} ${bestTrail.heightPx}`, target, all: m });
-    console.log(`${p.id}  t=${p.t}  hull ${String(bestShip.lengthPx).padStart(5)} px (${bestShip.name})  trail ${String(bestTrail.heightPx).padStart(5)} px  -> ${target ? 'TARGET' : '-'}`);
+    const bestShip = m.reduce((a, b) => (b.lengthPx > a.lengthPx ? b : a));
+    const target = bestShip.lengthPx >= 150;
+    rows.push({ id: p.id, t: p.t, ship: `${bestShip.name} ${bestShip.lengthPx}`, target, all: m });
+    console.log(`${p.id}  t=${p.t}  hull ${String(bestShip.lengthPx).padStart(5)} px (${bestShip.name})  -> ${target ? 'TARGET' : '-'}`);
   }
   if (opt('json', '')) fs.writeFileSync(path.resolve(root, opt('json', '')), JSON.stringify(rows, null, 2));
 } else if (mode === 'stats') {
@@ -61,8 +56,7 @@ if (mode === 'info') {
     await page.evaluate(() => { window.__gpuStats(); window.__ctx.frozen = false; });
     await page.evaluate(() => window.__frames(150));
     const s = await page.evaluate(() => window.__gpuStats());
-    const own = (s['skyops-gbuffer'] || 0) + (s['skyops-fwd'] || 0);
-    console.log(`${cs}\n  total ${s.total.toFixed(2)} ms   skyops-gbuffer ${s['skyops-gbuffer'] ?? '-'}  skyops-fwd ${s['skyops-fwd'] ?? '-'}  (own ${own.toFixed(3)} ms)`);
+    console.log(`${cs}\n  total ${s.total.toFixed(2)} ms   skyops-gbuffer ${s['skyops-gbuffer'] ?? '-'}`);
   }
 } else if (mode === 'beams') {
   const r = await page.evaluate(async () => {

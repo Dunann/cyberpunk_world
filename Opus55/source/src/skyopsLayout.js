@@ -1,4 +1,5 @@
-// Sky operations (I-009): placement rules and timing for the advertising airships and the mountain spaceport.
+// Sky operations (I-009 airships, kept in I-020 without the launch): placement rules and timing for the three
+// advertising airships.
 // Pure CPU code (no GPU), so tools/skyops-test.mjs can check it in Node.
 //
 // Every placement is derived from the world layout (RIVERS, BRIDGES, DISTRICTS, LANDMARKS, colliders, terrain and
@@ -6,7 +7,7 @@
 // before the first capture and must not be changed after looking at captures (review-1 fix 3).
 
 import { RIVERS, BRIDGES, DISTRICTS, DT, LANDMARKS } from './world.js';
-import { catmullRom, rng, smoothstep } from './math.js';
+import { catmullRom, rng } from './math.js';
 
 // ---------------------------------------------------------------- locked constants
 
@@ -24,31 +25,6 @@ export const ALT_MIN = 280;
 export const TOWER_CLEAR_V = 70, TOWER_CLEAR_H = 250;
 export const TRAFFIC_BAND = 50;         // +-40 m around a traffic altitude plus the +-10 m taxi offsets
 export const TRAFFIC_NEAR = 300;        // m: traffic paths closer than this to a track constrain its altitude
-
-export const LAUNCH_PERIOD = 150;       // s; launch k ignites at t = k * 150
-export const IGNITION = 3;              // s from ignition to lift-off
-export const ACCEL = 12;                // m/s^2 along the path: s = 0.5 * a * tau^2
-// Round 3 (fix 1 of the judge findings): the smoke follows the size of a real launch trail. Radius 8 m behind the
-// nozzle, growing 0.55 m/s (turbulent spreading) to at most 100 m, instead of 15 m + 2 m/s up to 250 m, which made a
-// 500 m wide column. The life stays at 240 s, locked by review-1 fix 3.
-export const SMOKE_LIFE = 240;          // s; opacity (1 - age / 240)^0.7
-export const SMOKE_POW = 0.7;
-export const SMOKE_R0 = 8, SMOKE_GROW = 0.55, SMOKE_RMAX = 100; // radius = 8 m + 0.55 m/s * age, capped
-export const GROUND_CLOUD_R = 35;      // m added at the pad (exhaust deflected along the deck), fading over 110 m
-export const CLOUD_BASE = 1800;         // the sky's cloud deck: nothing is drawn above it
-export const CLOUD_FADE0 = 1650;
-export const GT_START = 120;            // m of vertical climb before the pitch-over
-export const GT_MAX = 0.9;              // rad: asymptotic flight-path angle from vertical
-export const GT_SCALE = 900;            // m
-export const WIND_LOW = 3.0;            // m/s drift at and below 300 m
-export const WIND_SHEAR_Y0 = 300, WIND_SHEAR_Y1 = 1800;
-export const WIND_TURN = 75 * Math.PI / 180; // drift direction turns 75 deg between 300 m and 1800 m, speed doubles
-export const ROCKET_RETURN0 = 70, ROCKET_RETURN1 = 100; // s after ignition: the next rocket rises out of the deck
-export const SITE_R0 = 4500, SITE_R1 = 5500, SITE_BEARING_SPAN = 20 * Math.PI / 180, SITE_LIMIT = 5900;
-export const SITE_PATCH = 300;          // m: patch whose height range is minimised
-export const DECK_HALF = 80;            // m: the launch deck is 160 m square
-export const DECK_CLEAR = 5;            // m above the highest ground under the deck
-export const CITY = [300, -300];
 
 // ---------------------------------------------------------------- polyline helpers
 
@@ -326,105 +302,3 @@ export function shipState(ship, t, out) {
   out.ux = u0x * cb - lx * sb; out.uy = u0y * cb; out.uz = u0z * cb - lz * sb;
   return out;
 }
-
-// ---------------------------------------------------------------- spaceport
-
-// Site rule (review-1 fix 9): search 4.5-5.5 km from the city centre on the bearing from the city centre to the CBD
-// district centre +-20 deg, staying inside |x|, |z| <= 5900 where the heightmap is valid; pick the 300 m patch with
-// the smallest height range. The bearing comes from DISTRICTS and is never adjusted.
-export function chooseSite(world) {
-  const cbd = DISTRICTS.find((d) => d.type === DT.CBD);
-  const b0 = Math.atan2(cbd.cz - CITY[1], cbd.cx - CITY[0]);
-  const half = SITE_PATCH / 2;
-  let best = null;
-  for (let r = SITE_R0; r <= SITE_R1 + 1e-6; r += 50) {
-    for (let k = -10; k <= 10; k++) {
-      const b = b0 + SITE_BEARING_SPAN * k / 10;
-      const x = CITY[0] + Math.cos(b) * r, z = CITY[1] + Math.sin(b) * r;
-      if (Math.abs(x) + half > SITE_LIMIT || Math.abs(z) + half > SITE_LIMIT) continue;
-      let lo = 1e9, hi = -1e9;
-      for (let i = 0; i <= 6; i++) for (let j = 0; j <= 6; j++) {
-        const h = world.heightAt(x - half + SITE_PATCH * i / 6, z - half + SITE_PATCH * j / 6);
-        lo = Math.min(lo, h); hi = Math.max(hi, h);
-      }
-      if (lo < 5) continue; // not on water
-      if (!best || hi - lo < best.range) best = { x, z, range: hi - lo, lo, hi, bearing: b, r };
-    }
-  }
-  return best;
-}
-
-// Deck level and the pile grid (every corner and edge midpoint included) for a site.
-export function deckPlan(world, site) {
-  let hi = -1e9;
-  for (let i = 0; i <= 8; i++) for (let j = 0; j <= 8; j++) {
-    hi = Math.max(hi, world.heightAt(site.x - DECK_HALF + DECK_HALF * 2 * i / 8, site.z - DECK_HALF + DECK_HALF * 2 * j / 8));
-  }
-  const deckY = hi + DECK_CLEAR;
-  const piles = [];
-  for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) {
-    const px = site.x - DECK_HALF + 2 * DECK_HALF * i / 4 * 0.97 + DECK_HALF * 0.03;
-    const pz = site.z - DECK_HALF + 2 * DECK_HALF * j / 4 * 0.97 + DECK_HALF * 0.03;
-    // the pile footing is the lowest ground under its 3 m section, so it never floats
-    let g = 1e9;
-    for (const ox of [-1.5, 1.5]) for (const oz of [-1.5, 1.5]) g = Math.min(g, world.heightAt(px + ox, pz + oz));
-    piles.push({ x: px, z: pz, ground: g });
-  }
-  return { deckY, piles };
-}
-
-// Gravity-turn trajectory from the pad: arc length s along the path, flight-path angle from vertical
-// GT_MAX * (1 - exp(-(s - GT_START) / GT_SCALE)), downrange due east (away from the city). Integrated every 5 m until
-// the path reaches the cloud deck. Returns {s: Float32Array, x, y, z, sDeck, angleAtDeck}.
-export function trajectory(pad) {
-  const xs = [pad[0]], ys = [pad[1]], zs = [pad[2]], ss = [0];
-  let x = pad[0], y = pad[1], s = 0;
-  const ds = 5;
-  while (y < CLOUD_BASE && s < 8000) {
-    const g = s < GT_START ? 0 : GT_MAX * (1 - Math.exp(-(s - GT_START) / GT_SCALE));
-    x += Math.sin(g) * ds; y += Math.cos(g) * ds; s += ds;
-    xs.push(x); ys.push(y); zs.push(pad[2]); ss.push(s);
-  }
-  // exact deck crossing
-  const n = ys.length;
-  const f = (CLOUD_BASE - ys[n - 2]) / (ys[n - 1] - ys[n - 2]);
-  const sDeck = ss[n - 2] + ds * f;
-  const g = GT_MAX * (1 - Math.exp(-(sDeck - GT_START) / GT_SCALE));
-  return { s: Float32Array.from(ss), x: Float32Array.from(xs), y: Float32Array.from(ys), z: Float32Array.from(zs), sDeck, angleAtDeck: g };
-}
-
-// Arc length of the rocket (nozzle) at launch age a (s since ignition). 0 before lift-off.
-export function rocketS(a) { const tau = Math.max(a - IGNITION, 0); return 0.5 * ACCEL * tau * tau; }
-// Launch age at which the nozzle passed arc length s.
-export function emitAge(s) { return IGNITION + Math.sqrt(Math.max(s, 0) * 2 / ACCEL); }
-// Smoke opacity at point age (s since that smoke was emitted).
-export function smokeOpacity(age) { return age < 0 || age >= SMOKE_LIFE ? 0 : Math.pow(1 - age / SMOKE_LIFE, SMOKE_POW); }
-export function smokeRadius(age) { return Math.min(SMOKE_R0 + SMOKE_GROW * Math.max(age, 0), SMOKE_RMAX); }
-// Horizontal wind drift (m) of smoke at altitude y after `age` seconds: speed doubles and the direction turns by
-// WIND_TURN between 300 m and 1800 m (wind shear), so the column develops a dogleg seen from any bearing.
-export function windDrift(y, age, windX, windZ, out) {
-  const k = smoothstep(WIND_SHEAR_Y0, WIND_SHEAR_Y1, y);
-  const L = Math.hypot(windX, windZ) || 1;
-  const a = WIND_TURN * k, c = Math.cos(a), s = Math.sin(a);
-  const dx = windX / L, dz = windZ / L;
-  const v = WIND_LOW * (1 + k) * age;
-  out[0] = (dx * c - dz * s) * v; out[1] = (dx * s + dz * c) * v;
-  return out;
-}
-// Launch ages (s since ignition) whose smoke is still alive at time t, newest first, written into out
-// (Float64Array(2)); returns the count. Smoke emitted at lift-off lives SMOKE_LIFE s and the last smoke is emitted
-// at the cloud deck (< 25 s after ignition), so with a 150 s period at most two trails exist at once.
-// If `idx` is given, the launch index j (ignition at j * LAUNCH_PERIOD) of each is written into it. Callers use it
-// for the trail's noise seed: recomputing j from t - age can round to j - 1 and make the trail pop for a frame.
-export const LAUNCH_ALIVE = SMOKE_LIFE + 25;
-export function liveLaunches(t, out, idx) {
-  const k = Math.floor(t / LAUNCH_PERIOD);
-  let n = 0;
-  for (let j = k; j >= k - 2 && n < 2; j--) {
-    const age = t - j * LAUNCH_PERIOD;
-    if (age >= 0 && age < LAUNCH_ALIVE) { if (idx) idx[n] = j; out[n++] = age; }
-  }
-  return n;
-}
-// Noise seed of launch j's smoke trail, in [0.1, 1.1).
-export function trailSeed(j) { return ((j * 0.37) % 1 + 1) % 1 + 0.1; }
