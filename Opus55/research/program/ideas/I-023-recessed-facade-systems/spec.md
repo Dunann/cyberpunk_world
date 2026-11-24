@@ -76,7 +76,7 @@ About 1.5 days. Run all GPU jobs under the shared lock.
    - The eligible share per pose, with the debug paint. Freeze the target list.
    - Four held-out cameras, computed from part data by a script before any render is viewed, and written to `heldout-cameras.json`:
      - **H1:** the residential part with `FLAG.BALC`, box plan and median height among those of at least 60 m in Nan'an Old Town (ties: lowest part index). Camera 45 m from the centre of its widest face, 50° off the face normal, 25 m above the part's base, looking at the face centre at 45% of its height.
-     - **H2:** the same rule for an office part in West Hills.
+     - **H2:** the same rule for an office part in West Hills (no balcony flag needed).
      - **H3:** the glass podium part (height 30 m or less) with the median face length among those of at least 40 m in the CBD. Camera 1.7 m above the ground, 18 m from the face, 70° off the normal, looking along the face.
      - **H4:** 300 m above a point 500 m south of the West Hills centre, looking at the centre, pitch -35°.
      - If a camera is inside a collider or below the terrain, mirror the angle; if still blocked, take the next part in the sorted list.
@@ -154,7 +154,7 @@ Blend from the per-pixel result to these means with the existing `det` (1 at cel
 
 Rules that keep things attached and unchanged where they must be:
 - **Flat (depth 0):** every part with `FLAG.LED` or `FLAG.TEXT` (the light show and the I-014 tower text keep their flat screen), materials 16 and 18 (truss and crystal patterns), and every material not in the table. For these the function returns exactly today's coverage.
-- **AC units stay attached.** `acUnits()` mounts units 0.32 m in front of the face, in the band from 0.1 to about 0.28 of the floor height, on box-plan residential parts only. On those parts the wall below the sill (below 0.3) always stays flush. Systems that recess the full bay height are limited to parts that never get AC units (office, glass, non-box residential).
+- **AC units stay attached.** `acUnits()` mounts each unit on the face (centre 0.32 m out, 0.6 m deep), in the band from 0.1 to about 0.28 of the floor height. It is called for box-plan residential parts and for shophouse blocks (shop material, untouched here). On box-plan residential parts the wall below the sill (below 0.3) always stays flush, and loggias open only above the flush parapet (0.33). Systems that recess the full bay height are limited to parts that never get AC units (office, glass, non-box residential).
 - **Corner piers are solid.** No opening within half a recess depth of either end of a face, so a ray near a corner never shows a recess that would lie outside the building.
 - **Glass depths are small on purpose.** At 0.15 m and a 1.5 m pane, a wall seen 75° off its normal still shows about 60% of its glass, so B2's lit office interiors stay visible. (The I-012 review showed that 0.35 m opaque fins would hide them.)
 - **The tower text overlay** draws with an equal-depth test on the same faces. Depth is not changed, so it keeps working.

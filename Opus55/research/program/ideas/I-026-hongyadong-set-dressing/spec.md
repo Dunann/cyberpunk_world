@@ -1,7 +1,8 @@
 ---
 id: I-026
 title: Hongyadong set dressing - a set decorator's pass of hangings, traditional shop signs and gallery extras on the built stack
-status: proposed
+status: rejected
+score: 4.67 (review-1 4.67, review-2 4.67; mean; below 7)
 direction: Borrow from another field (film set decoration: dressing a built set in layers by a dressing plan)
 family: set dressing on an existing landmark: layered hangings, typed signage and extras, density tied to occupancy
 parent: I-015 (builds on its stack; does not change its structure)
