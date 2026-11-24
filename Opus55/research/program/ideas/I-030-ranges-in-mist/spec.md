@@ -1,7 +1,8 @@
 ---
 id: I-030
 title: Ranges in mist - the mountains are already tall; make them visible (sea of mist, layered far haze, moonlit crests, lit ridgelines)
-status: in-review
+status: rejected
+score: 5.17 (review-1 5.00, review-2 5.33; mean; below 7)
 direction: The hard layout problem - hill city and riverbanks (mountains that read in mist with lit ridgelines)
 family: far-field atmosphere and mountain lighting (no terrain change)
 parent: none
