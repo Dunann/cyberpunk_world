@@ -1,7 +1,8 @@
 ---
 id: I-033
 title: Steppe threads - one cultural field puts Mongolian signs, ger and dome rooflines and vertical-script tower ribbons across the whole city
-status: in-review
+status: rejected
+score: 5.83 (review-1 5.67, review-2 6.00; mean; below 7; revision queued: concentrate into 2-3 station neighbourhoods)
 direction: Combine / build on the best - the brief axis (critic 2 change 7, critic 1 change 10)
 family: culture layer: rule-placed Mongolian / Central Asian signs, crowns and tower text driven by one influence field
 parent: I-014 (tower phrase show), reuses the Steppe Quarter vocabulary (genSteppe, gerHut, ribbed domes, felt shader)
