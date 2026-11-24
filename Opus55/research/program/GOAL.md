@@ -10,6 +10,7 @@ Neon Confluence (`Opus55/`) is a real-time WebGPU cyberpunk river city that runs
 4. **Signage diversity.** Add some very large, striking signs, and skyscrapers with text light shows.
 5. **More technology.** Monorails, other aircraft and spacecraft.
 6. **Detail everywhere.** It should look sleek and be exciting to explore. Render distance can change if necessary.
+7. **Crazy 3D feeling (added by the user on 2026-11-24).** Elevated walkways between buildings and anything else that gives the layered, vertical, multi-level Chongqing feeling: streets stacked above streets, footbridges and sky corridors between towers, stairs and lifts between levels.
 
 ## Focus zones, in priority order
 - **Zone A, the Chongqing core:** the Yuzhong peninsula tip and the confluence, the Hongyadong cliff, the hillside streets and the monorail.
