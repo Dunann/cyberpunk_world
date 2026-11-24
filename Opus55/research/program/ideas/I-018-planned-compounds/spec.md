@@ -1,7 +1,7 @@
 ---
 id: I-018
 title: Planned compounds - towers designed per block as Chinese residential compounds, not per lot as random boxes
-status: accepted
+status: implementing
 score: 5.67 (review-1 only; prototype track, user priority 1; build with review-1 fixes 1-12; queued until I-014 and I-016 are decided)
 direction: Break an assumption (user priority 1: buildings too boxy and pixelated, few great places)
 family: building generation: block-level compound generator (urban-planning rules) replacing per-lot tower boxes
