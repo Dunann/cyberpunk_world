@@ -12,7 +12,7 @@ date: 2026-11-24
 # I-001: Skeleton field
 
 ## Idea
-Today a district is an ellipse, and the ellipse decides three things at once: where the ground is flattened, where buildings may stand, and which street grid and style apply. Buildings therefore stop at each ellipse, and everything between the ellipses is forest. A top-down map of the current world (made for this spec, see "Evidence") shows eight separate islands. The gaps are large: 220–420 m between Nan'an Old Town and the Great River, a 1 km empty plain between the confluence and Jiangbei, about 140 m between the CBD and its own river bank, and every bridge except one lands outside any street grid.
+Today a district is an ellipse, and the ellipse decides three things at once: where the ground is flattened, where buildings may stand, and which street grid and style apply. Buildings therefore stop at each ellipse, and everything between the ellipses is forest. A top-down map of the current world (made for this spec, see "Evidence") shows eight separate islands. The gaps are large: 220–420 m between Nan'an Old Town and the Great River, a 1 km empty plain between the confluence and Jiangbei, about 140 m between the CBD and its own river bank, and eight of the ten bridge ends are 130–640 m from the nearest block.
 
 Split the three roles of the ellipse:
 1. **Flattening** keeps the old ellipse weights, so the ground does not move and the existing districts stay as they are.
@@ -58,15 +58,16 @@ All layout data stays in `world.js`.
 1. **The field (CPU and GPU, same formula, no noise in the new terms).**
    ```
    w_i(p)  = smoothstep(1.0, 0.72, e_i(p))                       // unchanged ellipse weight
-   core(p) = 1 - smoothstep(0.9, 1.05, |(p - (900, -450)) / (2500, 1650)|)
-   band(p) = max(1 - smoothstep(200, 300, wd(p)),                // river bands
-                 1 - smoothstep(120, 220, sk(p)))                // bridge and rail bands
-             * core(p) * (1 - w_garden(p))
+   coreR(p) = 1 - smoothstep(0.9, 1.05, |(p - (900, -500)) / (2700, 2000)|)   // river bands
+   coreS(p) = 1 - smoothstep(0.9, 1.05, |(p - (300, -400)) / (3500, 2300)|)   // bridge and rail bands (reaches West Hills)
+   band(p) = max(coreR(p) * (1 - smoothstep(200, 300, wd(p))),
+                 coreS(p) * (1 - smoothstep(120, 220, sk(p))))
+             * (1 - w_garden(p))
    weight(p) = max(max_i w_i, 0.75 * band)
    owner(p)  = argmax_i w_i  if max_i w_i > 0,  else  argmin_i e_i over districts with block > 0
    ```
    - `wd` = signed water distance. `sk` = distance to the skeleton: each `BRIDGES` segment extended 150 m past both ends, and the dense `ROUTES` polylines.
-   - `URBAN_FIELD = { core, bands }` holds the numbers above as layout data next to `DISTRICTS`.
+   - `URBAN_FIELD = { coreR, coreS, bands }` holds the numbers above as layout data next to `DISTRICTS`. The area figures in this spec were computed with these values on a 10 m grid.
    - CPU: `World.districtAt` returns `{ index: owner, weight }` from this field. `districtWeight(i, x, z)` keeps its meaning (audio, sky glow and the garden test use it).
    - GPU: in `GEN_INFO`, add the skeleton segments as a second storage buffer and write `owner` and `weight` to `info.y` and `info.z`. `GEN_HEIGHT` keeps calling the old `districtW` for flattening and `hillW`, so **the heightmap is unchanged**.
 2. **Loop bounds.** Four loops assume the ellipse radius: `_buildLots`, `trafficCars.js` (`nI`), `terrainLamps.js` and `vegetation.js` street trees (`ext`, and the `(lx/rx)² + (lz/rz)² > 1.05` test). Add `World.gridExtent(di)` (the ellipse radius plus the reach of the bands, about +700 m) and use it in all four. Their existing validity tests (`districtAt`, `lampValid`) do the real filtering.
@@ -103,7 +104,7 @@ All layout data stays in `world.js`.
   | G3 | 10.47 | 3.30 | 3.56 | 8.61 (gbuffer 2.63, lighting 2.10) |
   | B3 | 9.03 | 2.13 | 3.31 | 8.07 (gbuffer 2.27, lighting 1.94) |
 
-  - **gbuffer:** today's 2876 lots cost 0.7–1.0 ms of gbuffer time in the aerial poses. 700 more lots at lower prop density add about +0.15–0.25 ms there.
+  - **gbuffer:** today's 2876 lots (with their signs) account for about 1.0 ms of gbuffer time at G2 and 0.7 ms at G3. At B3 they cost nothing net, because they hide ground that is expensive to shade. 700 more lots at lower prop density should add about +0.15–0.25 ms at G2 and G3.
   - **bld-cull:** 0.13–0.19 ms today for 134k parts; about +0.03–0.05 ms.
   - **Lighting:** the 1.4 ms that buildings and signs add comes from their point lights and lit pixels. Light budgets are fixed, so this should stay within +0.05 ms. Street lamps beyond the real-light range are analytic and free.
   - **Savings:** forest disappears from about 3.5 km². Tree draws are overdraw-heavy, but this spec could not isolate their cost (disabling the vegetation module also changes when the ground is drawn). The implementer measures it with `ctx.hideA = 1`.

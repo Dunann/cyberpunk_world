@@ -1,7 +1,8 @@
 ---
 id: I-010
 title: Riverfront tower character show
-status: proposed
+status: rejected
+score: 5.33 (review-1 5.33, review-2 5.33)
 direction: Wild card / borrow from another field (media-facade practice); revision of I-007 after review
 family: signage: tower-scale facade text show
 parent: I-007

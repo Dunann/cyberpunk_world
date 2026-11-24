@@ -68,9 +68,15 @@ Half a day, heightmap only:
 2. **Stepped profile** (`CARVE_WGSL` in `terrainLand.js`, called from `GEN_HEIGHT`).
    - Compute `dG = waterDistTo(p, 0)` exactly in `GEN_HEIGHT` (not from the 6 m info map) wherever the hillside weight is above zero and `dG < q0 + maxTiers * tread`.
    - `u = max((dG - q0) / tread + 1, 0)`; `step = 5.8 + rise * (floor(u) + smoothstep(1 - riser / tread, 1, fract(u)))`. This gives a level quay at 5.8 m out to `q0 − riser`, then tread k at `5.8 + rise * k` from `q0 + (k − 1) * tread` to `q0 + k * tread − riser`, with a 3.2 m riser ramp in front of each tread.
-   - `stepW = smoothstep(0.05, 0.3, hillW)`.
-   - Before the existing bank carve: `landH = mix(landH, min(landH, step), stepW)`. The existing carve then shapes the first metres at the shore as now, and shapes the Jade side as now. Where terraces reach the Jade cliff they simply end at it.
-   - `carveWater` gets one new parameter; the far-field call in `terrainGen.js` passes zero.
+   - The existing carve computes `land = mix(shore, landH, smoothstep(wall, wall + soft, wd))` from the distance to the nearest water of either river. Its smooth ramp must not be applied on the Great River side, or it would bend the treads (at the tip `soft` is 55–90 m because the hillside weight there is only 0.35–0.8). So, in the stepped zone:
+     ```
+     rampJ   = mix(shore, landH, smoothstep(wall, wall + soft, dJ))   // Jade-side cliff, as today (dJ = waterDistTo(p, 1))
+     stepped = min(rampJ, step)                                        // Great-side bank: steps
+     stepW   = smoothstep(0.05, 0.3, hillW)
+     land    = mix(land, stepped, stepW)
+     ```
+     The quay wall in the first 5 m stays as it is. Where terraces reach the Jade cliff they simply end at it. Where the hillside weight fades out (the west end of the district's bank) the steps fade into the old ramp.
+   - `carveWater` gets the extra inputs (`dG`, `dJ`, stair weight); the far-field call in `terrainGen.js` passes values that switch the steps off.
 3. **Stair streets** (`GEN_HEIGHT`).
    - In the district's grid frame, a corridor of ±5 m around every third road line that runs toward the river.
    - Inside it, replace `step` by the straight ramp `5.8 + (rise / tread) * max(dG - (q0 - tread), 0)`, which passes through the front edge of every tread (33° if the street meets the bank at right angles, gentler otherwise). Check that the walking controller climbs it; if not, lengthen the ramp by starting it lower on each tread.
@@ -95,7 +101,7 @@ Half a day, heightmap only:
    - Trees: rows of fixed trees in the planter strips at 11 m spacing, published through the existing `world.shared.gardenTrees` list (the vegetation module already draws it and keeps the random forest off reserved rectangles).
    - Prow concourse (level 0 at the foot of the grand stair): three floating pontoons with gangways and four moored boats, built as static parts in `buildings_landmarks.js` (call it from `genLandmarks`), plus a slim light mast at the head of the stair. Original designs; about 300 parts.
    - Add 4 point lights at the concourse from the buildings budget at high priority.
-8. **Stilt site.** Move the `stilts` hint in `LANDMARKS` from (−280, −900) to the site the search finds today (245, −135), so the search result cannot drift.
+8. **Stilt site.** Leave the `stilts` hint in `LANDMARKS` alone. The search picks the bank point with the largest rise minus a distance penalty; the stepped cut only lowers the rise on the Great River side, so today's site (245, −135) on the Jade side still wins. The quick test confirms it.
 9. **Checks before hand-off.**
    - All 14 poses captured. A4, A5, A6, B1–B4, G1 and G4 must match the baseline.
    - Walk test: from the promenade up the grand stair to the top terrace, and along a tread; no falling through, no invisible walls.
@@ -113,7 +119,7 @@ Half a day, heightmap only:
 
 ## Risks
 - **It may read as a quarry.** Bare treads without buildings can look like a mine. The tip is free of lots by design, so the lamps, lit vaults, planters and the stair must carry it. The quick test checks the form before the detail work.
-- **The cut reaches the plateau.** On the tip the plateau edge moves from about 60 m to about 125 m inland. Measured against today's layout the tower sites (at least 160 m from the Great River bank), the monorail end and the stilt site are outside the cut, but the probe in the quick test must confirm it.
+- **The cut reaches the plateau.** On the tip the plateau edge moves from about 60 m to about 125 m inland. Checked against the baseline height data: the six tower bases, the monorail end and the stilt site all lie where the step level is above the present ground, so none is cut. The closest is the southern tip tower at (150, 45): about 163 m from the Great River, ground 81 m, step level 96 m. The probe in the quick test must confirm this on the real build.
 - **Junction with the Hongyadong cliff.** Near the prow the Jade-side cliff becomes lower in 9 m steps. The current stilt columns adapt (their height comes from `heightAt`), and so does I-004, but A1's left third will look different. If I-004 is adopted first, re-check where its walker ends: terraces also rise more than 15 m in 60 m, so its complex could continue around the prow. Cap its length at the first terrace wall if so.
 - **Heightmap resolution.** Risers are 3 m ramps in the height data. The wall geometry hides them, but any stretch without a wall (rejected stations, stair edges) shows a steep ramp with stretched texture. Give stair corridors side walls from the same extruder.
 - **Lots on treads.** Hillside lots within about 90 m of the south bank now stand on flat treads or straddle a riser. Straddling lots get a 9 m podium side (`terracedPodium` handles this). If it looks wrong, drop lots whose `gMax − gMin` exceeds 7 m inside the stepped zone; do this as a filter after generation so the random stream is not disturbed.
