@@ -1,7 +1,8 @@
 ---
 id: I-038
 title: Light pre-cull - each lighting tile tests only the lights of its 160 px block, with the same tests and the same image
-status: in-review
+status: accepted
+score: 5.17 (review-1 5.33, review-2 5.00; mean). Feasibility+impact only = 6.25 (creativity axis does not fit an image-identical performance change). Prototype track: plan hard problem #2; measurement-first gate >= 0.30 ms, objective bench + identity checks
 direction: from the reviews of I-024 (freeing GPU budget in the lighting pass; both reviewers asked for this as its own spec)
 family: performance: two-level tiled light culling (per-block candidate lists, exact per-tile tests kept)
 parent: I-024 (split out of its Cost section)
