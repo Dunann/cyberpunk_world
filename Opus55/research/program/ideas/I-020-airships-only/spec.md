@@ -1,7 +1,7 @@
 ---
 id: I-020
 title: Airships only (I-009 without the launch)
-status: evaluating
+status: rejected
 score: n/a (follow-up from I-009 judge findings; coordinator decision, user priority 5)
 parent: I-009
 date: 2026-11-24

@@ -12,4 +12,4 @@
 | I-009 round 3 (b3d59af) | B1, B3, B4, G1, G3, G4 | judge C: 0/6 (B3 clear loss) | pass | **blocked**: the launch trail loses at every distance; close airships win (u62) | — |
 | I-016 (88b8ab6, vs I-014r2) | G2, G3, B3 | judge A: 3/3 clear, 0; judge B: 3/3 clear, 0 | pass (+0.21 ms) | met rule; re-judged after merge with I-015 | — |
 | I-016 merged (9115317, vs main-014-015) | G2, G3, B3 | judge C: 3/3 clear, 0; judge D: 3/3 clear, 0 | pass (+0.19 ms) | **adopted**; result review: holds with caveats (aerial gain only, judge-named park defects) | pending |
-| I-020 airships only | 8 rule-placed fresh cameras + no clear loss on eval poses | — | — | implementing | — |
+| I-020 airships only (9cfe031) | 8 rule-placed fresh cameras + no clear loss on eval poses | judge A: fresh 5/8 (needs 6), eval poses 0 losses | pass (+0.03 ms) | not adopted; losses where a close ship hides a landmark | — |
