@@ -115,3 +115,85 @@
 
 ### Evaluation untouched
 `git diff 101026f d83534b -- Opus55/eval` and `git diff main...idea/I-016 -- Opus55/eval` are empty. Nothing in `eval/`, the evaluation data or the poses changed.
+
+## Code review round 2 (2026-11-24)
+
+**Branch:** idea/I-016 at c96661c (code in 6c051ca, 9bea0da, 9dbe467)
+**Verdict:** pass. Every round-1 problem is fixed. The new code keeps every existing stream identical and adds no per-frame work. What remains is minor and cannot change the result.
+
+### Round-1 findings
+- **Avenue through infill lots (moderate): fixed.**
+  - `streetTarget` now takes the nearest crossing whose avenue stays 11 m clear of every lot, except on its last 12 m (`plan.js:510-540`).
+  - The Old Town Bridge north avenue now runs from (1150, −40) to (1245, −236).
+  - Probe: `avenueLotHits` 0 and `planRunLotHits` 0 (every infill and avenue run sampled every 2 m against all lot footprints).
+- **Non-target changes and forecasts (moderate): done.**
+  - `planshare.mjs` gives frame shares for every pose. A1 and A3 are listed as changed, with "tie expected".
+  - Noplan identity holds for all 11 non-target poses.
+  - Bursts are now PNG so they can be diffed. The eval bursts are not deterministic, so that check is limited, as DEVIATIONS says.
+  - Static park bursts show no line shimmer.
+- **Minor items, all fixed:**
+  - `?noplan` is gated by `__DEV__` (`plan.js:322`).
+  - `StreetLamps.update` no longer allocates (preallocated `Float64Array`, `_emit` is now a method). Lamp behaviour is unchanged: 5,749 lamps.
+  - `renderer.js` formatting fixed.
+  - `rng(4242)`: suppressed hamlet reserves now go into a copy of the mask that is used only for the street-tree filter (`vegetation.js:470-478`), so the stream is identical by construction.
+
+### Coordinator's questions
+1. **Park lanterns, the 15 park lights and light indices.**
+   - The park lanterns get their own `Cells`, buffer and bind group (`signs.js:420-429`, drawn after the existing lanterns). `placeSigns` and `placeInfillSigns` are not touched, and there is no random draw (the phase is `i * 0.618`).
+   - Probe, plan against `?noplan`, same values in both:
+     - signs 83,457, sign lanterns 14,806, sign lights 2,150;
+     - hash of the first 83,457 sign rows, and of the first 14,806 lantern rows (position, phase, hue), equal in both;
+     - 552 park lanterns, in their own buffer.
+   - `parkStructures` runs after the compounds and before the lotus pads, which draw from `R` (7070). It draws nothing itself, and neither does `garden._pavilion`. Garden trees: 238, same hash. Hamlets: 289.
+   - Light indices: lights carry their flicker seed in their own data, and every dynamic pool takes its base from `reserve()`. I found no code that depends on an absolute light index; tile order under `TILE_MAX` is already set by atomic ordering.
+   - **Minor:** the garden adds **19** real lights, not 15. `_pavilion` calls `lantern([..], 1.1)` without the `light` argument. The wrapper `(q, s, light, col) => env.lantern(q, s, light && allow, col)` then passes `undefined`, and the default `light = true` applies. So every pavilion gets a light, and `p.light` and the `PARK_REAL_LIGHTS` cap (`gardenParks.js:43-46`) have no effect. Total lights are 5,312: 5,153 + 80 + 60 + 19. The cost is negligible, but the reported `lights: 15` is wrong. Fix: `light !== false && allow`.
+2. **`planPark.js` textures.**
+   - Layout and light maps: rgba16float, atlas 1335 x 374, Lantern Park and the Silk Road Garden side by side. Each region has a 6-texel pad, so no bleed at the seam. That is 4.0 MB each, 8.0 MB together (DEVIATIONS estimates 2 x 3.3 MB). The coverage map adds 3.3 MB.
+   - Bindings 11 and 12 are in the terrain group, which only the terrain draw pipeline uses. Both are always bound; with `?noplan` the atlas is 1 x 1.
+   - Per park pixel, `designedPark` does 2 bilinear samples plus simple maths, which is cheaper than the round-1 walk loops. The Silk Road Garden also runs the unrolled `gardenAvenueNear`. The quay walk, squares and avenues stay analytic, as before.
+   - No per-frame work. The textures are written in `plan.upload`, and once more by `bakeTreeLight` at vegetation init. The park-lantern cull reuses preallocated arrays.
+   - Measured: +0.04 ms gbuffer, +0.12 ms average in total over 3 pairs, within the +0.30 ms cap.
+3. **`capture.mjs` bursts.** `run-eval.mjs:35` passes `--jpg --burst`, so `type` is `image/jpeg` and `ext` is `jpg`. That is the same `__capture('image/jpeg')` call and the same names, `burst-u<N>-<k>.jpg`, so the eval output is unchanged. `eval/` is untouched (`git diff 101026f c96661c -- Opus55/eval` is empty).
+4. **Peninsula South Bridge avenue and traffic on park land.**
+   - The avenue runs from (−540, 980) to (−292, 1133), owned by the Old Town, with 0 lot hits.
+   - Probe: all 399 car runs (370 existing, 29 plan), sampled every 2 m, have 0 points on park land other than avenue texels.
+   - Existing district streets that cross plan land are painted as city streets (`edgeStreet`). Existing runs are unchanged: 370 runs and 5,749 lamps in both builds.
+5. **Art.** See below.
+
+### Other problems (all minor)
+- `plan.unlitLawn()` (`plan.js:707`) still measures against the round-1 analytic walks. It reports 91,800 m² of Lantern Park lawn more than 25 m from a walk, which is stale and misleading. The real gate is `coverage()` in `planPark.js` (3.4% / 2.4%). Delete the old function or port it.
+- Load time: 6.0 s against 4.2 s without the plan in my probe; DEVIATIONS reports `buildPlan` at 1,030 ms. Not gated.
+- The held-out stage gate's 7/7 overstates the case a little. `ho-main/H8` is a camera inside the forest canopy (an all-green frame), so that pair is not informative. H1, H7, H9 and H10 are convincing on their own.
+
+### Art (out/i016r2/final against out/i016r2/ho-main)
+- **Much improved.**
+  - **H10:** a dark forest becomes a lit, varied park with meandering walks, uplit trees, lanterns and a pavilion.
+  - **H7:** the round-1 waffle over black lawn is gone. The lawn is visibly lit, the paths curve, and the plazas are full circles.
+  - **H9:** the river front gains a lantern promenade, lit willows and a pavilion plaza, where main has a black forest wall.
+  - **H8 and H1:** posts, lanterns, a paifang gate and gold uplit groves give the park a Chinese character.
+  - **H3:** the Silk Road Garden reads as a designed turquoise garden.
+- **Likely blind results (my estimate):**
+  - G2 about 65–70% win: 26% of the frame becomes a lit park instead of dark forest.
+  - G3 about 70%.
+  - B3 about 60–65%.
+  - 2 wins of 3 now looks likely, about 65%.
+- **Remaining risks, in order:**
+  1. **The steep-bank forest band** (slope over 25%, between the river walk and the upper walks) stays unlit. It is the darkest part of H4 and H7, and in G2 it lies along the near bank.
+     - Fix: uplight forest-edge trees within 12 m of a walk on that slope.
+     - And: add a lit stairway at every cross walk down the slope, using the existing hamlet stairway pattern. That is Chongqing in character.
+  2. **The river plazas look identical and evenly spaced.** Same r = 14, same jade/gold tile floor, same hexagonal pavilion (H7).
+     - Fix: pick the plaza kind by a hash (pavilion, lantern ring, open LED floor, stage).
+     - And: set the radius from the size of the flat area (10–18 m).
+  3. **Small artefacts:** the lone cyan terrace ring on the Silk Road Garden bank (H3, bottom centre), path stubs at the park edge, and near-camera crowns (low held-out cameras only).
+  - None of these blocks evaluation.
+
+### Checks run
+- `git diff d83534b c96661c` and a full read of every changed `src/` and `tools/` file. Read in full: `gardenParks.js`, `signs.js`, `terrainPark.js`, the `vegetation.js` and `terrainLamps.js` diffs, `capture.mjs`, and the upload, avenue and street-painting parts of `plan.js` and `planPark.js`.
+- Through `gpu-run.sh I-016cr`, with the dev build current (`out/dev.html` = `out/cand-r2/dev.html`):
+  - Two probe loads, plan and `?noplan`, at 480x270. Streams, hashes, light counts, atlas size and avenues are as quoted above. No WebGPU errors, no failed `console.assert`.
+  - Two more loads for the lantern-row hash and the 2 m traffic-on-park sweep.
+- Held-out images viewed: final against ho-main for H1, H3, H4, H7, H8, H9 and H10.
+- bench.mjs was not run. No eval-pose captures were made.
+
+### Evaluation untouched
+`git diff 101026f c96661c -- Opus55/eval` is empty.
