@@ -39,3 +39,4 @@
 - 2026-11-24: I-016 implemented (idea/I-016 @ ad7a561, d83534b): 62 infill blocks with 169 lots, Lantern Park, Silk Road Garden, pocket parks, 2,026 park trees. Existing streams identical by construction. Two clean bench pairs: +0.19 ms (9.65/11.67, 9.63/11.71). Functional 18/18. Stage 3 cut. Code review started.
 - 2026-11-24: I-009 fix round 1 done (bab3950, 7dc6eb0): beams after water, per-pixel deck fade, near-camera thinning (boundary worst 0.92 ms), launch index, tree keep-out. Bench 3 alternating clean pairs: +0.07 ms. Code review round 2 started.
 - 2026-11-24: I-009 code review round 2: PASS. Evaluation captures started.
+- 2026-11-24: I-016 code review round 1: FAIL. Streams identical (verified with ?noplan). Moderate: approach avenue with traffic runs through infill lots (G2 edge); spec checks for fixes 1, 5 and 12 not run. Art: Lantern Park is a black field with a rigid gold grid (G2 win estimated 35-40%). Fix round 1 started.
