@@ -187,7 +187,7 @@ export function buildParkLayout(ctx) {
   if (regions[STYLE.SILK]) silkLayout(ctx, regions[STYLE.SILK], out, { H, R6, inMask, addWalk, pieces });
 
   // ---- secondary paths wherever lawn is still far from a lit feature, then lamps, lanterns and the base light map
-  for (const R of out.regions) secondaryPaths(R, out, { H, R6, inMask, addWalk });
+  for (const R of out.regions) secondaryPaths(R, out, { H, R6, inMask, addWalk, isStreet: ctx.isStreet });
   for (const R of out.regions) {
     lampsAndPosts(R, out, inMask);
     out.stats[R.style === STYLE.LANTERN ? 'lantern' : 'silk'] = coverage(R);
@@ -431,7 +431,9 @@ function secondaryPaths(R, out, h) {
       const t = q / 32 * Math.PI * 2, dx = Math.cos(t), dz = Math.sin(t);
       for (let s = 2; s < 150; s += 2) {
         const x = fx + dx * s, z = fz + dz * s;
-        if (!inMask(R, x, z) || inPond(x, z)) break;
+        // a path may also end at a city street that bounds the park (an entrance from the sidewalk)
+        if (!inMask(R, x, z)) { if (h.isStreet(x, z) && s > 6) hits.push({ t, s: s - 2, x: fx + dx * (s - 2), z: fz + dz * (s - 2) }); break; }
+        if (inPond(x, z)) break;
         if (onWalk(x, z)) { hits.push({ t, s, x, z }); break; }
       }
     }

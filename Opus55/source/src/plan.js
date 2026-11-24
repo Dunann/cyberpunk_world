@@ -13,7 +13,7 @@
 // Sites are bounded by world features only (water, bridge corridors, district street grids, a contour and a slope
 // rule), never by coordinate lines or circles:
 //  - Lantern Park: the south bank of the Great River between the Peninsula South Bridge and the Old Town Bridge,
-//    from the water up to the Old Town's first street (its 0.55 weight contour and the streets around its lots),
+//    from the water up to the Old Town's first street (its 0.3 weight contour, where the city paints and drives streets),
 //    at most the 450 m floodplain. Its designed layout (walks, plazas, ponds, lamps, lanterns, gates, pavilions)
 //    is in planPark.js.
 //  - The plain north of the Great River and east of the Jade River, south of the line through the Jiangbei and
@@ -228,6 +228,7 @@ export function buildPlan(world) {
     return best;
   };
   const coreAt = (x, z) => { for (const i of gridded) if (world.districtWeight(i, x, z) >= 0.55) return true; return false; };
+  const streetZone = (x, z) => { for (const i of gridded) if (world.districtWeight(i, x, z) >= 0.3) return true; return false; };
 
   // ---- field grid (6 m): water distance, region, owner
   const B = PLAN_BOX;
@@ -466,6 +467,43 @@ export function buildPlan(world) {
     stamp(L.x, L.z, L.angle, -L.w / 2 - (e[0] ? out : inn), L.w / 2 + (e[1] ? out : inn), -L.d / 2 - (e[2] ? out : inn), L.d / 2 + (e[3] ? out : inn), (k) => { built[k] = 255; owner[k] = L.district; });
   }
 
+  // ---- existing streets that carry traffic through plan land (the district streets trafficCars.js buildRuns drives,
+  // which extend to blocks of district weight 0.3): painted as city streets (built coverage, the district's own grid),
+  // so the parks stop at them and no car drives across a lawn. The runs themselves are not changed.
+  const edgeStreet = new Uint8Array(CW * CH);
+  for (const di of gridded) {
+    const D = DISTRICTS[di];
+    const ca = Math.cos(D.angle), sa = Math.sin(D.angle);
+    const toW = (lx, lz) => [D.cx + lx * ca - lz * sa, D.cz + lx * sa + lz * ca];
+    const nI = Math.ceil(Math.max(D.rx, D.rz) / D.block) + 1;
+    const blockOk = (bi, bj) => { const [x, z] = toW((bi + 0.5) * D.block, (bj + 0.5) * D.block); const dom = world.districtAt(x, z); return dom.index === di && dom.weight >= 0.3; };
+    for (let axis = 0; axis < 2; axis++) for (let i = -nI; i <= nI; i++) for (let k = -nI; k < nI; k++) {
+      const a = axis === 0 ? toW(i * D.block, k * D.block) : toW(k * D.block, i * D.block);
+      const b = axis === 0 ? toW(i * D.block, (k + 1) * D.block) : toW((k + 1) * D.block, i * D.block);
+      if (Math.max(a[0], b[0]) < B.X0 || Math.min(a[0], b[0]) > B.X1 || Math.max(a[1], b[1]) < B.Z0 || Math.min(a[1], b[1]) > B.Z1) continue;
+      let inSite = false;
+      for (let s = 0; s <= 8 && !inSite; s++) {
+        // a stretch of the street lies on plan land outside the existing blocks (their lots, streets and the 0.55 core)
+        const x = a[0] + (b[0] - a[0]) * s / 8, z = a[1] + (b[1] - a[1]) * s / 8;
+        const i3 = Math.floor((x - B.X0) / CS), j3 = Math.floor((z - B.Z0) / CS);
+        inSite = i3 >= 0 && j3 >= 0 && i3 < CW && j3 < CH && !exist[j3 * CW + i3] && !built[j3 * CW + i3] && !!siteAt(x, z) && !coreAt(x, z);
+      }
+      if (!inSite) continue;
+      if (!(axis === 0 ? blockOk(i - 1, k) || blockOk(i, k) : blockOk(k, i - 1) || blockOk(k, i))) continue;
+      let ok = true, hPrev = null;
+      for (let s = 0; s <= 4 && ok; s++) {
+        const x = a[0] + (b[0] - a[0]) * s / 4, z = a[1] + (b[1] - a[1]) * s / 4, h = world.heightAt(x, z);
+        if (h < 2.0 || world.waterDist(x, z) < 6 || world.districtAt(x, z).index !== di) ok = false;
+        if (hPrev !== null && Math.abs(h - hPrev) / (D.block / 4) > 0.4) ok = false;
+        hPrev = h;
+      }
+      if (!ok) continue;
+      const cx = (a[0] + b[0]) / 2, cz = (a[1] + b[1]) / 2, hw = D.road / 2 + 3.5, hl = D.block / 2 + hw;
+      const ang = axis === 0 ? D.angle + Math.PI / 2 : D.angle;
+      stamp(cx, cz, ang, -hl, hl, -hw, hw, (kk) => { if (!built[kk] && !exist[kk]) { built[kk] = 255; owner[kk] = di; edgeStreet[kk] = 1; } });
+    }
+  }
+
   // ---- approach avenues: from each bridge landing in a plan site straight to the nearest street of the
   // adjoining built blocks (infill or existing lots)
   const avenues = [];
@@ -524,6 +562,9 @@ export function buildPlan(world) {
     if (!site) continue;
     if (onAvenue(x, z, 3)) { park[k] = 255; style[k] = STYLE.AVENUE; continue; }
     if (exist[k] || coreAt(x, z)) continue;
+    // Lantern Park ends at the Old Town's first street: the city paints and drives its streets from a district weight
+    // of 0.3 (terrainShade.js, trafficCars.js buildRuns), so the park stops at that contour
+    if (site === 'lantern' && streetZone(x, z)) continue;
     const wd = fieldWater(x, z);
     if (wd < PARK_WATER || inKeep(x, z) || inRamp(x, z, 4)) continue;
     if (slopeAt(x, z) > STEEP) continue;
@@ -582,6 +623,7 @@ export function buildPlan(world) {
   for (let j = 0; j < CH; j += 2) for (let i = 0; i < CW; i += 2) {
     const k = j * CW + i;
     if (!built[k]) continue;
+    if (edgeStreet[k]) { stats.edgeStreetArea = (stats.edgeStreetArea || 0) + 4 * CS * CS; continue; }
     const x = B.X0 + (i + 0.5) * CS, z = B.Z0 + (j + 0.5) * CS;
     let ok = false;
     for (let a = -1; a <= 1 && !ok; a++) for (let b = -1; b <= 1 && !ok; b++) for (const L of lotGrid.get((Math.floor(x / 100) + a) * 7919 + Math.floor(z / 100) + b) || []) {
@@ -613,6 +655,7 @@ export function buildPlan(world) {
   const layout = buildParkLayout({
     world, STYLE, axis, river: great, sA: sWest, sB: sEast, silk, silkAvenues, fieldWater, slopeAt,
     coverStyle: park3,
+    isStreet: (x, z) => { const i = Math.floor((x - B.X0) / CS), j = Math.floor((z - B.Z0) / CS); return i >= 0 && j >= 0 && i < CW && j < CH && built[j * CW + i] > 0; },
     forEachPark: (fn) => { for (let k = 0; k < CW * CH; k++) if (park[k]) fn(B.X0 + (k % CW + 0.5) * CS, B.Z0 + (Math.floor(k / CW) + 0.5) * CS, style[k]); },
   });
   stats.park = layout.stats;
