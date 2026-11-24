@@ -2,11 +2,14 @@
 // spaceport on the eastern mountains that launches a rocket every 150 s, leaving a smoke trail that drifts and
 // spreads in a sheared wind for 240 s and lighting the cloud deck as it passes through (via F.launch in sky.js).
 //
-// Rendering: everything is drawn in two passes of this module, timed on their own (skyops-gbuffer, skyops-fwd), in
-// afterLighting, before the water's SSR so the river reflects the ships and the plume:
+// Rendering:
+//   In afterLighting, two passes of this module, timed on their own (skyops-gbuffer, skyops-fwd), before the water's
+//   SSR so the river reflects the ships, the plume and the trail:
 //   1. opaque pass: airships, rocket and spaceport shade themselves (moon, sky, city glow from below, local floods,
 //      emissive, fog) and write the lit colour, G-buffer normal, motion (with previous-frame transforms) and depth.
-//   2. transparent pass: smoke trails (premultiplied alpha), searchlights, plume and light sprites (additive).
+//   2. transparent pass: smoke trails (premultiplied alpha) and the plume (additive).
+//   In the shared forward pass, after the water (the `skyopsLate` entry in main.js): searchlight beams and light
+//   sprites (additive). Drawn earlier, the water's opaque plane would paint over them wherever it lies behind them.
 // Lights: 3 searchlight hit points + 1 plume light (dynamic).
 // Placement and timing rules live in skyopsLayout.js.
 
@@ -36,7 +39,7 @@ const NAV = [
   [R + 0.7, -1.0, 10], [-(R + 0.7), -1.0, 10], [0, 0, -91.8], [0, R + 1.4, 12], [0, -R - 6.2, 18], [0, -R - 5.3, 30.6], [0, R + 7.4, 50],
 ];
 
-export default {
+const skyops = {
   name: 'skyops',
 
   async init(ctx) {
@@ -66,7 +69,8 @@ export default {
     w.addCollider(S.x, dy - 1.6, S.z, L.DECK_HALF, 1.6, L.DECK_HALF, 0);
     w.addCollider(S.x, dy + 80, S.z - 17, 6, 80, 6, 0);
     w.addCollider(S.x - 46, dy + 24, S.z + 40, 18, 24, 14, 0);
-    w.shared.spaceport = { x: S.x, z: S.z, deckY: dy, period: L.LAUNCH_PERIOD };
+    // half: half the deck's side; vegetation keeps trees off the deck footprint
+    w.shared.spaceport = { x: S.x, z: S.z, deckY: dy, half: L.DECK_HALF, period: L.LAUNCH_PERIOD };
 
     // ---- meshes
     const ship = airshipMesh();
@@ -138,6 +142,7 @@ export default {
     this.ships = null;
     this.vis = new Uint8Array(5);
     this.ages = new Float64Array(2);
+    this.launchIdx = new Int32Array(2);
     this._st = {}; this._pt = {};
     this._r = { x: 0, y: 0, z: 0, ux: 0, uy: 1, uz: 0, lx: 1, ly: 0, lz: 0 };
     this._p3 = new Float64Array(3);
@@ -252,6 +257,7 @@ export default {
   _shipXf(i, st, prev) { this._setXf(i, st.x, st.lx, st.ly, st.lz, st.y, st.ux, st.uy, st.uz, st.z, st.fx, st.fy, st.fz, prev); },
 
   // rocket base position and axis at launch age a; returns false when hidden. Writes this._r.
+  // While it climbs through the cloud deck, the opaque shader clips it at 1800 m per pixel (nose first).
   _rocket(a) {
     const r = this._r;
     const P = this.pad;
@@ -268,14 +274,14 @@ export default {
       return true;
     }
     const s = L.rocketS(a);
-    if (s >= this.sDeck - 5) return false;
+    if (s >= this.sDeck) return false;
     const T = this.traj;
     const f = Math.min(s / 5, T.s.length - 1.001), k = Math.floor(f), u = f - k;
     r.x = T.x[k] + (T.x[k + 1] - T.x[k]) * u; r.y = T.y[k] + (T.y[k + 1] - T.y[k]) * u; r.z = T.z[k];
     const g = s < L.GT_START ? 0 : L.GT_MAX * (1 - Math.exp(-(s - L.GT_START) / L.GT_SCALE));
     r.ux = Math.sin(g); r.uy = Math.cos(g); r.uz = 0;
     r.lx = Math.cos(g); r.ly = -Math.sin(g); r.lz = 0;
-    return r.y + ROCKET_TOP * r.uy < L.CLOUD_BASE;
+    return r.y < L.CLOUD_BASE;
   },
 
   _sprite(k, x, y, z, r, cr, cg, cb, pxMin) {
@@ -371,12 +377,12 @@ export default {
     LU[28] = ctx.env.windX / wl; LU[29] = ctx.env.windZ / wl; LU[30] = this.sDeck; LU[31] = NTRAJ;
     LU[32] = flash; LU[33] = 1; LU[34] = t; LU[35] = 0;
     // trails: up to two launches with live smoke; puff spacing level from the smoke radius at mid-trail
-    const n = L.liveLaunches(t, this.ages);
+    const n = L.liveLaunches(t, this.ages, this.launchIdx);
     for (let k = 0; k < 2; k++) {
       const A = this.ages[k];
       const live = k < n && A > L.IGNITION;
       const sEnd = live ? Math.min(L.rocketS(A), this.sDeck) : 0;
-      LU[k * 4] = A; LU[k * 4 + 1] = sEnd; LU[k * 4 + 2] = ((Math.floor((t - A) / P) * 0.37) % 1 + 1) % 1 + 0.1; LU[k * 4 + 3] = live ? 1 : 0;
+      LU[k * 4] = A; LU[k * 4 + 1] = sEnd; LU[k * 4 + 2] = L.trailSeed(this.launchIdx[k]); LU[k * 4 + 3] = live ? 1 : 0;
       const rMid = L.smokeRadius(A - L.emitAge(sEnd * 0.5));
       const lev = Math.log2(Math.max(0.8 * rMid / PUFF_DS, 1)); // target spacing 0.8 x the smoke radius
       const kf = Math.floor(lev);
@@ -455,12 +461,28 @@ export default {
     p.draw(6, 2 * NPUFF);
     p.setPipeline(this.plumePipe);
     p.draw(6, 2);
-    p.setPipeline(this.beamPipe);
-    p.setBindGroup(2, this.beamGroup);
-    p.draw(120, NSHIP);
-    p.setPipeline(this.sprPipe);
-    p.setBindGroup(2, this.sprGroup);
-    p.draw(6, NSPR);
     p.end();
   },
+
+  // Called from the shared forward pass after the water (see skyopsLate): searchlight beams and light sprites.
+  drawLate(ctx, pass) {
+    if (!this.ships) return;
+    pass.setBindGroup(0, ctx.renderer.frameGroup);
+    pass.setBindGroup(1, ctx.forwardGroup);
+    pass.setPipeline(this.beamPipe);
+    pass.setBindGroup(2, this.beamGroup);
+    pass.draw(120, NSHIP);
+    pass.setPipeline(this.sprPipe);
+    pass.setBindGroup(2, this.sprGroup);
+    pass.draw(6, NSPR);
+  },
+};
+
+export default skyops;
+
+// Second entry in the module list, placed after `water`: its forward hook draws the beams and sprites after the
+// water's opaque plane. (skyops itself stays before `water`, so the water's SSR still sees the ships and the trail.)
+export const skyopsLate = {
+  name: 'skyops-late',
+  forward(ctx, pass) { skyops.drawLate(ctx, pass); },
 };

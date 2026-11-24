@@ -355,6 +355,9 @@ function buildMask(world) {
   stampLine(CABLEWAY.ax, CABLEWAY.az, CABLEWAY.bx, CABLEWAY.bz, 12);
   stampRect(MONORAIL_STATION.x, MONORAIL_STATION.z, 50, 50, 0, 0);
   for (const g of world.shared.gardenReserve || []) stampRect(g.x, g.z, g.hw, g.hd, g.angle || 0, 2);
+  // the spaceport deck on piles (skyops): no trees under it or growing through it
+  const sp = world.shared.spaceport;
+  if (sp) stampRect(sp.x, sp.z, sp.half, sp.half, 0, 12);
   for (const run of world.shared.embankments || []) for (let i = 1; i < run.length; i++) {
     const a = run[i - 1], b = run[i];
     stampLine(a[0] + a[2] * 6, a[1] + a[3] * 6, b[0] + b[2] * 6, b[1] + b[3] * 6, 9);

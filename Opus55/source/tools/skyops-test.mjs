@@ -89,6 +89,19 @@ ok('smoke timing: opacity curve, radius cap, always a young trail', () => {
     assert.ok(ages[0] < L.LAUNCH_PERIOD);
   }
 });
+ok('launch index of each live trail is exact (no one-frame seed flips)', () => {
+  const ages = new Float64Array(2), idx = new Int32Array(2);
+  for (let f = 0; f < 3000 * 60; f++) {
+    const t = f / 60;
+    const k = L.liveLaunches(t, ages, idx);
+    for (let i = 0; i < k; i++) {
+      assert.ok(Math.abs(t - idx[i] * L.LAUNCH_PERIOD - ages[i]) < 1e-6, `t ${t} trail ${i}`);
+      assert.equal(idx[i], Math.round((t - ages[i]) / L.LAUNCH_PERIOD));
+      // the seed is a function of the launch alone: equal for every frame of that launch
+      assert.equal(L.trailSeed(idx[i]), L.trailSeed(Math.round((t - ages[i]) / L.LAUNCH_PERIOD)));
+    }
+  }
+});
 ok('wind shear: speed doubles and the direction turns 75 deg between 300 and 1800 m', () => {
   const a = [0, 0], b = [0, 0];
   L.windDrift(300, 10, 0.6, 0.25, a); L.windDrift(1800, 10, 0.6, 0.25, b);

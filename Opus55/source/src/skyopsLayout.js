@@ -408,13 +408,17 @@ export function windDrift(y, age, windX, windZ, out) {
 // Launch ages (s since ignition) whose smoke is still alive at time t, newest first, written into out
 // (Float64Array(2)); returns the count. Smoke emitted at lift-off lives SMOKE_LIFE s and the last smoke is emitted
 // at the cloud deck (< 25 s after ignition), so with a 150 s period at most two trails exist at once.
+// If `idx` is given, the launch index j (ignition at j * LAUNCH_PERIOD) of each is written into it. Callers use it
+// for the trail's noise seed: recomputing j from t - age can round to j - 1 and make the trail pop for a frame.
 export const LAUNCH_ALIVE = SMOKE_LIFE + 25;
-export function liveLaunches(t, out) {
+export function liveLaunches(t, out, idx) {
   const k = Math.floor(t / LAUNCH_PERIOD);
   let n = 0;
   for (let j = k; j >= k - 2 && n < 2; j--) {
     const age = t - j * LAUNCH_PERIOD;
-    if (age >= 0 && age < LAUNCH_ALIVE) out[n++] = age;
+    if (age >= 0 && age < LAUNCH_ALIVE) { if (idx) idx[n] = j; out[n++] = age; }
   }
   return n;
 }
+// Noise seed of launch j's smoke trail, in [0.1, 1.1).
+export function trailSeed(j) { return ((j * 0.37) % 1 + 1) % 1 + 0.1; }

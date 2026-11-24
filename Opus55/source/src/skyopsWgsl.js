@@ -4,14 +4,16 @@
 //                     write the lit colour, normal, motion and depth.
 //   SKY_SPRITE_WGSL : nav lights, strobes, aviation lights, flood glare (additive, size clamped to >= 1.3 px)
 //   SKY_BEAM_WGSL   : airship searchlight cones (same look as the air.js helicopter beams)
-//   SKY_PLUME_WGSL  : rocket exhaust flame and halo (HDR core <= 50)
-//   SKY_TRAIL_WGSL  : launch smoke ribbons (premultiplied alpha)
+//   SKY_PLUME_WGSL  : rocket exhaust flame and halo (HDR <= 50 for the two together)
+//   SKY_TRAIL_WGSL  : launch smoke puffs (premultiplied alpha)
+// The trail and the plume fade per pixel with 1 - smoothstep(1650, 1800, y), and the rocket is clipped per pixel, so
+// nothing is drawn above the 1800 m cloud deck.
 
 const LAUNCH_STRUCT = /* wgsl */ `
 // tr[i]: x launch age (s), y arc length reached (m), z seed, w alive    lod[i]: x puff spacing (m), y fade to the next level
 // plume: xyz nozzle, w flame intensity (0..1)       plumeDir: xyz exhaust direction (unit), w flame length (m)
 // glow: xyz smoke-lighting source, w intensity       wind: xy unit wind direction (xz), z sDeck, w trajectory samples
-// misc: x halo intensity (ignition flash), y deck fade of the plume, z time
+// misc: x halo intensity (ignition flash), y unused, z time
 struct LaunchU { tr: array<vec4f, 2>, lod: array<vec4f, 2>, plume: vec4f, plumeDir: vec4f, glow: vec4f, wind: vec4f, misc: vec4f };
 `;
 
@@ -214,7 +216,9 @@ fn lineMask(x: f32, period: f32, width: f32, fw: f32) -> f32 {
     albedo = vec3f(0.08); rough = 0.35; metal = 0.8;
     emis = vec3f(1.0, 0.45, 0.15) * 6.0 * I.b.w;
   }
-  if (i.wp.y < I.a.w) { discard; }
+  // lower clip (the rocket rising out of the deck on its elevator), and the cloud deck: the climbing rocket
+  // disappears into the clouds from the nose down
+  if (i.wp.y < I.a.w || i.wp.y > 1800.0) { discard; }
   var o: SOut;
   o.color = vec4f(shade(i.wp, n, albedo, rough, metal, emis, ao, local), 1.0);
   o.normal = vec4f(n, metal);
@@ -318,9 +322,12 @@ struct VOut { @builtin(position) cp: vec4f, @location(0) q: vec2f, @location(1) 
     let I = LU.misc.x + LU.plume.w * 0.6;
     if (I <= 0.0) { o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
     let r = max(70.0 + 90.0 * LU.misc.x, 6.0 * px);
-    let p = P + LU.plumeDir.xyz * 25.0 + vdir * 30.0 + (F.camRight.xyz * c.x + F.camUp.xyz * c.y) * r;
+    let hc = P + LU.plumeDir.xyz * 25.0;
+    let off = (F.camRight.xyz * c.x + F.camUp.xyz * c.y) * r;
+    let p = hc + vdir * 30.0 + off;
     o.cp = F.viewProj * vec4f(p, 1.0);
-    o.q = c; o.k = vec2f(0.0, I); o.wy = P.y;
+    // height of this point of the halo, without the shift toward the camera (cloud-deck fade per pixel)
+    o.q = c; o.k = vec2f(0.0, I); o.wy = hc.y + off.y;
     return o;
   }
   // flame: a camera-facing quad along the exhaust direction
@@ -357,7 +364,9 @@ struct VOut { @builtin(position) cp: vec4f, @location(0) q: vec2f, @location(1) 
   let body = pow(1.0 - a, 1.6) * across;
   let flick = 0.9 + 0.1 * sin(time() * 47.0 + a * 13.0);
   let c = (vec3f(1.0, 0.92, 0.8) * core * 40.0 + vec3f(1.0, 0.5, 0.16) * body * 9.0) * flick * i.k.y;
-  return vec4f(min(c, vec3f(50.0)) * deck * fg, 0.0);
+  // HDR cap of 50 for flame and halo together: the halo adds at most its peak (3 x its intensity) on top
+  let haloPeak = vec3f(1.0, 0.62, 0.3) * 3.0 * (LU.misc.x + LU.plume.w * 0.6);
+  return vec4f(min(c, vec3f(50.0) - haloPeak) * deck * fg, 0.0);
 }
 `;
 
@@ -367,6 +376,12 @@ export const SKY_TRAIL_WGSL = LAUNCH_STRUCT + /* wgsl */ `
 const NPUFF = 192u;
 const PUFF_DS = 9.25;           // arc-length spacing of the finest puff level (m)
 const SMOKE_LIFE = 240.0;
+// Cost bound near the trail (see vs): near-camera fade, full opacity beyond NEAR1 x the puff radius, culled inside
+// NEAR0; thinning of puffs larger than THIN0 x the screen height (half-size), at most THIN_MAX extra levels, only
+// for puffs closer than THIN_D1 m (none from THIN_D1 on, full from THIN_D0 in).
+const NEAR0 = 0.6; const NEAR1 = 2.0;
+const THIN0 = 0.25; const THIN_MAX = 2.0;
+const THIN_D0 = 1500.0; const THIN_D1 = 2000.0;
 struct VOut {
   @builtin(position) cp: vec4f,
   @location(0) q: vec2f,                              // puff-local, 1 = smoke radius
@@ -377,6 +392,8 @@ struct VOut {
   @location(5) @interpolate(flat) wdir: vec3f,        // warm light (city side / plume) direction, same basis
   @location(6) @interpolate(flat) fogC: vec4f,        // in-scatter rgb, transmittance
   @location(7) @interpolate(flat) aux: vec4f,         // x opacity, y noise seed, z noise rotation
+  @location(8) wy: f32,                               // world height of this point of the puff (deck fade per pixel)
+  @location(9) @interpolate(flat) aux2: vec4f,        // x opacity of one finest-level layer, y layers stood for, z thinning gate
 };
 fn trajAt(s: f32) -> vec3f {
   let n = u32(LU.wind.w);
@@ -410,12 +427,9 @@ fn cull() -> VOut { var o: VOut; o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
   if (T.w < 0.5) { return cull(); }
   let s = f32(j) * lod.x;
   if (s > T.y) { return cull(); }
-  let odd = (u32(round(s / lod.x)) & 1u) == 1u;
-  let keep = select(1.0, 1.0 - lod.y, odd);
   let c = smokeAt(s, T.x);
   let age = c.w;
   let life = pow(saturate(1.0 - age / SMOKE_LIFE), 0.7);
-  let deck = 1.0 - smoothstep(1650.0, 1800.0, c.y);
   // radius 15 m + 2 m/s * age (cap 250 m), uneven along the trail and over time, plus the ground cloud at the pad
   var r = min(15.0 + 2.0 * age, 250.0);
   r *= 0.7 + 0.6 * vnoise3(vec3f(s * 0.012, age * 0.035, T.z * 17.0));
@@ -425,14 +439,38 @@ fn cull() -> VOut { var o: VOut; o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
   let toCam = toCamV / dist;
   let px = dist * 2.0 * F.camRight.w * F.res.w;
   let rr = max(r, 2.0 * px);
-  // opacity per puff keeps the column density independent of the puff spacing
-  let op = life * deck * keep * min(lod.x / (0.8 * rr) / (1.0 - 0.5 * lod.y), 1.6) * 0.8 * pow(r / rr, 2.0);
+  // puffs wholly above the cloud deck draw nothing (the others fade per pixel in fs)
+  if (c.y - 1.4 * rr * (abs(F.camRight.y) + abs(F.camUp.y)) >= 1800.0) { return cull(); }
+  // Cost bound near the trail. What costs is the blend of many large overlapping layers, which happens only when
+  // the camera is within a few hundred metres of the smoke (free flight near the pad). Puffs farther than
+  // THIN_D1 (and than NEAR1 x their radius) are drawn exactly as before, so views from 2 km or more are unchanged.
+  //  - Puffs that look large are thinned: each doubling of their size beyond THIN0 x the screen height removes
+  //    every other puff (up to THIN_MAX extra levels), the survivors taking over their opacity, so the screen is
+  //    covered by a bounded number of layers. Same scheme as the LOD fade: level = lod.y + extra levels, the odd
+  //    puffs of the current level fading out continuously, so nothing pops.
+  //  - Puffs closer than NEAR1 x their radius fade out, and closer than NEAR0 x it are culled.
+  let sf = 1.4 * rr / (dist * F.camRight.w);               // puff half-size / screen half-height
+  let gate = 1.0 - smoothstep(THIN_D0, THIN_D1, dist);
+  let lvl = lod.y + gate * clamp(log2(max(sf, 1e-6) / THIN0), 0.0, THIN_MAX);
+  let li = min(u32(lvl), u32(THIN_MAX)); let lf = lvl - f32(li);
+  let stp = 1u << li;
+  if (j % stp != 0u) { return cull(); }
+  let keep = select(1.0, 1.0 - lf, ((j / stp) & 1u) == 1u);
+  let nearK = smoothstep(NEAR0 * rr, NEAR1 * rr, dist);
+  // opacity per puff keeps the column density independent of the puff spacing: linear in the number of
+  // finest-level puffs this one stands for (the far look, unchanged), and for thinned puffs as that many
+  // stacked layers, 1 - (1 - a)^m, so thinning keeps the smoke's transmittance (fs blends the two by the gate)
+  let spacing = lod.x * f32(stp);
+  let fade = life * nearK * 0.8 * pow(r / rr, 2.0);
+  let op = fade * keep * min(spacing / (0.8 * rr) / (1.0 - 0.5 * lf), 1.6 * f32(stp));
   if (op < 0.01) { return cull(); }
+  o.aux2 = vec4f(fade * min(lod.x / (0.8 * rr), 1.6), keep * f32(stp) / (1.0 - 0.5 * lf), gate, 0.0);
   var corners = array<vec2f, 6>(vec2f(-1.0, -1.0), vec2f(1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, -1.0), vec2f(1.0, 1.0), vec2f(-1.0, 1.0));
   let q = corners[vi] * 1.4;
   let p = c.xyz + (F.camRight.xyz * q.x + F.camUp.xyz * q.y) * rr + toCam * min(rr, dist * 0.5);
   o.cp = F.viewProj * vec4f(p, 1.0);
   o.q = q;
+  o.wy = c.y + (F.camRight.y * q.x + F.camUp.y * q.y) * rr;
   // lighting, constant per puff: sky ambient and city glow from below, the moon (cool) and a warm key from the
   // city 5 km away or from the plume while it burns nearby
   let albedo = vec3f(0.75, 0.75, 0.78);
@@ -455,13 +493,14 @@ fn cull() -> VOut { var o: VOut; o.cp = vec4f(0.0, 0.0, -1.0, 1.0); return o; }
 }
 @fragment fn fs(i: VOut) -> @location(0) vec4f {
   let r2 = dot(i.q, i.q);
-  if (r2 > 1.96) { discard; }
+  if (r2 > 1.96 || i.wy >= 1800.0) { discard; }
   // billowy edge: noise in the puff's own rotated frame
   let rq = rot2(i.aux.z) * i.q;
   let n = vnoise2(rq * 1.5 + i.aux.y) * 0.65 + vnoise2(rq * 3.4 - i.aux.y) * 0.35;
   let edge = r2 * (1.0 + 0.9 * (0.5 - n));
-  let dens = exp(-edge * 1.9) * (0.6 + 0.7 * n) * saturate(1.0 - r2 / 1.96);
-  let alpha = saturate(dens * i.aux.x);
+  let dens = exp(-edge * 1.9) * (0.6 + 0.7 * n) * saturate(1.0 - r2 / 1.96) * (1.0 - smoothstep(1650.0, 1800.0, i.wy));
+  var alpha = saturate(dens * i.aux.x);
+  if (i.aux2.z > 0.0) { alpha = mix(alpha, 1.0 - pow(1.0 - saturate(dens * i.aux2.x), i.aux2.y), i.aux2.z); }
   if (alpha < 0.004) { discard; }
   // round puff normal in (right, up, toward camera)
   let nq = i.q / 1.25;
