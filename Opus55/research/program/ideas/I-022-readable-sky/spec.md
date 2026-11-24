@@ -1,7 +1,8 @@
 ---
 id: I-022
 title: Readable sky - fewer specks, aircraft you can recognise, rooftop vertiports, and airships that keep out of the landmarks' way
-status: in-review
+status: rejected
+score: 4.50 (review-1 4.67, review-2 4.33; mean; below 7)
 direction: Attack the weakness (critic-named sky clutter and unreadable aircraft; the I-020 airship losses)
 family: air traffic design: flyer hierarchy, vehicle silhouettes, vertiport cycles, airship placement rule
 parent: I-020 (airships), I-009
