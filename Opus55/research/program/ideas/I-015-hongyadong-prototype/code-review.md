@@ -166,3 +166,84 @@ I could not run my own GPU captures. An I-016 `bench.mjs` (profile opus55-I016-b
 
 ### Evaluation untouched
 `git diff c43ed1f bb2de29 -- Opus55/eval` is empty. Nothing in `Opus55/eval/`, the pose set or the judge prompts changed.
+
+## Code review round 2 (2026-11-24)
+
+**Branch:** idea/I-015 at 6cdfcf7 (code in e59c948)
+**Verdict:** pass
+
+Both serious problems from round 1 are fixed. The fix for the shared random streams is proven at the data level. The p99 gate passes on quiet back-to-back runs, which also show that round 1's p99 failure was GPU contention: my round-1 suspicion of a real spike at the plaza was wrong. The round-1 moderate items are fixed. What remains is minor and does not affect the evaluation.
+
+### Round-1 findings, rechecked
+- **Random streams (serious 1): fixed and proven.**
+  - **Shared landmark stream.** `earlierStiltsFootprint()` (`buildings_landmarks.js`) replays the old `stilts()` exactly: the same seed search, the 17-column walk, `R()` once per column plus `floors` and three more draws per tier, and the same prop budget (`B.props` advanced only while under budget, as `B.prop` did).
+  - **Part seeds.** Round 1 also missed something the implementer found: `Parts.add` gives a part without a seed the seed `(index × 7.31) % 997` (`buildings_gen.js:32`), so every district part after the complex was reseeded. Placing the first 1,306 complex parts at the old indices and appending the rest in `finishComplex()` keeps every other index, and so every seed. `hyd-identity.mjs` compares the full 24-float rows (seed included) index by index, so this is proven: 132,598 of 132,598 identical (equal hashes), and the 1,306 old indices all lie in the complex's box.
+  - **Signs.** The complex's slots now come after all others and are tagged `own`. Signs: the first 83,457 rows identical. Sign lanterns and the 58,627 city slots identical. The city's sign lights are chosen from untagged candidates with the unchanged budget (2,150 in both builds). The complex gets 64 more (it has 88 signs, so its allowance is full).
+  - **Lights.**
+    - The 34-light allowance is right. The replay counts `1 + (k > 3)` per column, the same rule as the old code. The report shows exactly 34 baseline-only lights and 111 I-015-only lights (47 complex lights plus 64 complex sign lights), all inside the box, and the 4,999 shared lights in the same order.
+    - Because the complex's lights are tagged and the city budget is `1450 − 34`, the same shuffled shop-spill lights survive.
+    - Indices of later lights shift by 13 (for example, lightshow's `lightBase` goes from 2881 to 2894). That is an index offset only; nothing is keyed to it.
+  - **Gap in the proof, checked by me.** The identity tool does not cover vegetation: fixed street trees are filtered by the exclusion mask and then given rotation and scale from one stream, `rng(4242)`, so a removed tree would shift every later tree. In both builds `nFixed` is 1,186 and `streetTreeCount` is 2,563, so no street tree was removed. The garden, bridges, towerTops and ledFacades states are also identical.
+  - **Colliders.** The collider order differs (deck colliders are now added during generation). The only reader (`air.js` CBD corridors) makes yes/no tests, and the complex is not in the CBD, so the order does not matter.
+- **GPU p99 (serious 2): passes, and the round-1 failure was contention.**
+  - I read the gate reports in `out/I015/r2/gate`. The accepted pairs are: base 11.54 against I-015 11.70, and base 11.52 against I-015 11.77 (p99). Averages are 9.53 against 9.59, and 9.52 against 9.64. TAA p99/average is 1.05 in all four runs, and the maximum is 13.2–14.3 ms.
+  - The traces settle round 1:
+    - the quiet round-1 build (`trace-r1-045403`) is 9.63 / 11.79 / 13.20, with TAA at 1.05;
+    - the contended one (`trace-r1-045139`) runs at 22–25 ms on every frame for the first 28 s, which is contention lasting the whole stretch, not a spike near the complex;
+    - at t = 4–7 s the quiet round-1 build is only +0.2–0.3 ms over the baseline.
+  - The dry plaza and the detail props are extra margin, not a fix that was needed.
+- **Dev-only paths: fixed.** `devQuery` tests `__DEV__` (`buildings_stilts.js:52`), so it compiles to false in `index.html`. `this.devParts` is also dev-only.
+- **Audit: fixed.** The blanket exemptions are gone. The joints are reported by category with their maximum depths (below the stated limits). The landmark obstacles are audited, and props have roles. Re-run: 0 unsupported pieces, and the overlaps as the implementer listed them.
+- **Undercroft lights, comments, `maxDepth`, prop accounting, narrow-unit colliders:** all done as described.
+
+### The coordinator's specific checks
+1. **Identity proof: sound** (see above). Light selection is exact. Unseeded parts cannot shift, because every non-complex index is unchanged and the row comparison includes the seed.
+2. **Underpinning masses and tower overlaps.** I checked with `upcheck.mjs`, `upexpose.mjs` and `upabove.mjs` in the scratchpad `cr15/`. All GPU runs went through `gpu-run.sh`.
+   - **Shape.** There are 1,992 masses, total volume about 162,000 m³. 1,925 of them have a side under 1 m: banding by floor height turns a sloping rock face into stacks of 0.2–0.3 m slabs, one per 0.75 m sample row. 1,265 are taller than 7.5 m, and some reach 26 m.
+   - **Cost.** Small: 1.4% of all parts, simple boxes, and the gate runs are within +0.12 ms on average.
+   - **Exposure.** Analytic test: face samples 0.12 m outside each mass, counted as covered by terrain or by any box-shaped complex or landmark part. 154 masses have at least 1 m² not covered, 8,311 m² in total.
+   - **Where they show** (painted flat green):
+     - thin strips on both sides of the lift shaft (z −112 to −125), up to about 15 m tall;
+     - the rear notches between tower bays seen from inland and above (z ≈ −228, −290).
+   - **Where they do not show:** none appear in the river views (whole face, both ends, both end sides), the plaza view, or a high oblique like G3.
+   - **How they look when visible.** In the normal render the visible faces read as plain timber walls, because they use the WOOD material at param 1.2. They are not a defect at any eval-like distance.
+   - **Tower against facade.** In close shots of all three sampled tower/body overlaps (up to 2.08 m), including the 2.08 m one at (153, 72, −263), nothing is visible: the overlap lies inside the tower's footprint and under the tower block above. The tower/paving overlaps (0.11–0.15 m) are at plaza height and not visible.
+3. **Shader inputs: valid.**
+   - `occ = saturate(prm / 1.8)` and window style 6 apply only to materials 8 and 22–24, which only the complex uses (no other `MAT.WOOD` or 22–24 user in the code).
+   - Every WOOD param in the complex maps sensibly: dark 0.06, dim 0.5, normal 1.15–1.35, bright 1.75; podium, skirt and underpin 1.2–1.3; deck 2.6 (occupancy 1, the lantern-lit underside still keys on `prm > 2`).
+   - No derivatives were added inside the branches, and the runs report no WebGPU errors.
+4. **Art:** see below.
+
+### Problems
+- **minor: underpinning is built from thousands of thin slabs.** `buildings_stilts.js:670–705`.
+  - Grouping samples into 0.5 m floor bands per 0.75 m depth row turns a sloping rock face into stacks of 0.2–0.3 m slabs, up to 26 m tall.
+  - Merge each column into one mass from the lowest floor in its band group, or step the bands at 2–3 m. Either should cut the count about tenfold.
+  - Give underpins a dark param (about 0.06), so that their few visible faces (beside the lift shaft, the rear notches) read as plain timber or retaining walls rather than lit rooms.
+  - Neither affects the evaluation.
+- **minor: dressing skips break the eave lines.**
+  - 217 eaves are skipped. The audit samples show a run on level 1 at the south end (z 44–93), skipped against the neighbouring unit's eave by 0.5 m, which leaves gaps in the lowest eave line.
+  - 27 units are dropped by clearance.
+  - Trim the neighbour's eave length, or let neighbouring eaves of the same level join (as the facade joints do), instead of dropping the piece.
+- **minor:** the complex's 88 sign candidates exceed its 64-light allowance, so 24 complex signs have no light. This is cosmetic.
+
+### Art (round 2, `out/I015/r2/compare/*.jpg` and the full-size `r2/` images)
+**Verdict: varied enough. A1 is a likely win and A2 a probable win; the risk at A3 is low.**
+- **Fixed from round 1.** The round-1 problem (one uniform glowing ochre band) is gone.
+  - Dark, dim and bright units now cluster into vertical and diagonal patches.
+  - Red lacquer, white-plaster and dark timber families read clearly at river distance (H2, H3, H5, the middle view).
+  - Tower bays break the skyline at several heights, the dark slots and the lift add vertical rhythm, and the coloured blade signs add the cyberpunk accent the brief asks for.
+  - The ends step down to end pavilions instead of the smooth bow (H5, H6).
+- **A1 (far, from the river).** A grounded, continuous, varied cliff town against floating pavilions on a dark cliff; I expect a win.
+- **A2 (close).** A probable win. The remaining weakness is the roofs: the hip roofs and upswept corners are small and dark, and from the river the crest still reads mostly as flat tops. The tower bays read as plain boxy mid-rises rather than pavilion towers, so a strict judge may call it generic dense housing rather than Hongyadong.
+- **A3.** The south end now finishes in short steps against the mound. There is no hull shape and nothing floats or is cut open, so the risk is low.
+- **If one more pass is affordable:** lighter, thicker ridge and eave edges on the crest roofs, so the upswept roof line reads at 100–250 m. It is not needed for a fair test.
+
+### Checks run
+- `git diff bb2de29 e59c948`: read in full for `buildings.js`, `buildings_landmarks.js`, `signPlace.js`, `signs.js` and `buildings_wgsl.js`; the changed parts of `buildings_stilts.js` (underpin, occupancy, unit, audit, return value); and `tools/hyd-identity.mjs` and `tools/bench-trace.mjs`.
+- `out/I015/r2/identity/identity-report.json`, the gate reports (7 runs) and the trace files (3 runs), recomputed.
+- `cr15/vegcheck.mjs` (via `gpu-run.sh`), `tr-base.html` against the rebuilt `dev.html`: vegetation, garden, bridges, towerTops and ledFacades are identical; only `gardenReserve` and `landmarkSites` grow.
+- `cr15/upcheck.mjs`, `upexpose.mjs` and `upabove.mjs` (via `gpu-run.sh`, 1920×1080): audit re-run, underpinning statistics, the exposure test, and green-painted captures of 5 river views, 9 overlap close-ups, 8 exposure close-ups and 5 inland/plaza/high views. Images are in the scratchpad at `cr15/shots/`.
+- `bench.mjs` was not run.
+
+### Evaluation untouched
+`git diff c43ed1f 6cdfcf7 -- Opus55/eval` is empty. `tools/bench.mjs` is unchanged; `bench-trace.mjs` is a separate dev tool.
