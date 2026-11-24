@@ -37,7 +37,8 @@ export function parkStructures(env) {
     else {
       const allow = p.light && lights < PARK_REAL_LIGHTS;
       if (allow) lights++;
-      const lan = (q, s, light, col) => env.lantern(q, s, light && allow, col);
+      // garden.lantern defaults its light flag to true: only an explicit false turns a light off
+      const lan = (q, s, light, col) => env.lantern(q, s, light !== false && allow, col);
       env.pavilion([p.x, p.y, p.z], p.sides, p.r, 0.35, lan);
       litEaves(M, p.x, p.y + 0.35, p.z, p.sides, p.r);
     }

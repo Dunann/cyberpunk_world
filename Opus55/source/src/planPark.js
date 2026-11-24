@@ -207,6 +207,13 @@ export function buildParkLayout(ctx) {
     const k = fi(R, x, z);
     return { walk: R.walk[k], plaza: R.plaza[k], pond: R.pond[k], style: R.style };
   };
+  // distance from a park point to the nearest lit walk, plaza or pond edge (coarse grid, exact up to 44 m)
+  out.litDist = (x, z) => {
+    const R = out.regionAt(x, z);
+    if (!R) return null;
+    const i = Math.floor((x - R.X0) / CS), j = Math.floor((z - R.Z0) / CS);
+    return i < 0 || j < 0 || i >= R.cW || j >= R.cH ? null : R.lit[j * R.cW + i];
+  };
   out.bakeTrees = (trees) => bakeTrees(out, trees);
   out.texData = (which) => texData(out, which);
   return out;

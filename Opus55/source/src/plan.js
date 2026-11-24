@@ -703,15 +703,25 @@ export function buildPlan(world) {
   stats.ms = Math.round(performance.now() - t0);
   stats.msPhases = tm;
   plan.parkTrees = (masked) => { const t = performance.now(), r = parkTrees(world, plan, masked, slopeAt); stats.msTrees = Math.round(performance.now() - t); return r; };
-  // Lawn more than 25 m from any lit walk, plaza or avenue (m2 per style): the "unlit lawn" check.
+  // Lawn more than 25 m from any lit walk, plaza or avenue (m2 per style): the "unlit lawn" check. Lantern Park and
+  // the Silk Road Garden are measured against their designed layout (the 20 m gate is in stats.park).
   plan.unlitLawn = () => {
     const res = {};
     for (let z = B.Z0; z < B.Z1; z += 6) for (let x = B.X0; x < B.X1; x += 6) {
       const cv = plan.coverAt(x, z);
       if (cv.park < 0.5) continue;
-      const c = cv.style === STYLE.LANTERN || cv.style === STYLE.QUAY ? fieldWater(x, z) : 0;
-      const p = parkPath(plan, cv.style, x, z, c, cv.owner);
-      if (Math.min(p.d, p.plaza) > 25) { const k = styleNames[cv.style]; res[k] = (res[k] || 0) + 36; }
+      let far;
+      if (cv.style === STYLE.LANTERN || cv.style === STYLE.SILK) {
+        // designed parks: the round-2 layout (planPark.js); walk, plaza and pond surfaces are not lawn
+        const q = layout.sample(x, z), d = layout.litDist(x, z);
+        if (!q || q.walk < 0 || q.plaza < 0 || q.pond < 0 || d === null) continue;
+        far = d > 25;
+      } else {
+        const c = cv.style === STYLE.QUAY ? fieldWater(x, z) : 0;
+        const p = parkPath(plan, cv.style, x, z, c, cv.owner);
+        far = Math.min(p.d, p.plaza) > 25;
+      }
+      if (far) { const k = styleNames[cv.style]; res[k] = (res[k] || 0) + 36; }
     }
     return res;
   };
