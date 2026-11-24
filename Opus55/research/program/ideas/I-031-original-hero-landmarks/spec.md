@@ -1,7 +1,8 @@
 ---
 id: I-031
 title: Original hero landmarks - seven near-replicas redesigned around one idea each, and the empty tip of the Raffles site built as terraces
-status: in-review
+status: rejected
+score: 5.33 (review-1 5.00, review-2 5.67; mean; below 7; revision requested: user rule "inspired by, never replicas")
 direction: Attack the weakness (critic 2: near-replica landmarks; critic 1 change 8; critical A3 wedge)
 family: landmark design: bespoke part assemblies with index-slot isolation
 parent: none
