@@ -504,6 +504,7 @@ export class Air {
     this.meshCount = mesh.length;
     this.total = mesh.length + other.length;
     const pd = new Float32Array(paths.flat());
+    if (typeof __DEV__ !== 'undefined' && __DEV__) (ctx.world.shared.devData ||= {}).airPaths = pd;   // identity checks
     const fd = new Float32Array(mesh.concat(other).flat());
     this.pathBuf = d.createBuffer({ size: pd.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.pathBuf, 0, pd);

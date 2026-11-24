@@ -77,6 +77,8 @@ export class Builder {
     this.propBudget = quality >= 2 ? 130000 : quality === 1 ? 70000 : 20000;
     this.props = 0;
     this.shopProps = 0;          // props added by shopfront() (awnings, AC units, stepped pavements)
+    this.rec = null;             // I-018: record of the lot being generated (set by buildings.js; counters only)
+    this.bridgeRecs = [];        // I-018: per skybridge, its two hillTowers indices and its first part
   }
 
   part(o) { return this.P.add(o); }
@@ -137,7 +139,7 @@ function waterTank(B, R, x, z, y) {
   B.prop({ x, y0: y + 0.6, z, hw: r, hd: r, h, kind: 2, prm: 48, mat: MAT.METAL, col: R() < 0.5 ? [0.55, 0.55, 0.58] : [0.3, 0.42, 0.55] });
 }
 
-function aviation(B, x, y, z, seed) {
+export function aviation(B, x, y, z, seed) {
   B.prop({ x, y0: y, z, hw: 0.45, hd: 0.45, h: 0.7, mat: MAT.EMIT, col: RED, param: 40, winW: 1, seed, flags: FLAG.BOTTOM });
 }
 
@@ -162,12 +164,13 @@ function billboard(B, R, x, z, y, a, w, h, style) {
 }
 
 // Crown on top of a tower part. Returns the highest point.
-function crown(B, R, o) {
+export function crown(B, R, o) {
   const { x, z, a, hw, hd, top, kind, prm, style, baseY } = o;
   let type = o.type;
   // keep tall crowns (spires, masts, lanterns) under the lot height cap (viewpoint sight lines)
   const capped = o.maxTop !== undefined && top + 12 > o.maxTop;
   if (capped) type = 'machine';
+  if (B.rec) B.rec.crowns.push(type);
   const m = Math.min(hw, hd);
   if (type === 'machine') {
     B.part({ x, y0: top, z, a, hw: hw * (0.3 + R() * 0.2), hd: hd * (0.3 + R() * 0.2), h: 3.5 + R() * 3, mat: MAT.CONCRETE, col: [0.32, 0.32, 0.33] });
@@ -308,7 +311,9 @@ function roofDress(B, R, x, z, a, hw, hd, top, kind, prm, o, noNeon = false) {
     const [ux, uz] = Builder.tw(x, z, a, ox, (j - (rows - 1) / 2) * 2.6 + (R() - 0.5) * hd * 0.4);
     B.prop({ x: ux, y0: top, z: uz, a, hw: len / 2, hd: 0.6, h: 1.1, mat: MAT.AC, col: [0.42, 0.43, 0.44], seed: R() * 999 });
   }
-  if (!noNeon && kind !== 2 && R() < 0.22) {
+  // o.neon (I-018 compounds only) decides the neon edge instead of the draw; other callers draw as before
+  if (!noNeon && kind !== 2 && (o.neon === undefined ? R() < 0.22 : o.neon)) {
+    if (B.rec) B.rec.dressNeon++;
     const col = pick(R, PAL.neon);
     for (const [lx, lz, ex, ez] of [[0, hd, hw, 0.06], [0, -hd, hw, 0.06], [hw, 0, 0.06, hd], [-hw, 0, 0.06, hd]]) {
       const [px, pz] = Builder.tw(x, z, a, lx, lz);
@@ -327,7 +332,7 @@ function roofDress(B, R, x, z, a, hw, hd, top, kind, prm, o, noNeon = false) {
 function streetFaces(L) { return streetFacesBox(L, L.x, L.z, L.w / 2, L.d / 2); }
 
 // Which faces of a box (centre x,z, half sizes hw,hd, aligned with lot L) face a street. Ring order: +z, -x, -z, +x.
-function streetFacesBox(L, x, z, hw, hd) {
+export function streetFacesBox(L, x, z, hw, hd) {
   const D = DISTRICTS[L.district];
   const c = Math.cos(-D.angle), s = Math.sin(-D.angle);
   const qx = (x - D.cx) * c - (z - D.cz) * s, qz = (x - D.cx) * s + (z - D.cz) * c;
@@ -612,6 +617,13 @@ export function walkways(B, R) {
   return n;
 }
 
+// I-018: where a lot's tower section starts (after its podium, signs and shop light). Reads counters only.
+function towerMark(B, podTop) {
+  const r = B.rec;
+  if (!r) return;
+  r.mark = B.P.count; r.slotMark = B.slots.length; r.hillMark = B.hillTowers.length; r.podTop = podTop;
+}
+
 // Shop spill light at a street face.
 function shopLight(B, R, L, podTop) {
   const street = streetFaces(L);
@@ -663,7 +675,9 @@ export function genHillside(B, R, L) {
   const podTop = tp.minTop;   // towers start on the lowest terrace (they pass through the higher ones)
   lotSigns(B, R, L, tp.topAt, DT.HILLSIDE);
   if (R() < 0.55) shopLight(B, R, L, podTop);
+  towerMark(B, podTop);
   const t = R();
+  if (B.rec) B.rec.path = t < 0.2 ? 'stack' : 'tower';
   const maxTop = L.maxTop || 1e9;
   const col = pick(R, PAL.res);
   const lit = 0.35 + R() * 0.3;
@@ -720,7 +734,10 @@ export function genHillside(B, R, L) {
     B.hillTowers.push({ x: T.x, z: T.z, a: L.angle, hw: T.hw, hd: T.hd, y0: podTop, top: podTop + h * (segs === 2 ? 0.6 : 1), district: L.district });
     if (kind === 0 && prm === 0) acUnits(B, R, T.x, T.z, L.angle, T.hw, T.hd, podTop, podTop, podTop + h * (segs === 2 ? 0.6 : 1), floorH, winW, 0.09);
     // rooftop neon accent: a coloured parapet line that reads from far viewpoints
-    if (kind !== 2 && R() < 0.28) B.part({ x: T.x, y0: tw.top - 0.7, z: T.z, a: L.angle, hw: tw.hw + 0.15, hd: tw.hd + 0.15, h: 0.35, kind: tw.kind, prm: tw.prm, mat: MAT.EMIT, col: pick(R, PAL.neon), param: 4.5, flags: FLAG.BOTTOM | FLAG.NOTOP });
+    if (B.rec) B.rec.towers.push({ x: T.x, z: T.z, hw: T.hw, hd: T.hd, base: podTop, top: tw.top, mat: MAT.RES, flags, winW, floorH });
+    const neonLine = kind !== 2 && R() < 0.28;
+    if (neonLine && B.rec) B.rec.parapet++;
+    if (neonLine) B.part({ x: T.x, y0: tw.top - 0.7, z: T.z, a: L.angle, hw: tw.hw + 0.15, hd: tw.hd + 0.15, h: 0.35, kind: tw.kind, prm: tw.prm, mat: MAT.EMIT, col: pick(R, PAL.neon), param: 4.5, flags: FLAG.BOTTOM | FLAG.NOTOP });
     if (R() < 0.12 && kind === 0) {
       // cross plan: perpendicular wing
       B.part({ x: T.x, y0: podTop, z: T.z, a: L.angle, hw: T.hw * 0.45, hd: T.hd + 3, h: h * 0.92, mat: MAT.RES, col, floorH, winW, baseY: podTop, param: lit, seed: R() * 999, solid: true });
@@ -766,6 +783,8 @@ export function genUrban(B, R, L) {
   const podTop = tp.minTop;
   lotSigns(B, R, L, tp.topAt, DT.URBAN);
   if (R() < 0.5) shopLight(B, R, L, podTop);
+  towerMark(B, podTop);
+  if (B.rec) B.rec.path = 'tower';
   const ins = 1.5 + R() * 3;
   const hw = L.w / 2 - ins, hd = L.d / 2 - ins;
   const k = R();
@@ -777,6 +796,7 @@ export function genUrban(B, R, L) {
   let h = floors * floorH;
   if (podTop + h > maxTop) h = Math.max(maxTop - podTop, 8);
   const tw = tower(B, R, { x: L.x, z: L.z, a: L.angle, y0: podTop, baseY: podTop, hw, hd, h, segs: R() < 0.3 ? 2 : 1, kind, prm, mat, col, floorH, winW, lit, flags, seed: R() * 999 });
+  if (B.rec) B.rec.towers.push({ x: L.x, z: L.z, hw, hd, base: podTop, top: tw.top, mat, flags, winW, floorH });
   if (mat === MAT.RES && kind === 0) acUnits(B, R, L.x, L.z, L.angle, hw, hd, podTop, podTop, podTop + h * 0.6, floorH, winW, 0.07);
   crown(B, R, { x: L.x, z: L.z, a: L.angle, hw: tw.hw, hd: tw.hd, top: tw.top, kind: tw.kind, prm: tw.prm, type: pick(R, crowns), maxTop: L.maxTop, style: DT.URBAN });
   if (tw.top - L.gMin > 140) { const [ax, az] = Builder.tw(L.x, L.z, L.angle, tw.hw * 0.9, -tw.hd * 0.9); aviation(B, ax, tw.top, az, R() * 999); }
@@ -1041,6 +1061,7 @@ export function skybridges(B, R) {
         const len = Math.hypot(ox, oz);
         const ang = Math.atan2(oz, ox);
         const col = [0.28, 0.28, 0.3];
+        B.bridgeRecs.push({ i, j, p0: B.P.count });
         B.part({ x: mx, y0: y, z: mz, a: ang, hw: len / 2, hd: 1.8, h: 3.4, mat: MAT.OFFICE, col, floorH: 3.4, winW: 2.2, baseY: y, param: 0.7, flags: FLAG.BOTTOM, seed: R() * 999, solid: true });
         B.part({ x: mx, y0: y - 0.25, z: mz, a: ang, hw: len / 2, hd: 1.95, h: 0.25, mat: MAT.EMIT, col: R() < 0.5 ? [0.3, 0.9, 1] : [1, 0.35, 0.7], param: 3.5, flags: FLAG.BOTTOM });
         n++;

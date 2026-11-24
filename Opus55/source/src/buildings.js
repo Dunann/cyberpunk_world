@@ -61,8 +61,11 @@ function generate(ctx) {
   for (const L of world.lots) if (L.type === DT.BUND && L.waterDist < 125) { const d = Math.abs(L.z + 1080); if (d < best) { best = d; clockLot = L; } }
   genLandmarks(B, R, world);
   genMarket(B, R, world, market);
+  // I-018: one record per lot (part, sign slot and hill tower ranges; where its tower section starts)
+  B.lotRecs = [];
   for (const L of world.lots) {
     const r = rng(L.seed);
+    B.rec = { L, p0: B.P.count, s0: B.slots.length, h0: B.hillTowers.length, path: null, mark: -1, towers: [], crowns: [], parapet: 0, dressNeon: 0 };
     switch (L.type) {
       case DT.HILLSIDE: genHillside(B, r, L); break;
       case DT.URBAN: genUrban(B, r, L); break;
@@ -71,7 +74,10 @@ function generate(ctx) {
       case DT.CBD: genCBD(B, r, L); break;
       default: break;
     }
+    Object.assign(B.rec, { p1: B.P.count, s1: B.slots.length, h1: B.hillTowers.length });
+    B.lotRecs.push(B.rec);
   }
+  B.rec = null;
   B.bridges = skybridges(B, rng(5150));
   B.walkways = walkways(B, rng(5151));
   finishComplex(B, world);   // the Hongyadong complex's remaining parts and its sign slots go after everything else

@@ -590,6 +590,7 @@ export class Crowd {
   init(ctx) {
     const d = ctx.device, R = ctx.renderer, q = ctx.quality.level;
     const ag = buildAgents(ctx.world, this.transit, q);
+    if (typeof __DEV__ !== 'undefined' && __DEV__) (ctx.world.shared.devData ||= {}).crowd = ag.data;   // identity checks
     this.count = ag.count;
     const mk = (size, usage, label) => d.createBuffer({ label, size, usage });
     this.agentBuf = mk(ag.data.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST, 'crowd-agents');

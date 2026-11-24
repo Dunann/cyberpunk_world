@@ -513,6 +513,7 @@ export class Cars {
     for (const r of extra) runs.push(r);
     world.shared.infillRoadRuns = extra.length;
     this.count = cars.length / 8;
+    if (typeof __DEV__ !== 'undefined' && __DEV__) (world.shared.devData ||= {}).cars = cars;   // identity checks
     const runData = new Float32Array(runs.length * 12);
     runs.forEach((r, i) => runData.set([r.ax, r.az, r.dx, r.dz, r.len, r.laneW, r.lanes, r.mode, r.yA || 0, r.yB || 0, r.deck || 0, r.ramp || 1], i * 12));
     const mk = (size, usage, label) => d.createBuffer({ label, size, usage });
