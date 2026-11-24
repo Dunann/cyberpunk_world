@@ -109,3 +109,68 @@ The code matches the spec plus review-1 fixes 1–15 and DEVIATIONS.md, apart fr
 
 ### Evaluation untouched
 `git diff main...6fa0b38 --name-only` lists only `ideas/I-009-sky-operations/{spec.md, DEVIATIONS.md}`, seven `src/` files and two new `tools/skyops-*.mjs`. Nothing in `Opus55/eval/` (poses, judge prompts, `run-eval.mjs`) or the metric folder changed.
+
+## Code review round 2 (2026-11-24)
+
+**Branch:** idea/I-009 at bab3950 (code) + 7dc6eb0 (DEVIATIONS round 2)
+**Verdict:** pass
+
+All three moderate problems from round 1 are fixed. The minor ones are fixed or reasonably recorded as deviations. No new problems were found that could change the result.
+
+### Matches the spec
+Round-1 findings, one by one:
+- **Beams under the water: fixed.** `skyopsLate` is listed after `water` in `main.js`. Its `forward` hook calls `skyops.drawLate`, which draws the beams and sprites in the shared forward pass, after the water's opaque plane. The trail and plume stay in `afterLighting`, so the SSR still reflects them. The timer change is recorded in DEVIATIONS round 2.
+- **Fix 7: fixed.**
+  - Puffs now fade on the height of each pixel: `wy = c.y + (q.x·camRight.y + q.y·camUp.y)·rr`, the plane through the puff centre, without the shift toward the camera.
+  - Pixels at 1800 m or higher are discarded, and puffs wholly above the deck are culled in the vertex shader.
+  - The plume halo fades on `hc.y + off.y`.
+  - The rocket is clipped per pixel at 1800 m (`skyopsWgsl.js` opaque fs). `_rocket` hides it only once its base reaches the deck.
+- **Cost inside the trail: bounded.** There is a near-camera fade (`smoothstep(0.6·rr, 2·rr, dist)`) plus thinning by screen size, and the measured worst case at the world boundary is 0.92 ms. Details:
+  - The thinning reuses the existing LOD scheme. I checked that the visible puff positions stay continuous when `lod.y` wraps and the CPU doubles `lod.x` while the extra levels are at their cap.
+  - Opacity compensation `1 − (1 − a)^m`: m > 0 whenever the puff is drawn, because a puff with keep = 0 has op < 0.01 and is culled. The `pow` is only evaluated behind `if (aux2.z > 0.0)`, so a non-finite value cannot leak through `mix` with weight 0.
+  - At distances of at least 2·rr and gate 0, the expressions reduce exactly to the round-1 opacity. The old `round(s/lod.x)&1` equals `j&1`, and op equals `min(lod.x/(0.8·rr)/(1 − 0.5·lod.y), 1.6)`.
+- **Seed flips: fixed.** `liveLaunches` writes each launch index j, and the seed is `trailSeed(j)`. A new unit check (3000 s at 60 fps) passes.
+- **Plume cap: fixed.** The flame is clamped to `50 − haloPeak`, and haloPeak = 3 × the halo intensity × colour is the halo's true maximum (`exp(0)·2.5 + 0.5`). The total stays at or below 50.
+- **Trees through the deck: fixed** with a mask stamp. See question 2.
+- **Bearing wording:** corrected in DEVIATIONS (6° off the CBD bearing).
+- **Glows behind the smoke:** kept as a recorded deviation. The reasoning holds: in the normal views the city's additive glows (drone show, beams, air traffic) are in front of the trail, so moving the trail later would wrongly dim them. Minor.
+
+### Answers to the coordinator's questions
+1. **The 2 km thinning limit is sound, and it is safer than a pure screen-size rule.**
+   - **Distance and screen size are equivalent here.** The field of view is fixed (`fov: 1.05` in `controls.js`, so tan(fov/2) = 0.577). A puff's screen fraction is `1.4·rr / (dist·0.577)`. The distance gate is therefore just a screen-size threshold that depends on the puff's radius.
+   - **Where the cost problem lives.** A puff can cover the whole screen only within about 2.4 × its radius, and the largest radius is about 380 m (325 m smoke + 55 m ground cloud). So full-screen layers exist only within about 0.9 km. A gate with full thinning inside 1.5 km and none beyond 2 km leaves about 2× margin, which is a geometric basis, not an eval-pose one.
+   - **Beyond 2 km**, a puff is at most about 0.46 of the screen half-height. Overlap is bounded by the column's own puffs, about 3–7 per pixel per trail, and the bench measured `skyops-fwd` at 0.024 ms average and 0.16 ms p99.
+   - **A pure screen-size rule would not be safer for the eval.** With no distance cut, thinning would start at sf > 0.25, which at 2.5 km means rr > about 257 m. That would thin the old ground-cloud puffs in B4 (2.58 km, trail 523 px), where there is no cost problem, and make the smoke lumpier than the look tuned on held-out cameras.
+   - **Does the gate make the idea look better than it is?** No. It keeps the eval views identical to the round-1 look, which gives the idea no advantage. The only rule that would change the eval stills is a larger or absent cut.
+   - **The implementer's 2.49 km figure is plausible.** I spot-checked two cameras:
+     - B2 is 2.36 km from the pad itself. At t = 100, the base puff (age 97) has drifted about 290 m along the wind (0.92, 0.38), which puts it about 2.51 km away, minus up to about 25 m of wobble.
+     - B4 is about 2.53 km from the pad, and the drift moves the puffs farther away.
+   - **What to fix in the write-up.** DEVIATIONS justifies the 2 km value by the eval cameras' distances. It should give the geometric reason (full-screen coverage only within about 2.4 × r_max ≈ 0.9 km) as the basis, and the eval distances only as a check. This is wording only, not a code problem.
+2. **The tree keep-out adds no random draws.**
+   - `stampRect` only writes mask texels.
+   - The forest scatter on the GPU only rejects positions against the mask; its hashes are by position, not random streams.
+   - The mask is also used to filter the fixed street trees before `rng(4242)` assigns rotation and hash per tree. Removing a street tree would shift that stream, but none can be inside the stamp. Street-tree candidates exist only inside district ellipses with `road ≥ 12`. The nearest is the CBD ellipse, which ends at x ≈ 4080, while the stamp starts at x ≈ 4880.
+   - `world.shared.spaceport` exists only when skyops initialised, because skyops comes before `vegetation` in the module list. Otherwise the stamp is skipped.
+3. **`skyopsLate` is safe when skyops is disabled, and its timing is accounted for.**
+   - With `?disable=skyops`, or after a failed skyops init, `skyops.ships` is undefined or null, so `drawLate` returns before binding or drawing anything.
+   - `skyops-late` has no `init`, `update` or `resize`, and its distinct name lets it be disabled on its own.
+   - `drawLate` rebinds groups 0 and 1 to the same frame and forward groups that the renderer bound, so later modules are unaffected. The leftover group-2 binding is ignored by pipelines whose layout has no group 2. Those that do have one, such as the water, set their own.
+   - Timer accounting: beams and sprites now count under the shared `forward` timer (+0.006 ms average in the bench); `skyops-fwd` covers only the trail and plume. This is recorded in DEVIATIONS.
+4. **The varyings are within limits.**
+   - The trail's vertex output uses locations 0–9: 10 inter-stage variables, against the WebGPU default `maxInterStageShaderVariables` of 16. They hold 30 scalar components (34 counting the position), within the older 60-component limit.
+   - The other pipelines use up to 7 locations (opaque 0–6, beam 0–3, plume 0–2, sprite 0–1).
+   - DEVIATIONS reports `functional.mjs` 18/18 with no WebGPU errors.
+
+### Problems
+- **minor:** DEVIATIONS round 2 justifies the 2 km thinning limit by the eval camera distances. It should state the geometric basis instead (see question 1).
+- **minor:** the per-pixel deck fade uses the billboard plane. When the camera looks steeply up at the deck, the smoke's true extent above 1800 m is somewhat underestimated. Discarding at 1800 m still prevents any drawing over the clouds, so this does not matter for fix 7.
+
+### Checks run
+- `git diff 6fa0b38 bab3950` — read every changed line in `main.js`, `skyops.js`, `skyopsLayout.js`, `skyopsWgsl.js`, `vegetation.js` and `tools/skyops-test.mjs`.
+- `cd Opus55/source && node build.mjs --dev` — builds (`out/dev.html`, 989 KB).
+- `node tools/skyops-test.mjs` — 12 checks passed, including the new launch-index check.
+- Distance check by hand from B2 and B4 to the pad and base puffs, as described in question 1.
+- Not run, as instructed: bench, GPU captures, `skyops-check.mjs`. The bench pairs in DEVIATIONS (I-009 +0.07 ms GPU average, p99 within noise, module timers about 0.04 ms) are the coordinator's evidence.
+
+### Evaluation untouched
+`git diff main...7dc6eb0 --name-only` lists only `Opus55/source/src/*`, `Opus55/source/tools/skyops-*.mjs` and files in the I-009 idea folder. Nothing in `Opus55/eval/` or the metric folder changed.
