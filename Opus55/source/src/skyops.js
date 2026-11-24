@@ -36,6 +36,8 @@ const HUE = [0.52, 0.11, 0.36]; // LED palette offset per ship: cyan, amber, gre
 // buildings) within BEAM_RANGE m of slant range. Each beam is aimed at the outer bank of its racetrack and sweeps it.
 const BEAM_SLOT = 40, BEAM_FADE = 2, BEAM_RANGE0 = 640, BEAM_RANGE1 = 720;
 const BANK_STEP = 20, BANK_MAX = 600;
+// lit-city weight around the beam's hit point (see _cityWeight), and the weight that gives a full beam
+const CITY_R0 = 60, CITY_R1 = 200, CITY_W0 = 1, CITY_W1 = 3;
 // outline lights (judge fix 3): colour * intensity per kind (spine, keel, fin edge)
 const OUTLINE_COL = [[7, 6.4, 5.6], [7, 4.3, 1.8], [5.6, 6.2, 7.4]];
 const OUTLINE = shipOutlineLights();
@@ -47,8 +49,6 @@ const R = L.HULL_R;
 const NAV = [
   [R + 0.7, -1.0, 10], [-(R + 0.7), -1.0, 10], [0, 0, -91.8], [0, R + 1.4, 12], [0, -R - 6.2, 18], [0, -R - 5.3, 30.6], [0, R + 7.4, 50],
 ];
-
-function sstep(a, b, x) { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); }
 
 const skyops = {
   name: 'skyops',
@@ -164,10 +164,11 @@ const skyops = {
 
     this.ships = null;
     this._owner = 0; this._slotW = 0.5;
+    this._lv = new Float64Array(8); this._vp = new Float64Array(3); this._cq = new Float64Array(2);
     this.vis = new Uint8Array(5);
     this.ages = new Float64Array(2);
     this.launchIdx = new Int32Array(2);
-    this._st = {}; this._pt = {};
+    this._st = { u: 0.5 }; this._pt = { u: 0.5 };
     this._r = { x: 0, y: 0, z: 0, ux: 0, uy: 1, uz: 0, lx: 1, ly: 0, lz: 0 };
     this._p3 = new Float64Array(3);
     // nav light colours: red port, green starboard, white tail, strobe A, strobe B, searchlight lamp, beacon
@@ -269,23 +270,31 @@ const skyops = {
   _planShips(ctx) {
     const traffic = { lanes: LANES, circles: CIRCLES, corridors: ctx.world.shared.airCorridors || [] };
     this.ships = L.planAirships(ctx.world, traffic);
-    // Searchlight aim, per track sample: the outer side (away from the track centre) and the distance from the
-    // track to the first dry ground on that side (0 when there is none within BANK_MAX m). Done once here, so the
-    // per-frame code only looks it up.
+    // Searchlight aim. The outer side (away from the track centre) is one side of the track's direction for the
+    // whole lap (`side`: +1 left, -1 right, the majority over the samples; a racetrack around a river stretch is
+    // convex). Per track sample: how far the beam reaches across, 60 m inland of the first dry ground on the outer
+    // side (BANK_STEP search up to BANK_MAX m; 250 m when there is none), smoothed along the track over +-40 m so
+    // the aim point moves smoothly. The per-frame code interpolates it between samples.
     for (const sh of this.ships) {
       const T = sh.track;
-      let cx = 0, cz = 0;
+      let cx = 0, cz = 0, vote = 0;
       for (let k = 0; k < T.n; k++) { cx += T.x[k]; cz += T.z[k]; }
       cx /= T.n; cz /= T.n;
-      sh.outerX = new Float32Array(T.n); sh.outerZ = new Float32Array(T.n); sh.bank = new Float32Array(T.n);
+      for (let k = 0; k < T.n; k++) vote += T.hz[k] * (T.x[k] - cx) - T.hx[k] * (T.z[k] - cz) >= 0 ? 1 : -1;
+      sh.side = vote >= 0 ? 1 : -1;
+      const raw = new Float32Array(T.n);
       for (let k = 0; k < T.n; k++) {
-        const hx = T.hx[k], hz = T.hz[k];
-        const side = hz * (T.x[k] - cx) - hx * (T.z[k] - cz) >= 0 ? 1 : -1; // + : the left side (hz, -hx)
-        const nx = side * hz, nz = -side * hx;
-        sh.outerX[k] = nx; sh.outerZ[k] = nz;
+        const nx = sh.side * T.hz[k], nz = -sh.side * T.hx[k];
+        raw[k] = 250;
         for (let m = 1; m * BANK_STEP <= BANK_MAX; m++) {
-          if (ctx.world.heightAt(T.x[k] + nx * m * BANK_STEP, T.z[k] + nz * m * BANK_STEP) > 2) { sh.bank[k] = m * BANK_STEP; break; }
+          if (ctx.world.heightAt(T.x[k] + nx * m * BANK_STEP, T.z[k] + nz * m * BANK_STEP) > 2) { raw[k] = m * BANK_STEP + 60; break; }
         }
+      }
+      sh.reach = new Float32Array(T.n);
+      for (let k = 0; k < T.n; k++) {
+        let a = 0;
+        for (let m = -10; m <= 10; m++) a += raw[(k + m + T.n) % T.n];
+        sh.reach[k] = a / 21;
       }
     }
     ctx.world.shared.airships = this.ships.map((s) => ({ name: s.name, alt: s.alt, lap: s.track.length }));
@@ -341,16 +350,50 @@ const skyops = {
     return r.y < L.CLOUD_BASE;
   },
 
-  // Lit city at a point: the number of buildings (colliders taller than 6 m and under 80 m across, so not bridge
-  // decks or the spaceport) in its 64 m cell and the four cells around it. Forest, water and open ground have none.
-  _buildingsNear(w, x, z) {
-    let n = 0;
-    for (let k = 0; k < 5; k++) {
-      const cs = w.collidersNear(x + (k === 1 ? 64 : k === 2 ? -64 : 0), z + (k === 3 ? 64 : k === 4 ? -64 : 0));
+  // Lit city around the point (this._cq x, z): a smooth, distance-weighted sum of the building footprints whose
+  // centres lie within CITY_R1 m (full weight inside CITY_R0). A footprint of 20 x 20 m counts 1 (at most 4).
+  // Buildings are colliders over 8 m tall and 6-80 m across both ways, which leaves out bridge decks, the spaceport,
+  // embankment promenades and parapets, and transit pillars. Each collider is counted once, from the 64 m cell that
+  // holds its centre. The sum is continuous as the point moves, so the beam never steps in brightness.
+  _cityWeight(w) {
+    const x = this._cq[0], z = this._cq[1];
+    const i0 = Math.floor((x - CITY_R1) / 64), i1 = Math.floor((x + CITY_R1) / 64);
+    const j0 = Math.floor((z - CITY_R1) / 64), j1 = Math.floor((z + CITY_R1) / 64);
+    let sum = 0;
+    for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+      const cs = w.collidersNear(i * 64 + 32, j * 64 + 32);
       if (!cs) continue;
-      for (let m = 0; m < cs.length; m++) { const c = cs[m]; if (c.hy > 3 && c.hx < 40 && c.hz < 40) n++; }
+      for (let m = 0; m < cs.length; m++) {
+        const c = cs[m];
+        if (c.hy <= 4 || c.hx < 3 || c.hz < 3 || c.hx >= 40 || c.hz >= 40) continue;
+        if (Math.floor(c.cx / 64) !== i || Math.floor(c.cz / 64) !== j) continue;
+        const dx = c.cx - x, dz = c.cz - z, d2 = dx * dx + dz * dz;
+        if (d2 >= CITY_R1 * CITY_R1) continue;
+        let f = Math.min(Math.max((CITY_R1 - Math.sqrt(d2)) / (CITY_R1 - CITY_R0), 0), 1);
+        f = f * f * (3 - 2 * f);
+        sum += Math.min(c.hx * c.hz / 100, 4) * f;
+      }
     }
-    return n;
+    return sum;
+  },
+
+  // Write light i of the module from this._lv (x, y, z, radius, r, g, b, flicker) straight into the shared light
+  // list, the same as lights.set, without passing doubles through a call (V8 would box each one).
+  _putLight(Li, i) {
+    const o = i * 8, d = Li.data, v = this._lv;
+    for (let k = 0; k < 8; k++) d[o + k] = v[k];
+    if (i < Li.dirtyLo) Li.dirtyLo = i;
+    if (i > Li.dirtyHi) Li.dirtyHi = i;
+  },
+
+  // View test of the sphere (this._vp x, y, z) of radius r (same as the camera test's visible()).
+  _inView(r) {
+    const c = this.cam, v = this._vp;
+    const dx = v[0] - c.x, dy = v[1] - c.y, dz = v[2] - c.z;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < r) return true;
+    const sr = r / d, cr = Math.sqrt(Math.max(0, 1 - sr * sr));
+    return (dx * c.fx + dy * c.fy + dz * c.fz) / d > c.cosA * cr - c.sinA * sr;
   },
 
   // scale a sprite's colour (the searchlight lamp follows its beam)
@@ -365,7 +408,7 @@ const skyops = {
   // One airship per call (kept apart from update so V8 optimizes it): transforms, nav and outline lights,
   // searchlight. Takes the sprite slot to start at and returns the next one.
   _updateShip(ctx, i, sp) {
-    const t = ctx.time, dt = ctx.dt, w = ctx.world, Li = ctx.lights, cam = this.cam, S = this.spr;
+    const t = ctx.time, dt = ctx.dt, w = ctx.world, Li = ctx.lights, S = this.spr;
     const showI = ctx.show.intensity, owner = this._owner, slotW = this._slotW;
     const st = this._st, pt = this._pt;
     const sh = this.ships[i];
@@ -379,7 +422,8 @@ const skyops = {
     const o = i * INST_F + 24, D = this.inst;
     D[o] = 0; D[o + 1] = i; D[o + 2] = led; D[o + 3] = -1e9;
     D[o + 4] = this.atlas.extents[i]; D[o + 5] = t * 6.0; D[o + 6] = HUE[i]; D[o + 7] = 0;
-    this.vis[i] = cam.visible(st.x, st.y, st.z, 110) ? 1 : 0;
+    const vp = this._vp; vp[0] = st.x; vp[1] = st.y; vp[2] = st.z;
+    this.vis[i] = this._inView(110) ? 1 : 0;
 
     // nav lights: red port, green starboard, white tail, 1 Hz strobes (0.12 s), searchlight lamp, red beacon
     const ph = ((t + sh.seed * 0.9) % 1 + 1) % 1;
@@ -414,31 +458,41 @@ const skyops = {
     // searchlight: aimed at the outer bank (the side away from the track centre). March outward from the ship
     // to the first dry ground (at most BANK_MAX m), aim 60 m inland of it, sweeping along and across the bank.
     let hx = st.fx, hz = st.fz; const hl = Math.sqrt(hx * hx + hz * hz) || 1; hx /= hl; hz /= hl;
-    const ti = L.trackIndex(sh, t);
-    const nx = sh.outerX[ti], nz = sh.outerZ[ti], bank = sh.bank[ti];
-    const reach = (bank > 0 ? bank + 60 : 250) + 40 * Math.sin(t * 0.11 + sh.seed * 6);
+    // outer side from the interpolated track direction (heading * dir); reach interpolated between samples
+    const nx = sh.side * hz * sh.dir, nz = -sh.side * hx * sh.dir;
+    const n = sh.track.n, u = st.u, k0 = Math.floor(u) % n, k1 = (k0 + 1) % n, fu = u - Math.floor(u);
+    const reach = sh.reach[k0] + (sh.reach[k1] - sh.reach[k0]) * fu + 40 * Math.sin(t * 0.11 + sh.seed * 6);
     const along = 120 * Math.sin(t * 0.07 + sh.seed * 5);
     const tx = ap[0] + nx * reach + hx * along, tz = ap[2] + nz * reach + hz * along;
-    const gh = w.heightAt(tx, tz), gy = Math.max(gh, 0);
+    const gy = Math.max(w.heightAt(tx, tz), 0);
     const ex = tx - ap[0], ey = gy - ap[1], ez = tz - ap[2];
     const Lb = Math.sqrt(ex * ex + ey * ey + ez * ez);
     // only the slot owner's beam, and only while it lands on lit city within range
     let bw = 0;
     if (i === owner && slotW > 0 && beamOn > 0) {
-      bw = slotW * beamOn * sstep(2, 5, this._buildingsNear(w, tx, tz)) * sstep(1, 4, gh) * (1 - sstep(BEAM_RANGE0, BEAM_RANGE1, Lb));
+      this._cq[0] = tx; this._cq[1] = tz;
+      let a = Math.min(Math.max((this._cityWeight(w) - CITY_W0) / (CITY_W1 - CITY_W0), 0), 1);
+      // (no separate land test: the aim is 20-100 m inland of the bank by construction, and a height gate stepped
+      // at steep embankment walls)
+      let c = Math.min(Math.max((Lb - BEAM_RANGE0) / (BEAM_RANGE1 - BEAM_RANGE0), 0), 1);
+      a = a * a * (3 - 2 * a); c = c * c * (3 - 2 * c);
+      bw = slotW * beamOn * a * (1 - c);
     }
     const B = this.beam, bo = i * 8;
     B[bo] = ap[0]; B[bo + 1] = ap[1] - 0.5; B[bo + 2] = ap[2]; B[bo + 3] = bw;
     B[bo + 4] = tx; B[bo + 5] = gy; B[bo + 6] = tz; B[bo + 7] = 2 + Lb * Math.tan(3.2 * Math.PI / 180);
     this._lampW(spLamp, bw);
-    if (bw > 0.01) Li.set(this.lightBase + i, tx, gy + 8, tz, 34, 170 * bw, 180 * bw, 205 * bw, 0);
-    else Li.set(this.lightBase + i, 0, -1e5, 0, 0, 0, 0, 0, 0);
+    const lv = this._lv;
+    if (bw > 0.01) { lv[0] = tx; lv[1] = gy + 8; lv[2] = tz; lv[3] = 34; lv[4] = 170 * bw; lv[5] = 180 * bw; lv[6] = 205 * bw; }
+    else { lv[0] = 0; lv[1] = -1e5; lv[2] = 0; lv[3] = 0; lv[4] = 0; lv[5] = 0; lv[6] = 0; }
+    lv[7] = 0;
+    this._putLight(Li, this.lightBase + i);
     return sp;
   },
 
   // Launch cycle (kept apart from update so V8 optimizes it): rocket, plume, trails, cloud glow, pad lights.
   _updateLaunch(ctx) {
-    const t = ctx.time, dt = ctx.dt, Li = ctx.lights, cam = this.cam, S = this.spr;
+    const t = ctx.time, dt = ctx.dt, Li = ctx.lights, S = this.spr;
     // ---- launch cycle
     const P = L.LAUNCH_PERIOD;
     const a = ((t % P) + P) % P;
@@ -448,11 +502,13 @@ const skyops = {
     let nx = r.x, ny = r.y, nz = r.z, ux = r.ux, uy = r.uy;
     this._rocketXf(false);
     D[ro + 24] = 1; D[ro + 25] = 0; D[ro + 26] = 1; D[ro + 27] = r.clip;
-    const shownPrev = this._rocket(((a - dt) % P + P) % P);
+    this._rocket(((a - dt) % P + P) % P); // previous frame's pose, for the motion vectors
     this._rocketXf(true);
-    this.vis[I_ROCKET] = shown && cam.visible(nx, ny + 40, nz, 60) ? 1 : 0;
-    void shownPrev;
-    this.vis[I_PORT] = cam.visible(this.site.x, this.plan.deckY + 40, this.site.z, 190) ? 1 : 0;
+    const vp = this._vp;
+    vp[0] = nx; vp[1] = ny + 40; vp[2] = nz;
+    this.vis[I_ROCKET] = shown && this._inView(60) ? 1 : 0;
+    vp[0] = this.site.x; vp[1] = this.plan.deckY + 40; vp[2] = this.site.z;
+    this.vis[I_PORT] = this._inView(190) ? 1 : 0;
 
     // plume and ignition flash
     let flame = 0, flen = 40, flash = 0;
@@ -494,8 +550,11 @@ const skyops = {
 
     // plume light on the pad and the terrain below the climbing rocket
     const pi = flame * 1.0 + flash * 0.6;
-    if (pi > 0 && ny < this.plan.deckY + 400) Li.set(this.lightBase + NSHIP, nx - ux * 25, ny - uy * 25, nz, 180, 9000 * pi, 5200 * pi, 2400 * pi, 0);
-    else Li.set(this.lightBase + NSHIP, 0, -1e5, 0, 0, 0, 0, 0, 0);
+    const lv = this._lv;
+    if (pi > 0 && ny < this.plan.deckY + 400) { lv[0] = nx - ux * 25; lv[1] = ny - uy * 25; lv[2] = nz; lv[3] = 180; lv[4] = 9000 * pi; lv[5] = 5200 * pi; lv[6] = 2400 * pi; }
+    else { lv[0] = 0; lv[1] = -1e5; lv[2] = 0; lv[3] = 0; lv[4] = 0; lv[5] = 0; lv[6] = 0; }
+    lv[7] = 0;
+    this._putLight(Li, this.lightBase + NSHIP);
 
     // local lights for the spaceport's own shading: 3 floods + the plume
     const U = this.U;
@@ -525,7 +584,9 @@ const skyops = {
     // ---- airships (searchlights: one slot owner at a time)
     const slot = Math.floor(t / BEAM_SLOT), tau = t - slot * BEAM_SLOT;
     this._owner = ((slot % NSHIP) + NSHIP) % NSHIP;
-    this._slotW = sstep(0, BEAM_FADE, tau) * (1 - sstep(BEAM_SLOT - BEAM_FADE, BEAM_SLOT, tau));
+    let fi = Math.min(Math.max(tau / BEAM_FADE, 0), 1), fo = Math.min(Math.max((tau - (BEAM_SLOT - BEAM_FADE)) / BEAM_FADE, 0), 1);
+    fi = fi * fi * (3 - 2 * fi); fo = fo * fo * (3 - 2 * fo);
+    this._slotW = fi * (1 - fo);
     for (let i = 0; i < NSHIP; i++) sp = this._updateShip(ctx, i, sp);
 
     this._updateLaunch(ctx);

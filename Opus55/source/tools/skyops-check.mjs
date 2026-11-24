@@ -67,14 +67,27 @@ if (mode === 'info') {
 } else if (mode === 'beams') {
   const r = await page.evaluate(async () => {
     const s = window.__skyops, ctx = window.__ctx;
-    const on = [0, 0, 0]; let maxOn = 0, n = 0;
-    for (let t = 0; t < 600; t += 0.5) {
+    // 600 s at 60 fps: share of time lit, most beams at once, and the largest frame-to-frame change of a lit beam's
+    // weight and hit point (smooth motion: both should be small)
+    const on = [0, 0, 0], prevW = [0, 0, 0], prevP = [0, 0, 0, 0, 0, 0];
+    let maxOn = 0, n = 0, maxDW = 0, maxDP = 0;
+    ctx.dt = 1 / 60;
+    for (let f = 0; f < 36000; f++) {
+      const t = f / 60;
       ctx.time = t; s.update(ctx);
       let k = 0;
-      for (let i = 0; i < 3; i++) if (s.beam[i * 8 + 3] > 0.05) { on[i]++; k++; }
+      for (let i = 0; i < 3; i++) {
+        const B = s.beam, o = i * 8, wgt = B[o + 3];
+        if (wgt > 0.05) { on[i]++; k++; }
+        if (f > 0) {
+          maxDW = Math.max(maxDW, Math.abs(wgt - prevW[i]));
+          if (wgt > 0.05 && prevW[i] > 0.05) maxDP = Math.max(maxDP, Math.hypot(B[o + 4] - prevP[i * 2], B[o + 6] - prevP[i * 2 + 1]));
+        }
+        prevW[i] = wgt; prevP[i * 2] = B[o + 4]; prevP[i * 2 + 1] = B[o + 6];
+      }
       maxOn = Math.max(maxOn, k); n++;
     }
-    return { share: on.map((v) => +(v / n).toFixed(3)), maxOn };
+    return { share: on.map((v) => +(v / n).toFixed(3)), maxOn, maxWeightStepPerFrame: +maxDW.toFixed(4), maxHitStepPerFrameM: +maxDP.toFixed(2) };
   });
   console.log(JSON.stringify(r));
 } else if (mode === 'burst') {

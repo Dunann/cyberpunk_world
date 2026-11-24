@@ -77,6 +77,7 @@ ok('trajectory: >= 35 deg from vertical at the cloud deck, ends at the deck', ()
   for (let i = 1; i < tr.x.length; i++) assert.ok(tr.x[i] >= tr.x[i - 1]);
 });
 ok('smoke timing: opacity curve, radius cap, always a young trail', () => {
+  assert.equal(L.SMOKE_LIFE, 240); // locked by review-1 fix 3
   assert.equal(L.smokeOpacity(0), 1);
   assert.ok(Math.abs(L.smokeOpacity(L.SMOKE_LIFE / 2) - Math.pow(0.5, 0.7)) < 1e-9);
   assert.equal(L.smokeOpacity(L.SMOKE_LIFE), 0);

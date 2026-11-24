@@ -148,9 +148,8 @@ Commits on `idea/I-009` after `7dc6eb0`. Round 1 was not adopted (judges 2/6 and
 |---|---|---|---|
 | `SMOKE_R0`, `SMOKE_GROW`, `SMOKE_RMAX` | 15 m + 2 m/s × age, cap 250 m | 8 m + 0.55 m/s × age, cap 100 m | The size of a real launch trail: about 16 m wide behind the nozzle, spreading by turbulence to at most 200 m. The old column was up to 500 m wide and dwarfed the city. A unit check holds the width to ≤ 200 m. |
 | Ground cloud at the pad | +55 m | +35 m (`GROUND_CLOUD_R`) | Same scaling. |
-| `SMOKE_LIFE` | 240 s | 150 s (one launch period); `LAUNCH_ALIVE` follows (175 s) | With 240 s, two old, wide trails stood in the sky for most of each cycle. With one period, at most one old trail is fading while the next rocket climbs, and a trail is still always in the sky. The opacity formula `(1 − age/life)^0.7` is unchanged. |
 
-No other timing, phase or placement constant changed: launch period, ignition, acceleration, gravity turn, wind shear, site rule, airship tracks, altitudes, speeds and phases are as in round 1.
+The smoke life stays at 240 s (`LAUNCH_ALIVE` 265 s), locked by review-1 fix 3; see "Code review round 3 fixes" below. No other timing, phase or placement constant changed: launch period, ignition, acceleration, gravity turn, wind shear, site rule, airship tracks, altitudes, speeds and phases are as in round 1.
 
 ### 1. Launch trail
 - **Shape.** The trail is a chain of elongated puffs instead of round ones. Each puff is a Gaussian along the trail (sigma 0.6 × the puff spacing, so the chain sums to a flat column, under 1% ripple) and a steep profile across it, eroded by three octaves of noise in trail coordinates. The noise is continuous from puff to puff, so the column has fine billow detail instead of blotchy round puffs.
@@ -162,9 +161,9 @@ No other timing, phase or placement constant changed: launch period, ignition, a
 
 ### 2. Searchlights
 - **At most one beam in the sky.** Ships take turns in 40 s slots (2 s fades at each end), a pure function of time, so captures are reproducible.
-- **Only on lit city.** The slot owner's beam shows only while its hit point is on land (height > 1–4 m) with at least 2–5 buildings in the hit point's 64 m cell and the four next to it, within 640–720 m slant range. "Buildings" means colliders taller than 6 m and under 80 m across, so bridge decks and the spaceport do not count. Forest, water and open ground have none.
-- **Aim.** Each beam is aimed at the outer bank of its racetrack (the side away from the track centre): it marches outward from the track in 20 m steps, up to 600 m, to the first dry ground (computed once per track sample at load), aims 60 m inland of it, and sweeps ±120 m along the bank and ±40 m across it. The round-1 sweep (15–35° from vertical, around the heading) mostly hit water.
-- **Measured** (`skyops-check.mjs beams`, 600 s): a beam is lit 21% of the time on the confluence ship, 25% on the Bund–CBD ship and 0.2% on the west ship, whose banks are forest; never more than one at once. The beam's point light and lamp sprite follow the beam's weight.
+- **Only on lit city.** The slot owner's beam shows only while its hit point is on land (height > 1–4 m) among buildings, within 640–720 m slant range. The building measure is continuous (as revised in the code-review round 3 fixes below). Forest, water and open ground have none.
+- **Aim.** Each beam is aimed at the outer bank of its racetrack (the side away from the track centre): 60 m inland of the first dry ground on that side (20 m search steps, up to 600 m, done once per track sample at load), sweeping ±120 m along the bank and ±40 m across it. The round-1 sweep (15–35° from vertical, around the heading) mostly hit water.
+- The beam's point light and lamp sprite follow the beam's weight. Measured shares are under "Code review round 3 fixes".
 
 ### 3. Readable silhouette
 - Outline lights on every ship: 9 warm-white lights along the spine, 8 amber along the keel, and 3 cool-white on each fin's outer edge, drawn as sprites of at least 1.3 px (`shipOutlineLights` in `skyopsMesh.js`). At 30–80 px the ship reads as a dotted outline of hull and fins; end-on it reads as a cross of fin lights around the hull (R2).
@@ -210,3 +209,38 @@ One brand and one short line per ship, in both scripts (for example `天舟航�
   - Mean GPU average: I-009 9.60 ms against base 9.57 ms (+0.03 ms); p99 11.59 against 11.49 ms.
   - The module's own timers average 0.028 ms (p99 0.092 ms); the beams and sprites inside the shared `forward` pass add no measurable cost (0.373 against 0.374 ms). Well inside the 0.35 ms cap. All gates pass, no WebGPU errors.
 - **Worst case near the pad** (`skyops-check.mjs stats`, same 12 cameras as round 2: the world-boundary point nearest the pad, three heights, launch ages 20/60/130/230 s): `skyops-fwd` 0.27–0.54 ms, own total at most 0.55 ms (round 2: 0.47–0.92 ms). The elongated puffs need fewer, smaller layers than the old round puffs.
+
+### Code review round 3 fixes
+- **`SMOKE_LIFE` restored to 240 s** (`LAUNCH_ALIVE` 265 s), as review-1 fix 3 requires. The 150 s life from the first round-3 commit is withdrawn. The unit test now checks the value. The 100 m width cap and the other trail changes stay.
+- **Beam brightness is continuous.**
+  - The building measure (`_cityWeight`) is a distance-weighted sum of building footprints whose centres lie within 200 m of the hit point, with full weight inside 60 m and a smooth falloff. A 20 × 20 m footprint counts 1, at most 4.
+  - Each collider is counted once, from the 64 m cell that holds its centre, so buildings that span cells are no longer counted several times.
+  - "Buildings" means colliders over 8 m tall and 6–80 m across both ways. That leaves out bridge decks, the spaceport, embankment promenades and parapets (2.4 m and 0.24 m half-width) and transit pillars.
+  - The beam's weight rises from weight 1 to 3 (smoothstep).
+  - The land-height gate was removed: it stepped at steep embankment walls. The aim point is 20–100 m inland of the first dry ground by construction, and water has no buildings.
+  - The radius is 200 m rather than 120 m because, once the embankment structures stopped counting, real buildings mostly stand more than 120 m from the banks.
+- **The beam target moves continuously.**
+  - The outer side is now one constant per ship (`side`, the majority over the track samples; the racetracks are convex). The outer direction comes from the interpolated heading.
+  - The reach across (60 m inland of the first dry ground, or 250 m when there is none) is smoothed along the track over ±40 m. It is interpolated between samples with the same fraction `shipState` uses (`st.u`, written by `trackAt`).
+  - `L.trackIndex` was removed.
+- **Measured** (`skyops-check.mjs beams`, 600 s at 60 fps, largest change between consecutive frames for each ship):
+
+| | Lit share (confluence / Bund–CBD / west) | Most beams at once | Largest weight step per frame | Largest hit-point step per frame |
+|---|---|---|---|---|
+| Before these fixes | 21% / 25% / 0.1% | 1 | 1.0 (switched fully on or off) | 64.9 m |
+| After | 4.7% / 8.8% / 0% | 1 | 0.055 (a fade over about 0.3 s) | 1.0 m |
+
+  Beams are now rarer. They light only where real buildings are near, not lamp-lit embankments.
+- **Less per-frame boxing.**
+  - `sstep` is inlined as local arithmetic.
+  - The 4 module lights are written through an index-based setter (`_putLight`) from a scratch array.
+  - The view tests use `_inView(r)` on a scratch position.
+  - The dead `shownPrev` is gone.
+- **Header comment:** `skyops.js` says 240 s again, which is now correct.
+- **Checks after these fixes.** `skyops-test` passes 13/13 checks (12 tests; one test now also checks the 240 s life). `functional.mjs` passes 18/18 under the lock, and the held-out captures show no GPU errors.
+- **Bench pair p6** (under the lock, base `7faf017`):
+  - base: GPU 9.55 ms average, 11.56 ms p99, TAA ratio 1.049;
+  - I-009: GPU 9.64 ms average, 11.62 ms p99, TAA ratio 1.048;
+  - module timers: `skyops-gbuffer` 0.009 / 0.034 ms (avg / p99), `skyops-fwd` 0.028 / 0.117 ms.
+  
+  `skyops-fwd` is up from 0.019 ms because the 240 s life keeps a second trail alive more of the time. The module total of 0.037 ms average is still well inside the 0.35 ms cap.

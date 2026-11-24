@@ -30,9 +30,8 @@ export const IGNITION = 3;              // s from ignition to lift-off
 export const ACCEL = 12;                // m/s^2 along the path: s = 0.5 * a * tau^2
 // Round 3 (fix 1 of the judge findings): the smoke follows the size of a real launch trail. Radius 8 m behind the
 // nozzle, growing 0.55 m/s (turbulent spreading) to at most 100 m, instead of 15 m + 2 m/s up to 250 m, which made a
-// 500 m wide column. The life is one launch period, so at most one old trail fades out while the next rocket climbs
-// (with 240 s two old, wide trails stood in the sky together for most of each cycle).
-export const SMOKE_LIFE = 150;          // s; opacity (1 - age / 150)^0.7
+// 500 m wide column. The life stays at 240 s, locked by review-1 fix 3.
+export const SMOKE_LIFE = 240;          // s; opacity (1 - age / 240)^0.7
 export const SMOKE_POW = 0.7;
 export const SMOKE_R0 = 8, SMOKE_GROW = 0.55, SMOKE_RMAX = 100; // radius = 8 m + 0.55 m/s * age, capped
 export const GROUND_CLOUD_R = 35;      // m added at the pad (exhaust deflected along the deck), fading over 110 m
@@ -221,6 +220,7 @@ export function buildRacetrack(st) {
 export function trackAt(tr, s, out) {
   let u = (s % tr.length + tr.length) % tr.length / tr.ds;
   const i = Math.floor(u) % tr.n, j = (i + 1) % tr.n, f = u - Math.floor(u);
+  out.u = u;                 // sample index and fraction (the searchlight interpolates its aim with it)
   out.x = tr.x[i] + (tr.x[j] - tr.x[i]) * f;
   out.z = tr.z[i] + (tr.z[j] - tr.z[i]) * f;
   let hx = tr.hx[i] + (tr.hx[j] - tr.hx[i]) * f, hz = tr.hz[i] + (tr.hz[j] - tr.hz[i]) * f;
@@ -301,18 +301,12 @@ export function planAirships(world, traffic) {
   });
 }
 
-// Index of the track sample a ship is at, at time t (same arc length as shipState).
-export function trackIndex(ship, t) {
-  const tr = ship.track;
-  const s = ship.phase + ship.dir * SHIP_SPEED * t;
-  return Math.floor((s % tr.length + tr.length) % tr.length / tr.ds) % tr.n;
-}
-
 // Ship state at time t: position, heading frame and bank. Writes into out {x,y,z, fx,fy,fz, lx,ly,lz, ux,uy,uz}.
-const _tp = { x: 0, z: 0, hx: 0, hz: 0, bank: 0 };
+const _tp = { x: 0, z: 0, hx: 0, hz: 0, bank: 0, u: 0.5 };
 export function shipState(ship, t, out) {
   const s = ship.phase + ship.dir * SHIP_SPEED * t;
   trackAt(ship.track, s, _tp);
+  out.u = _tp.u;
   const hx = _tp.hx * ship.dir, hz = _tp.hz * ship.dir;
   const bank = _tp.bank * ship.dir + 0.004 * Math.sin(t * 0.21 + ship.seed * 9);
   const pitch = 0.012 * Math.sin(t * 0.13 + ship.seed * 5) ; // ~ +-0.7 deg gentle pitching
