@@ -1,7 +1,8 @@
 ---
 id: I-005
 title: Tower kits: massing grammar plus real geometric facade relief (array and stack parts with morphing LOD)
-status: proposed
+status: rejected
+score: 5.0 (review-1 only; second review skipped because even a 9 could not reach 7 - split requested instead)
 direction: Attack the weakness (user priority 1)
 family: geometry representation: instanced facade-element arrays + typology massing grammar
 parent: none

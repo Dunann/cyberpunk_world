@@ -11,3 +11,4 @@
 - 2026-11-24: I-007 rejected (5.5): cross-tower text would fragment; most target poses outside show window. Revision requested as I-010.
 - 2026-11-24: I-004 rejected (5.83): terrace plan doesn't fit the 86 m, 66 deg cliff; solver ignores clearance above; plaza vs Raffles radius. Revision requested as I-011.
 - 2026-11-24: I-006 rejected (4.67): diagnosis right (cityRefl dot grid/stripes), but bundled changes can't win 5/7 targets; probe bake would blur. Lesson for generators: focused ideas with 2-4 targets.
+- 2026-11-24: I-005 rejected after one review (5.0; second review skipped since it could not reach the 7 bar). Bundled 7 targets again; stack bands uncosted (+0.3-0.8 ms). Split requested: I-012 facade relief (A4, B2 + street held-outs), I-013 crowns and massing (G1, A6).

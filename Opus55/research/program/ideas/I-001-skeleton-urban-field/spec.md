@@ -12,7 +12,7 @@ date: 2026-11-24
 # I-001: Skeleton field
 
 ## Idea
-Today a district is an ellipse, and the ellipse decides three things at once: where the ground is flattened, where buildings may stand, and which street grid and style apply. Buildings therefore stop at each ellipse, and everything between the ellipses is forest. A top-down map of the current world (made for this spec, see "Evidence") shows eight separate islands. The gaps are large: 150–300 m between Nan'an Old Town and the Great River, a 1 km empty plain between the confluence and Jiangbei, about 140 m between the CBD and its own river bank, and every bridge except one lands outside any street grid.
+Today a district is an ellipse, and the ellipse decides three things at once: where the ground is flattened, where buildings may stand, and which street grid and style apply. Buildings therefore stop at each ellipse, and everything between the ellipses is forest. A top-down map of the current world (made for this spec, see "Evidence") shows eight separate islands. The gaps are large: 220–420 m between Nan'an Old Town and the Great River, a 1 km empty plain between the confluence and Jiangbei, about 140 m between the CBD and its own river bank, and every bridge except one lands outside any street grid.
 
 Split the three roles of the ellipse:
 1. **Flattening** keeps the old ellipse weights, so the ground does not move and the existing districts stay as they are.
@@ -112,7 +112,7 @@ All layout data stays in `world.js`.
 
 ## Risks
 - **Random streams.** `_buildLots` draws from one stream, so any change in which cells are accepted in the first loop would re-roll every later lot in the city and change all 14 poses. The second pass with its own stream avoids this. Sign placement and sign lights also use global streams and budgets; infill slots are appended last, but the sign-light budget (2150, by priority) may still move a few lights. Compare A4 and B1 with the baseline closely.
-- **Eval cameras hover over infill land.** G2 is 62 m above the south bank, 200 m from the water. The height plane keeps roofs there below about 48 m. It is a real zoning rule, but it is the reason the plane is this low, and the reviewer should know that.
+- **Eval cameras hover over infill land.** G2 is 65 m above the south bank, 207 m from the water. The height plane keeps roofs there below about 49 m. It is a real zoning rule, but it is the reason the plane is this low, and the reviewer should know that.
 - **Infill on unflattened ground.** Between districts the natural relief stays (10–60 m). Lots on slopes get tall blank podium sides. The `gMax − gMin ≤ 14` test and `terracedPodium` limit this, but steep cells will stay empty and may leave holes of forest floor without trees. A follow-up could plant them.
 - **Quality of the fill.** The fill is made of the same buildings the critics call boxy. It fixes continuity, not building character. If I-005 or I-006 is adopted, the fill improves with them.
 - **Ragged water edge.** Grid cells meet a curved bank in steps, leaving paved wedges up to half a block deep behind the promenade. This should read as a quay road. If it reads as empty paving, a bank-aligned frontage row is the follow-up.
