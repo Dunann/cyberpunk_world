@@ -1,7 +1,8 @@
 ---
 id: I-040
 title: Near-camera car fade and the Jade east-bank infill - remove the car that fills B2, and build the bare strip of G3 and G2 with fully separate streams
-status: in-review
+status: rejected
+score: 4.00 (review-1 only; review 2 would need 10 to reach 7). Part 1 (near-camera car fade) split out as I-042, already reviewed favourably by I-032 review-1, review-2 and I-040 review-1
 direction: Attack the weakness (B2 critical "purple box"; G3 "empty brown lots"); revision of I-032 after review
 family: defect repair at the source: camera-proximity fade for cars; land-use completion with an append-only second plan pass
 parent: I-032
