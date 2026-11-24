@@ -1,7 +1,8 @@
 ---
 id: I-029
 title: South Face - the hill city steps down to the Great River on the relief that is already there (lane-field terraces, stair streets, landings)
-status: in-review
+status: rejected
+score: 5.67 (review-1 5.67, review-2 5.67; mean; below 7; revision requested as I-041: units spanning levels / roofs as upper lanes)
 direction: The hard layout problem - hill city and riverbanks
 family: section-driven hillside infill - terraces and buildings on the unchanged heightmap, laid out by one scalar field
 parent: I-015 (method), I-016 (plumbing), I-002 (problem)

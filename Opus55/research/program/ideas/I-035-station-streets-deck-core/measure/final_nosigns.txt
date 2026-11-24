@@ -1,0 +1,17 @@
+A1    0.00%  within 120 m:  0.00% {"alley":0,"gallery":0}
+A2    0.00%  within 120 m:  0.00% {}
+A3    0.00%  within 120 m:  0.00% {}
+A4    2.55%  within 120 m:  2.47% {"crossbridge":1.57,"gallery":0.68,"stair":0.29,"alley":0.01}
+A5    3.13%  within 120 m:  2.98% {"gallery":0.32,"alley":0.06,"stair":0.13,"lift":2.04,"exit":0.59}
+A6    0.10%  within 120 m:  0.00% {"crossbridge":0.02,"gallery":0.03,"stair":0.03,"bridge":0.02}
+B1    0.00%  within 120 m:  0.00% {}
+B2   13.92%  within 120 m: 13.47% {"deck":10.88,"column":2.04,"span":0.99,"spine":0}
+B3    0.00%  within 120 m:  0.00% {"deck":0}
+B4    0.12%  within 120 m:  0.00% {"deck":0.1,"column":0.01,"span":0.01}
+G1    0.00%  within 120 m:  0.00% {"stair":0,"gallery":0}
+G2    0.02%  within 120 m:  0.00% {"gallery":0,"crossbridge":0.01,"stair":0,"alley":0}
+G3    0.01%  within 120 m:  0.00% {"deck":0,"stair":0,"gallery":0,"bridge":0,"alley":0}
+G4    0.01%  within 120 m:  0.00% {"stair":0,"gallery":0}
+H7    1.04%  within 120 m:  0.97% {"gallery":0.91,"alley":0.03,"crossbridge":0.05,"stair":0.04}
+H8   16.79%  within 120 m: 16.60% {"deck":12.24,"column":3.55,"span":0.92,"spine":0.08}
+H9    1.02%  within 120 m:  0.00% {"gallery":0.62,"crossbridge":0.24,"alley":0.08,"stair":0.08}
