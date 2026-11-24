@@ -1,7 +1,8 @@
 ---
 id: I-028
 title: CBD deck loop - a two-level pedestrian deck network around the tallest tower, with escalators, lifts and an optional sky-corridor ring
-status: in-review
+status: rejected
+score: 4.33 (review-1 4.33, review-2 4.33; mean; below 7; revision planned as user priority 7)
 direction: User priority 7 (elevated walkways, crazy 3D feeling), Zone B
 family: urban circulation: multi-level pedestrian network (new family; sibling of I-027)
 parent: none
