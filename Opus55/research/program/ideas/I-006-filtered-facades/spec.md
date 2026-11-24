@@ -1,7 +1,8 @@
 ---
 id: I-006
 title: Facades that filter: glass reflects a baked image of the real city, and windows light in coherent patterns
-status: proposed
+status: rejected
+score: 4.67 (review-1 4.67, review-2 4.67)
 direction: Attack the weakness (user priority 1: "pixelated")
 family: shading representation: baked city reflection cubemaps + semantic occupancy + scale-aware facade bands
 parent: none
