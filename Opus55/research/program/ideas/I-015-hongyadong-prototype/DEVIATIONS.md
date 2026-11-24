@@ -56,3 +56,20 @@ Branch `idea/I-015`. Code: `Opus55/source/src/buildings_stilts.js` (new), `build
 - **Dev tools.**
   - `?hydmask` repaints the complex in flat colours (magenta, with masonry green) and every other building black. It was used to measure the screen region, masonry share and glow.
   - `?hydaudit` stores the audit in `world.shared.landmarkSites.stilts.audit`.
+
+## Quick test results (implementer, not the official evaluation)
+- **Audit (`?hydaudit`):** 0 overlaps and 0 unsupported pieces out of 9,363; 4,784 designed joints. The complex has 10,942 parts, of which 3,721 are props and 257 are masonry, plus 38 lights.
+- **Masonry share** of the complex's screen area: 1.2% (H1), 0.7% (H3), 1.6% (H2).
+- **Glow, mean luminance (0–255)** over the complex region, I-015 against baseline. "Same region" is the old complex's screen region measured in the I-015 image.
+
+  | Camera | I-015 | Baseline | I-015 in the old complex's region |
+  |---|---|---|---|
+  | H1 | 105.2 | 97.9 | 100.4 |
+  | H3 | 104.6 | 99.1 | 104.9 |
+  | H2 | 99.0 | 96.4 | 98.7 |
+
+- **`functional.mjs`:** 18/18.
+- **GPU: not settled.** Up to three other implementers' browsers shared the GPU throughout; under that contention even the baseline read 25–31 ms on average.
+  - Only one back-to-back pair ran with no other browser seen. Baseline: average 9.51, p99 11.45, worst 13.89 (PASS). I-015: average 10.12, p99 22.22, worst 23.90 (fails on p99). Its lighting pass p99 was 10.9 ms against the baseline's 4.3.
+  - Static probes at fly-through positions near the complex (u 0–0.13) show I-015 at +0.1 to +0.5 ms over the baseline, with no position spiking.
+  - Whether the p99 rise is real or contention is unresolved. It needs a fly-through bench on a quiet GPU.
