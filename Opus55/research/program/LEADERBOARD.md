@@ -1,6 +1,6 @@
 # Leaderboard (eval v1)
 
-**Current best:** baseline + I-014 + I-015 + I-016 (merges on main, 2026-11-24). Critic zone scores not yet re-run (baseline: A 5.33, B 5.34, G 5.12). GPU 9.51-9.57 ms average.
+**Current best:** baseline + I-014 + I-015 + I-016 (merges on main, 2026-11-24). Critic zone scores (2 critics, 2026-11-24): **A 5.67, B 5.62, G 5.62** (baseline A 5.33, B 5.34, G 5.12). Goal: 9+ everywhere. GPU 9.51-9.57 ms average.
 
 | Idea | Targets | Pairwise (target wins / clear losses elsewhere) | Gates (GPU average ms) | Decision | Zone A / B / G after |
 |---|---|---|---|---|---|
@@ -13,3 +13,5 @@
 | I-016 (88b8ab6, vs I-014r2) | G2, G3, B3 | judge A: 3/3 clear, 0; judge B: 3/3 clear, 0 | pass (+0.21 ms) | met rule; re-judged after merge with I-015 | — |
 | I-016 merged (9115317, vs main-014-015) | G2, G3, B3 | judge C: 3/3 clear, 0; judge D: 3/3 clear, 0 | pass (+0.19 ms) | **adopted**; result review: holds with caveats (aerial gain only, judge-named park defects) | pending |
 | I-020 airships only (9cfe031) | 8 rule-placed fresh cameras + no clear loss on eval poses | judge A: fresh 5/8 (needs 6), eval poses 0 losses | pass (+0.03 ms) | not adopted; losses where a close ship hides a landmark | — |
+| I-018 round 1 (e06fc0f) | A6, G1, G3 | judge A: 2/3, 0; judge B: 2/3, 0 (both prefer main at A4 and u12: lost skybridges and crowned tower) | pass (+0.02 ms) | not adopted; fix round | — |
+| I-018 round 2 (1aa3041, 378 lots) | A6, G1, G3 | judge C: 1/3, 0; judge D: 0/3, 0 (both: u12 burst 4/4 wins, A1 slight loss, rest ties) | pass | **not adopted**: nearly neutral after keeping bridges and crowns | — |
