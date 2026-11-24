@@ -529,8 +529,8 @@ export class World {
     // land-use plan (I-016): infill lots (kept apart from this.lots) and the coverage map for the ground shaders
     this.plan = buildPlan(this);
     this.infillLots = this.plan.infill;
-    this.coverTex = device.createTexture({ size: [this.plan.W, this.plan.H], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, label: 'planCover' });
-    device.queue.writeTexture({ texture: this.coverTex }, this.plan.tex, { bytesPerRow: this.plan.W * 4 }, [this.plan.W, this.plan.H]);
+    this.plan.upload(device);
+    this.coverTex = this.plan.coverTex;
   }
 }
 

@@ -263,6 +263,17 @@ export class StreetLamps {
     this.slot = new Uint8Array(this.count);
     this.range = 300;
     this.terrain = terrain;
+    this.lastCam = new Float64Array(3);   // camera position of the previous update (preallocated)
+    this.hasLastCam = false;
+    this.k = 0;                           // real-light slots used in the current update
+  }
+
+  // Real light for lamp i at intensity f (0..1) in the next free slot.
+  _emit(L, P, i, f) {
+    const led = P[i * 4 + 3] > 0.5;
+    f *= 95;
+    L.set(this.lightBase + this.k, P[i * 4], P[i * 4 + 1], P[i * 4 + 2], 24, (led ? 0.72 : 1.0) * f, (led ? 0.84 : 0.52) * f, (led ? 1.0 : 0.18) * f, 0);
+    this.k++;
   }
 
   update(ctx) {
@@ -288,20 +299,15 @@ export class StreetLamps {
     }
     R = Math.max(R, 60);
     // a jump of the camera (pose change, teleport) or a frozen clock snaps; normal motion fades over ~0.4 s
-    const moved = this.lastCam ? Math.hypot(c.x - this.lastCam[0], c.y - this.lastCam[1], c.z - this.lastCam[2]) : 1e9;
-    this.lastCam = [c.x, c.y, c.z];
+    const lc = this.lastCam;
+    const moved = this.hasLastCam ? Math.hypot(c.x - lc[0], c.y - lc[1], c.z - lc[2]) : 1e9;
+    lc[0] = c.x; lc[1] = c.y; lc[2] = c.z; this.hasLastCam = true;
     const snap = !(ctx.dt > 0) || moved > 60;
     this.range = snap ? R : this.range + (R - this.range) * Math.min(1, ctx.dt * 4);
     R = Math.min(this.range, R);
     const rate = snap ? 1 : ctx.dt / 0.4;
     const cur = this.cur, slot = this.slot;
-    let k = 0;
-    const emit = (i, f) => {
-      const led = P[i * 4 + 3] > 0.5;
-      f *= 95;
-      L.set(this.lightBase + k, P[i * 4], P[i * 4 + 1], P[i * 4 + 2], 24, (led ? 0.72 : 1.0) * f, (led ? 0.84 : 0.52) * f, (led ? 1.0 : 0.18) * f, 0);
-      k++;
-    };
+    this.k = 0;
     // pass 1: lamps inside the range (at most `budget` of them)
     for (let i = 0; i < n; i++) {
       const dd = this.dist[i];
@@ -310,15 +316,16 @@ export class StreetLamps {
       const t = Math.min(Math.max((dd - R * 0.75) / (R * 0.25), 0), 1);
       const target = 1 - t * t * (3 - 2 * t);
       cur[i] += Math.max(-rate, Math.min(rate, target - cur[i]));
-      if (k < this.maxLights && cur[i] > 0.002) { emit(i, cur[i]); slot[i] = 1; }
+      if (this.k < this.maxLights && cur[i] > 0.002) { this._emit(L, P, i, cur[i]); slot[i] = 1; }
     }
     // pass 2: lamps outside the range that are still fading out use the spare slots
     for (let i = 0; i < n; i++) {
       if (slot[i] || cur[i] <= 0) continue;
       if (this.dist[i] < R) continue;
       cur[i] = Math.max(0, cur[i] - rate);
-      if (cur[i] > 0.002 && k < this.maxLights) emit(i, cur[i]); else cur[i] = 0;
+      if (cur[i] > 0.002 && this.k < this.maxLights) this._emit(L, P, i, cur[i]); else cur[i] = 0;
     }
+    const k = this.k;
     for (let j = k; j < (this.lastK || 0); j++) L.set(this.lightBase + j, 0, -1e5, 0, 0, 0, 0, 0, 0);
     this.lastK = k;
     this.realRange = R;

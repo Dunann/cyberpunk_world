@@ -342,7 +342,7 @@ export class Renderer {
       { binding: 6, visibility: VFC, buffer: { type: 'uniform' } },
       { binding: 7, visibility: VFC, texture: { sampleType: 'float' } },   // land-use plan coverage (plan.js)
     ] });
-    const VF =GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
     this.forwardLayout = device.createBindGroupLayout({ label: 'forward', entries: [
       { binding: 0, visibility: VF, texture: { sampleType: 'depth' } },
       { binding: 1, visibility: VF, texture: { sampleType: 'float' } },

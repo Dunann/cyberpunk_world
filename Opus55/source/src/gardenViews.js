@@ -842,7 +842,9 @@ export function hillsideLife(env, world) {
     // the same random draws, so every later hamlet stays as it was
     const skip = !!(world.plan && world.plan.blocks(x, z, 40));
     const M = skip ? SINK_M : env.M, lantern = skip ? noop : env.lantern, col = skip ? noop : env.col;
-    const lights = skip ? [] : env.lights, reserve = skip ? [] : env.reserve;
+    // the reserve rectangles of a suppressed hamlet are kept apart: the vegetation module still stamps them into the
+    // mask that filters the street trees, so the fixed-tree stream rng(4242) cannot shift (see vegetation.js)
+    const lights = skip ? [] : env.lights, reserve = skip ? (world.shared.suppressedReserve ||= []) : env.reserve;
     const gl = Math.hypot(ddx, ddz), dX = -ddx / gl, dZ = -ddz / gl;   // downhill
     const tX = -dZ, tZ = dX;                                         // along the contour
     const yaw = Math.atan2(dZ, dX);

@@ -320,7 +320,7 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
     let hr = saturate((i.wp.y - i.info.w) / select(12.0, 14.0, sp == 1.0));
     let under = 0.2 + 0.8 * saturate(0.25 - n.y);
     let up = (1.0 - smoothstep(0.05, 0.75, hr)) * under;
-    emis += glowColor(glow) * (albedo + vec3f(0.015)) * up * 16.0;
+    emis += glowColor(glow) * (albedo + vec3f(0.015)) * up * 12.0;
   }
   var wet = select(0.0, 0.5, mat == 0.0);
   // moonlit mist lying in the valley hollows south of the city
@@ -464,10 +464,24 @@ export default {
 
     // fixed trees: street avenues + garden
     // street trees also respect the exclusion mask (landmark plazas, viewpoint sightlines)
-    const fixed = (await this._streetTrees(ctx)).filter((t) => {
+    // Land-use plan (I-016): the filter mask also holds the reserve rectangles of the hamlets the plan suppressed, so
+    // it is exactly the mask of a build without the plan, and the street trees and the rng(4242) draws below stay the
+    // same by construction (before round 2 this was only true by measurement).
+    const supp = world.shared.suppressedReserve || [];
+    let filterMask = mask;
+    if (supp.length) { filterMask = mask.slice(); for (const g of supp) stampRectInto(filterMask, g.x, g.z, g.hw, g.hd, g.angle || 0, 2); }
+    const street = await this._streetTrees(ctx);
+    const keepTree = (m) => (t) => {
       const i = Math.floor((t[0] - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES), j = Math.floor((t[2] - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES);
-      return !(i >= 0 && j >= 0 && i < MASK_RES && j < MASK_RES && mask[j * MASK_RES + i]);
-    });
+      return !(i >= 0 && j >= 0 && i < MASK_RES && j < MASK_RES && m[j * MASK_RES + i]);
+    };
+    const fixed = street.filter(keepTree(filterMask));
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      // dev check: every hamlet reserve, kept or suppressed, reached the filter mask
+      const g = world.shared.garden || {};
+      console.assert(!world.plan || supp.length === 0 || g.hamlets > 0, 'I-016: suppressed hamlet reserves without hamlets');
+      world.shared.fixedPrefix = { street: fixed.length, streetIfSuppressedDropped: street.filter(keepTree(mask)).length, garden: (world.shared.gardenTrees || []).length, suppressedReserve: supp.length };
+    }
     for (const g of world.shared.gardenTrees || []) fixed.push(g);
     // land-use plan (I-016): park trees are appended after every existing fixed tree (so the rng(4242) draws of
     // those stay the same); infill lots are stamped into the mask only now, after the street-tree filter
@@ -478,6 +492,7 @@ export default {
       };
       const parkTrees = world.plan.parkTrees(masked);
       for (const t of parkTrees) fixed.push(t);
+      world.plan.bakeTreeLight(parkTrees);   // ground glow under the uplit trees
       this.parkTreeCount = parkTrees.length;
       world.shared.parkTrees = { count: parkTrees.length, uplit: parkTrees.filter((t) => t[4] % 1 > 0).length };
       stampLots(mask, world.infillLots);

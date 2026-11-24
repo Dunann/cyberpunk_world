@@ -75,6 +75,20 @@ const res = await page.evaluate(async (a) => {
   for (const r of w.routes) { g.beginPath(); for (const p of r.dense) g.lineTo(...tp(p.x, p.z)); g.stroke(); }
   g.strokeStyle = 'rgba(255,0,255,0.9)';
   for (const L of w.landmarks) if (L.r > 0) { g.beginPath(); g.arc(...tp(L.x, L.z), L.r / S, 0, Math.PI * 2); g.stroke(); }
+  // designed park layout: walks, plazas, ponds, lamps, gates
+  if (plan && plan.layout) {
+    const Ly = plan.layout;
+    for (const wk of Ly.walks) {
+      g.strokeStyle = wk.kind === 'path' ? 'rgba(255,255,255,0.75)' : 'rgba(255,200,80,1)'; g.lineWidth = wk.kind === 'path' ? 1 : 1.5;
+      g.beginPath(); for (let i = 0; i < wk.pts.length; i += 2) g.lineTo(...tp(wk.pts[i], wk.pts[i + 1])); g.stroke();
+    }
+    g.fillStyle = 'rgba(255,120,40,0.9)';
+    for (const pl of Ly.plazas) { g.beginPath(); g.arc(...tp(pl.x, pl.z), Math.max(pl.r / S, 1), 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = 'rgba(40,120,255,0.95)';
+    for (const pd of Ly.ponds) { g.beginPath(); g.arc(...tp(pd.x, pd.z), pd.r / S, 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = 'rgba(255,0,0,1)';
+    for (const gt of Ly.gates) g.fillRect(...tp(gt.x - 4, gt.z - 4), 3, 3);
+  }
   // grid labels every 500 m
   g.fillStyle = 'white'; g.font = '10px sans-serif';
   for (let x = Math.ceil(x0 / 500) * 500; x < x1; x += 500) for (let z = Math.ceil(z0 / 500) * 500; z < z1; z += 500) {
@@ -83,7 +97,7 @@ const res = await page.evaluate(async (a) => {
   const blob = await oc.convertToBlob({ type: 'image/png' });
   const b64 = await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(fr.result.split(',')[1]); fr.readAsDataURL(blob); });
   const sh = w.shared;
-  const extra = plan ? { unlitLawn: plan.unlitLawn(), infill: sh.infillStats, parkTrees: sh.parkTrees, infillStreetLamps: sh.infillStreetLamps, infillRoadRuns: sh.infillRoadRuns, signs: sh.signStats, lights: window.__ctx.lights.count, silk: plan.silk, avenues: plan.avenues.map((v) => [v.ax, v.az, v.bx, v.bz].map(Math.round)) } : null;
+  const extra = plan ? { unlitLawn: plan.unlitLawn(), fixedPrefix: sh.fixedPrefix, planRunLotHits: sh.planRunLotHits, garden: sh.garden, infill: sh.infillStats, parkTrees: sh.parkTrees, infillStreetLamps: sh.infillStreetLamps, infillRoadRuns: sh.infillRoadRuns, signs: sh.signStats, lights: window.__ctx.lights.count, silk: plan.silk, avenues: plan.avenues.map((v) => [v.ax, v.az, v.bx, v.bz].map(Math.round)) } : null;
   return { b64, stats: plan ? { ...plan.stats, ...extra } : null, lots: w.lots.length };
 }, [...rect, px]);
 fs.mkdirSync(path.dirname(outFile), { recursive: true });

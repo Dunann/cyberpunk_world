@@ -9,6 +9,8 @@ import { placeSigns, placeInfillSigns, selectLights, SIGN_FLOATS } from './signP
 
 const SIGN_LIGHT_BUDGET = 2150;
 const INFILL_SIGN_LIGHTS = 60;   // separate pool for the land-use plan's infill signs
+const PARK_LANTERN_SCALE = 1.3;  // park lanterns (land-use plan) are a little larger than the street ones
+const PARK_LANTERN_DIST = 900;   // and drawn up to this distance
 
 const SIGN_WGSL = /* wgsl */ `
 struct Sign { a: vec4f, b: vec4f, c: vec4f, d: vec4f, e: vec4f, f: vec4f };
@@ -415,6 +417,16 @@ export default {
     this.lanBuf = d.createBuffer({ label: 'lanterns', size: la.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.lanBuf, 0, la);
     this.lanGroup = d.createBindGroup({ layout: this.lanLayout, entries: [{ binding: 0, resource: { buffer: this.lanBuf } }] });
+    // land-use plan parks (I-016): red lanterns hanging from the lantern posts of Lantern Park (gardenParks.js);
+    // the same instanced lantern, in cells of their own, drawn farther out (they mark the walks seen from above)
+    const posts = (ctx.world.plan && ctx.world.plan.layout.posts) || [];
+    const parkRows = posts.map((p, i) => [p.x + p.nx * 0.5, ctx.world.heightAt(p.x, p.z) + 2.78, p.z + p.nz * 0.5, i * 0.618 % 1 * 6.28, PARK_LANTERN_SCALE, 0, 0.6, Math.atan2(p.nz, p.nx)]);
+    this.parkLanCells = new Cells(parkRows, 160, 0, 2, 2);
+    const pl = new Float32Array(Math.max(1, parkRows.length) * 8);
+    this.parkLanCells.rows.forEach((r, i) => pl.set(r, i * 8));
+    this.parkLanBuf = d.createBuffer({ label: 'park-lanterns', size: pl.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(this.parkLanBuf, 0, pl);
+    this.parkLanGroup = d.createBindGroup({ layout: this.lanLayout, entries: [{ binding: 0, resource: { buffer: this.parkLanBuf } }] });
     const budget = Math.min(SIGN_LIGHT_BUDGET, 8192 - ctx.lights.count - 64);
     const lights = selectLights(res.lightC, budget);
     for (const L of lights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
@@ -454,6 +466,15 @@ export default {
       pass.setVertexBuffer(0, this.lanMesh.vb);
       pass.setIndexBuffer(this.lanMesh.ib, 'uint32');
       for (let i = 0; i < l.draws; i++) pass.drawIndexed(this.lanMesh.count, l.drawCount[i], 0, 0, l.drawFirst[i]);
+    }
+    const pl = this.parkLanCells;
+    pl.cull(this.test, PARK_LANTERN_DIST);
+    if (pl.draws) {
+      pass.setPipeline(this.lanPipe);
+      pass.setBindGroup(1, this.parkLanGroup);
+      pass.setVertexBuffer(0, this.lanMesh.vb);
+      pass.setIndexBuffer(this.lanMesh.ib, 'uint32');
+      for (let i = 0; i < pl.draws; i++) pass.drawIndexed(this.lanMesh.count, pl.drawCount[i], 0, 0, pl.drawFirst[i]);
     }
   },
 };

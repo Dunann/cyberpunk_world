@@ -1,8 +1,11 @@
-// Park ground for the land-use plan (plan.js): lawns, paved walks with lit edge lines and bollard lights, light
-// pools, plazas, city squares, the Silk Road Garden's star plaza and the bridge approach avenues. All analytic:
-// no point lights. Layout comes from the water distance c, a coordinate a along the river reach, the owner's
-// street grid (squares) and a few segments computed by the plan. The CPU mirror of the walk curves is in plan.js
-// (walk0c / walk1c / walk2c / parkPathDist); keep them identical.
+// Park ground for the land-use plan (plan.js): lawns, paved walks with lit edge lines, light pools, plazas, ponds,
+// city squares, the Silk Road Garden's star plaza and the bridge approach avenues. No point lights.
+//  - Lantern Park and the Silk Road Garden (the designed parks) read the layout map and the light map baked by
+//    planPark.js: signed distances to walk, plaza and pond edges (LED curbs, paving, water) and the pools of the
+//    pole lamps, lanterns and uplit trees.
+//  - The quay walk, the city squares and the approach avenues stay analytic: layout from the water distance c, a
+//    coordinate a along the river reach, the owner's street grid and a few segments computed by the plan. The CPU
+//    mirror of those curves is in plan.js (walk0c, parkPath); keep them identical.
 //
 // parkShade() is called by groundShade (terrainShade.js) where the plan's park coverage is above zero.
 
@@ -19,19 +22,30 @@ function segCode(name, segs) {
 }
 
 // Light levels (HDR). Tuned on held-out cameras only.
-export const PARK_LIGHT = { edge: 2.4, dot: 14, bollard: 40, lamp: 95, plaza: 1.0 };
+export const PARK_LIGHT = { edge: 2.4, dot: 14, bollard: 40, lamp: 95, plaza: 1.0, led: 3.2, pond: 2.0 };
 
 export function parkWGSL(plan) {
   const silk = plan.silk || { x: 0, z: 0, r: 0, rings: [0, 0, 0], spokeR: 0 };
   const L = PARK_LIGHT;
+  const lay = plan.layout;
+  const reg = (st) => lay.regions.find((r) => r.style === st) || { X0: 0, Z0: 0, off: 0 };
+  const rl = reg(1), rs = reg(2);
   return /* wgsl */ `
+@group(1) @binding(11) var parkLay: texture_2d<f32>;   // x walk edge distance, y plaza, z pond (m, negative inside), w LED curb
+@group(1) @binding(12) var parkLit: texture_2d<f32>;   // rgb light pools of lamps, lanterns and uplit trees
+const PL_ATLAS = vec2f(${f(lay.atlasW)}, ${f(lay.atlasH)});
+const PL_O1 = ${v2(rl.X0, rl.Z0)};
+const PL_OFF1 = ${f(rl.off)};
+const PL_O2 = ${v2(rs.X0, rs.Z0)};
+const PL_OFF2 = ${f(rs.off)};
+const PL_TEX = 2.0;
 const PK_AXIS = ${v2(plan.axis[0], plan.axis[1])};
 const PLAZA_IN = ${f(PLAZA_IN)};
 const SILK_C = ${v2(silk.x, silk.z)};
 const SILK_R = ${f(silk.r)};
 const SILK_RING = vec3f(${silk.rings.map(f).join(', ')});
 const SILK_SPOKE = ${f(silk.spokeR)};
-const PK_LAWN = vec3f(0.036, 0.054, 0.025);
+const PK_LAWN = vec3f(0.058, 0.082, 0.042);
 const PK_GOLD = vec3f(1.0, 0.62, 0.26);
 const PK_JADE = vec3f(0.35, 1.0, 0.62);
 const PK_TURQ = vec3f(0.15, 0.85, 0.9);
@@ -42,6 +56,8 @@ const PK_DOT = ${f(L.dot)};
 const PK_BOLLARD = ${f(L.bollard)};
 const PK_LAMP = ${f(L.lamp)};
 const PK_PLAZA = ${f(L.plaza)};
+const PK_LED = ${f(L.led)};
+const PK_POND = ${f(L.pond)};
 
 // nearest point on segment a-b: keeps (distance, along, index) of the closest so far
 fn segNear(p: vec2f, a: vec2f, b: vec2f, r: vec3f, idx: f32) -> vec3f {
@@ -97,6 +113,88 @@ fn pkWalk(h0: PathHit, d: f32, s: f32, hw: f32, sp: f32, px: f32) -> PathHit {
 
 struct ParkOut { albedo: vec3f, rough: f32, emis: vec3f, wet: f32, flat: f32 };
 
+// Lantern Park (style 1) and the Silk Road Garden (style 2): layout and light from the baked maps.
+fn designedPark(p: vec3f, style: f32, px: f32, near: f32, lawn: vec3f) -> ParkOut {
+  var o: ParkOut;
+  let xz = p.xz;
+  let lantern = style < 1.5;
+  let uv = select((vec2f(PL_OFF2, 0.0) + (xz - PL_O2) / PL_TEX) / PL_ATLAS, (vec2f(PL_OFF1, 0.0) + (xz - PL_O1) / PL_TEX) / PL_ATLAS, lantern);
+  let Ly = textureSampleLevel(parkLay, sampClamp, uv, 0.0);
+  let E = textureSampleLevel(parkLit, sampClamp, uv, 0.0).rgb;
+  let edgeCol = select(PK_TURQ, PK_GOLD, lantern);
+  o.albedo = lawn; o.rough = 0.9; o.wet = 0.25; o.flat = 0.0;
+  // walks and plazas: stone slabs with joints, wet
+  let walkM = 1.0 - smoothstep(-px * 0.5, px * 0.5, Ly.x);
+  let plazaM = 1.0 - smoothstep(-px * 0.5, px * 0.5, Ly.y);
+  let pm = max(walkM, plazaM);
+  if (pm > 0.0) {
+    let cell = xz / vec2f(1.2, 0.8);
+    let sl = fract(cell);
+    let jt = (1.0 - smoothstep(0.0, 0.05, min(min(sl.x, 1.0 - sl.x), min(sl.y, 1.0 - sl.y)))) * near;
+    let stone = vec3f(0.11, 0.104, 0.098) * (0.85 + 0.3 * hash21(floor(cell))) * (1.0 - 0.45 * jt);
+    o.albedo = mix(o.albedo, stone, pm);
+    o.rough = mix(o.rough, 0.45, pm);
+    o.wet = mix(o.wet, 0.85, pm);
+  }
+  // LED curb (0.22 m) along the main walks; LED ring around the plazas
+  var em = edgeCol * pkLine(Ly.x - 0.11, 0.11, px) * saturate(Ly.w) * (1.0 - plazaM) * PK_LED;
+  em += edgeCol * pkLine(Ly.y - 0.12, 0.12, px) * PK_LED * 1.2;
+  // plaza floor: slow waves of LED tiles (gold and jade), livelier during the light show
+  if (plazaM > 0.0 && lantern) {
+    let tq = xz / 1.4;
+    let tf = abs(fract(tq) - 0.5);
+    let tile = 1.0 - smoothstep(0.36, 0.42, max(tf.x, tf.y));
+    let ph = time() * (0.35 + F.show.x * 1.6) + Ly.y * 0.18 + hash21(floor(tq)) * 0.6;
+    let wave = 0.5 + 0.5 * sin(ph * 2.0);
+    em += mix(PK_GOLD, PK_JADE, wave) * (0.2 + 0.5 * wave) * mix(0.55, tile, near) * plazaM * smoothstep(0.5, 1.5, -Ly.y) * PK_PLAZA;
+  }
+  if (!lantern) {
+    // the garden's star plaza (analytic, centred on SILK_C)
+    let q = xz - SILK_C;
+    let r = length(q);
+    if (r < SILK_R + 1.0) {
+      let g1 = abs(fract(q / 4.5) - 0.5);
+      let q2 = vec2f(q.x + q.y, q.y - q.x) * 0.70710678;
+      let g2 = abs(fract(q2 / 4.5) - 0.5);
+      let lat = max(pkLine((0.5 - max(g1.x, g1.y)) * 4.5, 0.05, px), pkLine((0.5 - max(g2.x, g2.y)) * 4.5, 0.05, px));
+      let s1 = max(abs(q.x), abs(q.y)) - 17.0;
+      let s2 = max(abs(q2.x), abs(q2.y)) - 17.0;
+      let star = pkLine(min(s1, s2), 0.14, px);
+      let pulse = 0.75 + 0.25 * sin(time() * 0.8 - r * 0.15) + F.show.x * 0.4 * sin(time() * 4.0 - r * 0.3);
+      em += (PK_TURQ * lat * 0.8 + PK_MAG * star * 2.2 * pulse) * pkBand(r, SILK_R, px) * PK_PLAZA;
+    }
+    // water channel down the middle of the garden avenues
+    let ga = gardenAvenueNear(xz);
+    if (ga.x < 3.0 && r > SILK_R - 1.0) { o.flat = max(o.flat, pkBand(ga.x, 0.8, px)); }
+  }
+  // lotus ponds: dark mirror water with pads and a few glowing flowers, a stone rim with a warm lit edge
+  let pondM = 1.0 - smoothstep(-px * 0.5, px * 0.5, Ly.z);
+  if (Ly.z < 1.2) {
+    let rim = pkBand(Ly.z - 0.55, 0.55, px);
+    o.albedo = mix(o.albedo, vec3f(0.13, 0.125, 0.115), rim);
+    o.rough = mix(o.rough, 0.5, rim);
+    em += PK_WARM * pkLine(Ly.z - 0.1, 0.09, px) * PK_POND;
+    o.flat = max(o.flat, pondM);
+    if (Ly.z < -1.0 && near > 0.0) {
+      let pc = xz / 2.3;
+      let ce = floor(pc);
+      let h = hash21(ce);
+      let d = length(fract(pc) - 0.5 - (vec2f(hash21(ce + 3.1), hash21(ce + 7.7)) - 0.5) * 0.3) * 2.3;
+      let pad = (1.0 - smoothstep(0.38 + 0.3 * h, 0.45 + 0.3 * h, d)) * step(h, 0.55) * near;
+      o.flat *= 1.0 - pad;
+      o.albedo = mix(o.albedo, vec3f(0.06, 0.12, 0.04), pad);
+      em += vec3f(1.0, 0.35, 0.55) * (1.0 - smoothstep(0.08, 0.16, d)) * step(h, 0.08) * 2.0 * near;
+    }
+  }
+  if (o.flat > 0.0) {
+    o.albedo = mix(o.albedo, vec3f(0.01, 0.012, 0.013), o.flat);
+    o.rough = mix(o.rough, 0.03, o.flat);
+    o.wet = mix(o.wet, 1.0, o.flat);
+  }
+  o.emis = em + E * o.albedo / PI;
+  return o;
+}
+
 fn parkShade(p: vec3f, style: f32, c: f32, owner: f32, px: f32, N1: vec4f, N2: vec4f, slope: f32) -> ParkOut {
   var o: ParkOut;
   let xz = p.xz;
@@ -104,13 +202,14 @@ fn parkShade(p: vec3f, style: f32, c: f32, owner: f32, px: f32, N1: vec4f, N2: v
   let a = dot(xz, PK_AXIS);
   // lawn: mown stripes close up, darker clover patches
   var lawn = PK_LAWN * (0.8 + 0.4 * N1.g) * (0.85 + 0.3 * N2.r);
-  lawn *= 1.0 + 0.12 * near * sign(sin(a * 0.65));
+  lawn *= 1.0 + 0.06 * (1.0 - smoothstep(0.05, 0.25, px)) * sign(sin(a * 0.65));
   o.albedo = lawn; o.rough = 0.9; o.wet = 0.25; o.emis = vec3f(0.0); o.flat = 0.0;
   var h = PathHit(0.0, 0.0, 0.0, 0.0);
   var edgeCol = PK_GOLD;
   var lightCol = PK_WARM;
   var plaza = 0.0;
   var plazaEm = vec3f(0.0);
+  if (style < 2.5) { return designedPark(p, style, px, near, lawn); }
   if (style > 4.5) {
     // ---- bridge approach avenue: asphalt, centre line, lane dashes, sidewalks, street-lamp pools
     let av = avenueNear(xz);

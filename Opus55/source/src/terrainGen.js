@@ -171,7 +171,7 @@ fn bakeNear(@builtin(global_invocation_id) id: vec3u) {
   if (park > 0.0) {
     urban *= 1.0 - park;
     city *= 1.0 - park;
-    m = vec4f(mix(m.rgb, vec3f(0.036, 0.054, 0.025) * (0.9 + 0.2 * gnoise2(p * 0.07)), park), m.a * (1.0 - park));
+    m = vec4f(mix(m.rgb, vec3f(0.058, 0.082, 0.042) * (0.9 + 0.2 * gnoise2(p * 0.07)), park), m.a * (1.0 - park));
     tr *= 1.0 - park;
   }
   m = vec4f(mix(m.rgb, pave, urban), m.a * (1.0 - smoothstep(0.0, 0.5, urban)) * (1.0 - city));

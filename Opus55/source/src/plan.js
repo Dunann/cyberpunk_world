@@ -13,7 +13,9 @@
 // Sites are bounded by world features only (water, bridge corridors, district street grids, a contour and a slope
 // rule), never by coordinate lines or circles:
 //  - Lantern Park: the south bank of the Great River between the Peninsula South Bridge and the Old Town Bridge,
-//    from the water up to the Old Town's built blocks (at most the 450 m floodplain).
+//    from the water up to the Old Town's first street (its 0.55 weight contour and the streets around its lots),
+//    at most the 450 m floodplain. Its designed layout (walks, plazas, ponds, lamps, lanterns, gates, pavilions)
+//    is in planPark.js.
 //  - The plain north of the Great River and east of the Jade River, south of the line through the Jiangbei and
 //    Bund centres, below the 45 m contour (the foot of Ovoo Hill):
 //      - Silk Road Garden: the part owned by the Bund that lies beyond the Bund's southernmost street.
@@ -25,6 +27,7 @@
 import { DISTRICTS, BRIDGES, ROUTES, LANDMARKS, RIVERS, DT, World } from './world.js';
 import { PLAN_BOX } from './common.js';
 import { rng, catmullRom } from './math.js';
+import { buildParkLayout } from './planPark.js';
 
 export const STYLE = { NONE: 0, LANTERN: 1, SILK: 2, QUAY: 3, POCKET: 4, AVENUE: 5 };
 
@@ -36,6 +39,7 @@ const FLOODPLAIN = 450;      // largest depth of the south-bank park from the wa
 const PARK_WATER = 6;        // parks start this far from the water edge (m)
 const QUAY_DEPTH = 70;       // unbuilt Exchange land closer to the water than this is the quay walk
 const RAMP = 130;            // bridge ramps: no park or lots within this distance of a landing, near the deck
+const AVENUE_CLEAR = 11;     // approach avenues keep this far from every lot (half road + sidewalk + 0.8 m)
 
 // Height rule for infill (metres above the highest ground under the lot). Fixed from first principles: infill
 // joins the district centres, so it stays below them, and it steps up only toward the waterfront and transit.
@@ -77,22 +81,49 @@ function riverLine(name) {
   const pts = catmullRom(R.points, 10);
   const s = [0];
   for (let i = 1; i < pts.length; i++) s.push(s[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
-  return { pts, s };
+  // segment index in 250 m cells (the nearest-segment search widens ring by ring)
+  const grid = new Map(), C = RIVER_CELL;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    for (let gx = Math.floor(Math.min(a[0], b[0]) / C); gx <= Math.floor(Math.max(a[0], b[0]) / C); gx++) for (let gz = Math.floor(Math.min(a[1], b[1]) / C); gz <= Math.floor(Math.max(a[1], b[1]) / C); gz++) {
+      const k = gx * 7919 + gz;
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push(i);
+    }
+  }
+  return { pts, s, grid };
 }
+const RIVER_CELL = 250;
 
 // Nearest point on a river centre line: distance to the bank (negative in water), arc length, side (+1 = right bank
 // looking downstream: south / east bank of the Great River, the peninsula side of the Jade River).
 function riverQuery(rl, x, z) {
-  const P = rl.pts;
+  const P = rl.pts, C = RIVER_CELL, gx0 = Math.floor(x / C), gz0 = Math.floor(z / C);
   let best = 1e18, bs = 0, side = 0, hw = 0;
-  for (let i = 0; i < P.length - 1; i++) {
-    const a = P[i], b = P[i + 1];
-    const bax = b[0] - a[0], baz = b[1] - a[1];
-    const L2 = bax * bax + baz * baz || 1;
-    const h = Math.min(Math.max(((x - a[0]) * bax + (z - a[1]) * baz) / L2, 0), 1);
-    const dx = x - a[0] - bax * h, dz = z - a[1] - baz * h;
-    const d2 = dx * dx + dz * dz;
-    if (d2 < best) { best = d2; bs = rl.s[i] + h * Math.sqrt(L2); side = Math.sign(bax * (z - a[1]) - baz * (x - a[0])); hw = (a[2] + (b[2] - a[2]) * h) / 2; }
+  // rings of cells around the point until the best distance found is closer than the ring (exact nearest segment)
+  for (let ring = 0; ring < 80; ring++) {
+    if (ring > 1 && Math.sqrt(best) < (ring - 1) * C) break;
+    // the cells on the ring's perimeter only
+    const n = ring ? ring * 8 : 1;
+    for (let q = 0; q < n; q++) {
+      let gx = gx0, gz = gz0;
+      if (ring) {
+        const side = Math.floor(q / (2 * ring)), t = q % (2 * ring) - ring;
+        if (side === 0) { gx = gx0 + t; gz = gz0 - ring; } else if (side === 1) { gx = gx0 + ring; gz = gz0 + t; }
+        else if (side === 2) { gx = gx0 - t; gz = gz0 + ring; } else { gx = gx0 - ring; gz = gz0 - t; }
+      }
+      const cellSegs = rl.grid.get(gx * 7919 + gz);
+      if (!cellSegs) continue;
+      for (const i of cellSegs) {
+        const a = P[i], b = P[i + 1];
+        const bax = b[0] - a[0], baz = b[1] - a[1];
+        const L2 = bax * bax + baz * baz || 1;
+        const h = Math.min(Math.max(((x - a[0]) * bax + (z - a[1]) * baz) / L2, 0), 1);
+        const dx = x - a[0] - bax * h, dz = z - a[1] - baz * h;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < best) { best = d2; bs = rl.s[i] + h * Math.sqrt(L2); side = Math.sign(bax * (z - a[1]) - baz * (x - a[0])); hw = (a[2] + (b[2] - a[2]) * h) / 2; }
+      }
+    }
   }
   return { d: Math.sqrt(best) - hw, s: bs, side };
 }
@@ -139,6 +170,9 @@ export const SILK_SPOKE_R = 240;          // eight straight walks radiate from t
 
 export function buildPlan(world) {
   const t0 = performance.now();
+  const tm = {};   // load time per phase (ms)
+  let tPrev = t0;
+  const lap = (k) => { const t = performance.now(); tm[k] = Math.round(t - tPrev); tPrev = t; };
   const great = riverLine('Great River'), jade = riverLine('Jade River');
   const gridded = DISTRICTS.map((D, i) => i).filter((i) => DISTRICTS[i].block > 0);
   const iJiangbei = DISTRICTS.findIndex((D) => D.name === 'Jiangbei');
@@ -158,10 +192,6 @@ export function buildPlan(world) {
   for (const [bi, B] of BRIDGES.entries()) for (const [x, z] of [[B.ax, B.az], [B.bx, B.bz]]) if (world.heightAt(x, z) > 2) landings.push({ x, z, bi, ox: x === B.ax ? B.bx : B.ax, oz: x === B.ax ? B.bz : B.az });
   const bridgeS = (name) => { const B = BRIDGES.find((b) => b.name === name); return riverQuery(great, (B.ax + B.bx) / 2, (B.az + B.bz) / 2).s; };
   const sWest = bridgeS('Peninsula South Bridge'), sEast = bridgeS('Old Town Bridge');
-  // inland edge of Lantern Park: the line through the two bridgeheads on the south bank (and the Old Town's blocks)
-  const southHead = (name) => { const B = BRIDGES.find((b) => b.name === name); return riverQuery(great, B.ax, B.az).side > 0 ? [B.ax, B.az] : [B.bx, B.bz]; };
-  const hW = southHead('Peninsula South Bridge'), hE = southHead('Old Town Bridge');
-  const riverSideOfHeads = (x, z) => ((hE[0] - hW[0]) * (z - hW[1]) - (hE[1] - hW[1]) * (x - hW[0])) * Math.sign(hE[0] - hW[0]) < 0;
   const inRamp = (x, z, m) => {
     for (const L of landings) {
       const B = BRIDGES[L.bi];
@@ -202,24 +232,37 @@ export function buildPlan(world) {
   // ---- field grid (6 m): water distance, region, owner
   const B = PLAN_BOX;
   const FS = 6, FW = Math.ceil((B.X1 - B.X0) / FS) + 1, FH = Math.ceil((B.Z1 - B.Z0) / FS) + 1;
-  const fWater = new Float32Array(FW * FH), fC = new Float32Array(FW * FH);
+  const fWater = new Float32Array(FW * FH);
   const fRegion = new Uint8Array(FW * FH), fOwner = new Int8Array(FW * FH).fill(-1);
   const REG = { NONE: 0, LANTERN: 1, PLAIN: 2 };
-  for (let j = 0; j < FH; j++) for (let i = 0; i < FW; i++) {
-    const x = B.X0 + i * FS, z = B.Z0 + j * FS, k = j * FW + i;
-    const wd = world.waterDist(x, z);
-    fWater[k] = wd;
-    if (wd < PARK_WATER - 6) continue;
+  const regionAt = (x, z) => {
     const g = riverQuery(great, x, z);
-    if (g.side > 0) {
-      if (g.s > sWest && g.s < sEast && g.d < FLOODPLAIN && riverSideOfHeads(x, z)) { fRegion[k] = REG.LANTERN; fC[k] = g.d; }
-      continue;
-    }
+    // Lantern Park: inland it ends at the Old Town's first street (the coverage skips its 0.55 contour and lot streets)
+    if (g.side > 0) return g.s > sWest && g.s < sEast && g.d < FLOODPLAIN ? REG.LANTERN : REG.NONE;
     const jq = riverQuery(jade, x, z);
-    if (jq.side > 0 || !southOfCentres(x, z)) continue;
-    fRegion[k] = REG.PLAIN;
-    fC[k] = wd;
+    return jq.side > 0 || !southOfCentres(x, z) ? REG.NONE : REG.PLAIN;
+  };
+  // water distance: exact on every second texel, interpolated between them, exact again within 40 m of the water
+  for (let j = 0; j < FH; j += 2) for (let i = 0; i < FW; i += 2) fWater[j * FW + i] = world.waterDist(B.X0 + i * FS, B.Z0 + j * FS);
+  for (let j = 0; j < FH; j++) for (let i = 0; i < FW; i++) {
+    if (!(i & 1) && !(j & 1)) continue;
+    const i0 = i & ~1, j0 = j & ~1, i1 = Math.min(i0 + 2, (FW - 1) & ~1), j1 = Math.min(j0 + 2, (FH - 1) & ~1);
+    const u = i1 > i0 ? (i - i0) / 2 : 0, v = j1 > j0 ? (j - j0) / 2 : 0;
+    const w = (fWater[j0 * FW + i0] * (1 - u) + fWater[j0 * FW + i1] * u) * (1 - v) + (fWater[j1 * FW + i0] * (1 - u) + fWater[j1 * FW + i1] * u) * v;
+    fWater[j * FW + i] = w < 40 || i1 < i || j1 < j ? world.waterDist(B.X0 + i * FS, B.Z0 + j * FS) : w;
   }
+  // exact on every second texel; a texel between four that agree takes their region, otherwise it is computed
+  // exactly too (the regions are large and their edges are where the samples disagree)
+  for (let j = 0; j < FH; j += 2) for (let i = 0; i < FW; i += 2) fRegion[j * FW + i] = regionAt(B.X0 + i * FS, B.Z0 + j * FS);
+  for (let j = 0; j < FH; j++) for (let i = 0; i < FW; i++) {
+    if (!(i & 1) && !(j & 1)) continue;
+    const i0 = i & ~1, j0 = j & ~1, i1 = Math.min(i0 + 2, (FW - 1) & ~1), j1 = Math.min(j0 + 2, (FH - 1) & ~1);
+    const r0 = fRegion[j0 * FW + i0];
+    const same = fRegion[j0 * FW + i1] === r0 && fRegion[j1 * FW + i0] === r0 && fRegion[j1 * FW + i1] === r0 && i1 >= i && j1 >= j;
+    fRegion[j * FW + i] = same ? r0 : regionAt(B.X0 + i * FS, B.Z0 + j * FS);
+  }
+  for (let k = 0; k < FW * FH; k++) if (fWater[k] < PARK_WATER - 6) fRegion[k] = REG.NONE;
+  lap('fieldRiver');
   // owners only where needed (plain), every other texel copied from the nearest computed one
   // Ovoo Hill: the highest ground of the plain within 900 m of the confluence. The plain's west edge is the line
   // from the Jiangbei centre over its summit to the river; land west of it is the Jade River bank (not in the plan).
@@ -274,8 +317,9 @@ export function buildPlan(world) {
   };
   const slopeAt = (x, z) => Math.hypot(world.heightAt(x + 4, z) - world.heightAt(x - 4, z), world.heightAt(x, z + 4) - world.heightAt(x, z - 4)) / 8;
 
-  // dev switch (?noplan): an empty plan, to measure the cost and the side effects of the plumbing alone
-  if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('noplan')) fRegion.fill(REG.NONE);
+  // dev switch (?noplan, dev builds only): an empty plan, to measure the cost and side effects of the plumbing alone
+  if (typeof __DEV__ !== 'undefined' && __DEV__ && typeof location !== 'undefined' && new URLSearchParams(location.search).has('noplan')) fRegion.fill(REG.NONE);
+  lap('field');
 
   // ---- infill pass: own stream, appended after everything else
   const R = rng(5678);
@@ -360,6 +404,38 @@ export function buildPlan(world) {
     }
   }
   stats.lots = infill.length;
+  lap('infill');
+
+  // ---- lot footprints (existing and infill) in a 100 m grid: distance of a point to the nearest lot
+  const LG = 100, lotGridAll = new Map();
+  for (const L of world.lots.concat(infill)) {
+    if (L.x < B.X0 - 300 || L.x > B.X1 + 300 || L.z < B.Z0 - 300 || L.z > B.Z1 + 300) continue;
+    const r = Math.hypot(L.w, L.d) / 2;
+    for (let gx = Math.floor((L.x - r) / LG); gx <= Math.floor((L.x + r) / LG); gx++) for (let gz = Math.floor((L.z - r) / LG); gz <= Math.floor((L.z + r) / LG); gz++) {
+      const kk = gx * 7919 + gz;
+      if (!lotGridAll.has(kk)) lotGridAll.set(kk, []);
+      lotGridAll.get(kk).push(L);
+    }
+  }
+  // distance from (x, z) to the nearest lot footprint (0 inside one), searched up to `reach` metres
+  const lotDist = (x, z, reach) => {
+    let best = reach;
+    for (let gx = Math.floor((x - reach) / LG); gx <= Math.floor((x + reach) / LG); gx++) for (let gz = Math.floor((z - reach) / LG); gz <= Math.floor((z + reach) / LG); gz++) {
+      for (const L of lotGridAll.get(gx * 7919 + gz) || []) {
+        const c = Math.cos(L.angle), s = Math.sin(L.angle), dx = x - L.x, dz = z - L.z;
+        const ex = Math.max(Math.abs(dx * c + dz * s) - L.w / 2, 0), ez = Math.max(Math.abs(-dx * s + dz * c) - L.d / 2, 0);
+        best = Math.min(best, Math.hypot(ex, ez));
+      }
+    }
+    return best;
+  };
+  // number of points (every 2 m) of segment a-b that come closer than `clear` to a lot footprint
+  const lotHits = (ax, az, bx, bz, clear) => {
+    const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 2));
+    let hits = 0;
+    for (let k = 0; k <= n; k++) if (lotDist(ax + (bx - ax) * k / n, az + (bz - az) * k / n, clear + 1) < clear) hits++;
+    return hits;
+  };
 
   // ---- coverage raster (3 m): r built, g owner, b park, a style
   const CS = B.CELL, CW = Math.ceil((B.X1 - B.X0) / CS), CH = Math.ceil((B.Z1 - B.Z0) / CS);
@@ -394,8 +470,9 @@ export function buildPlan(world) {
   // adjoining built blocks (infill or existing lots)
   const avenues = [];
   const streetTarget = (L) => {
-    // candidate street points: grid intersections of districts that have lots or infill near them
-    let best = null;
+    // candidate street points: grid intersections of districts that have lots or infill near them; the nearest
+    // one whose straight avenue keeps clear of every lot (existing or infill) is taken
+    const cands = [];
     for (const di of gridded) {
       const D = DISTRICTS[di];
       const ca = Math.cos(D.angle), sa = Math.sin(D.angle);
@@ -405,17 +482,23 @@ export function buildPlan(world) {
         const lx = (Math.round(lx0 / D.block) + a) * D.block, lz = (Math.round(lz0 / D.block) + b) * D.block;
         const x = D.cx + lx * ca - lz * sa, z = D.cz + lx * sa + lz * ca;
         const d = Math.hypot(x - L.x, z - L.z);
-        if (d < 40 || d > 700 || (best && d >= best.d)) continue;
+        if (d < 40 || d > 700) continue;
         // inland: onward from the bridge, not back toward the water
         if ((x - L.x) * (L.x - L.ox) + (z - L.z) * (L.z - L.oz) < 0.3 * d * Math.hypot(L.x - L.ox, L.z - L.oz)) continue;
         // on the same bank and next to built land of this district: a lot within one block of the crossing
         if (crossesRiver(great, L.x, L.z, x, z) || crossesRiver(jade, L.x, L.z, x, z)) continue;
         const near = (arr) => arr.some((q) => q.district === di && Math.abs(q.x - x) < D.block * 0.75 && Math.abs(q.z - z) < D.block * 0.75);
         if (!near(infill) && !near(world.lots)) continue;
-        best = { x, z, d, di };
+        cands.push({ x, z, d, di });
       }
     }
-    return best;
+    cands.sort((p, q) => p.d - q.d);
+    // the avenue's last 12 m end on the target street, between the blocks: only the part before it must be clear
+    for (const c of cands) {
+      const t = Math.max(0, 1 - 12 / c.d);
+      if (!lotHits(L.x, L.z, L.x + (c.x - L.x) * t, L.z + (c.z - L.z) * t, AVENUE_CLEAR)) return c;
+    }
+    return null;
   };
   for (const L of landings) {
     // a landing serves the plan when plan land lies right beside it
@@ -427,6 +510,9 @@ export function buildPlan(world) {
     avenues.push({ ax: L.x, az: L.z, bx: T.x, bz: T.z, hw: 8, di: T.di });
   }
   const onAvenue = (x, z, m) => avenues.some((v) => segDist(v.ax, v.az, v.bx, v.bz, x, z) < v.hw + m);
+  // dev check: no avenue comes closer than AVENUE_CLEAR to a lot (except on its target street)
+  stats.avenueLotHits = avenues.reduce((n, v) => { const d = Math.hypot(v.bx - v.ax, v.bz - v.az), t = Math.max(0, 1 - 12 / d); return n + lotHits(v.ax, v.az, v.ax + (v.bx - v.ax) * t, v.az + (v.bz - v.az) * t, AVENUE_CLEAR); }, 0);
+  lap('avenues');
 
   // ---- park coverage and style
   const silkPts = [];
@@ -511,7 +597,7 @@ export function buildPlan(world) {
   for (let s = 1; s < 6; s++) stats.styleArea[styleNames[s]] = Math.round(sCount[s] * CS * CS);
   stats.cells = cells.length;
   stats.avenues = avenues.length;
-  stats.ms = Math.round(performance.now() - t0);
+  lap('cover');
 
   // ---- texture data
   const tex = new Uint8Array(CW * CH * 4);
@@ -522,8 +608,18 @@ export function buildPlan(world) {
   const al = Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
   const axis = [(pb[0] - pa[0]) / al, (pb[1] - pa[1]) / al];
 
+  // ---- designed layout of Lantern Park and the Silk Road Garden (planPark.js)
+  const park3 = (x, z) => { const i = Math.floor((x - B.X0) / CS), j = Math.floor((z - B.Z0) / CS); if (i < 0 || j < 0 || i >= CW || j >= CH) return 0; const k = j * CW + i; return park[k] ? style[k] : 0; };
+  const layout = buildParkLayout({
+    world, STYLE, axis, river: great, sA: sWest, sB: sEast, silk, silkAvenues, fieldWater, slopeAt,
+    coverStyle: park3,
+    forEachPark: (fn) => { for (let k = 0; k < CW * CH; k++) if (park[k]) fn(B.X0 + (k % CW + 0.5) * CS, B.Z0 + (Math.floor(k / CW) + 0.5) * CS, style[k]); },
+  });
+  stats.park = layout.stats;
+  lap('park');
+
   const plan = {
-    stats, infill, cells, avenues, silk, silkAvenues, axis, keep, tex, W: CW, H: CH,
+    stats, infill, cells, avenues, silk, silkAvenues, axis, keep, tex, W: CW, H: CH, layout,
     iBund, iJiangbei, iOld,
     coverAt(x, z) {
       const i = Math.floor((x - B.X0) / CS), j = Math.floor((z - B.Z0) / CS);
@@ -532,6 +628,7 @@ export function buildPlan(world) {
       return { built: built[k] / 255, owner: owner[k] === 255 ? -1 : owner[k], park: park[k] / 255, style: style[k], blocked: inKeep(x, z) };
     },
     siteAt,
+    styleAt: park3,   // park style at a point (0 where there is no park), fast
     // true where a hamlet (or other small set piece) would stand on built or park land of the plan
     blocks(x, z, r = 0) {
       for (const [dx, dz] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
@@ -541,8 +638,28 @@ export function buildPlan(world) {
       return false;
     },
     waterAt: fieldWater,
+    lotHits,
+    // GPU textures: coverage map (frame group) and the park layout and light maps (terrain group)
+    upload(device) {
+      const mk = (w, h, format, data, bpp, label) => {
+        const t = device.createTexture({ size: [w, h], format, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, label });
+        device.queue.writeTexture({ texture: t }, data, { bytesPerRow: w * bpp }, [w, h]);
+        return t;
+      };
+      this.coverTex = mk(CW, CH, 'rgba8unorm', tex, 4, 'planCover');
+      this.layTex = mk(layout.atlasW, layout.atlasH, 'rgba16float', layout.texData('layout'), 8, 'parkLayout');
+      this.litTex = mk(layout.atlasW, layout.atlasH, 'rgba16float', layout.texData('light'), 8, 'parkLight');
+      this.device = device;
+    },
+    // bakes the ground glow of the uplit park trees into the light map (called by the vegetation module)
+    bakeTreeLight(trees) {
+      layout.bakeTrees(trees);
+      this.device.queue.writeTexture({ texture: this.litTex }, layout.texData('light'), { bytesPerRow: layout.atlasW * 8 }, [layout.atlasW, layout.atlasH]);
+    },
   };
-  plan.parkTrees = (masked) => parkTrees(world, plan, masked, slopeAt);
+  stats.ms = Math.round(performance.now() - t0);
+  stats.msPhases = tm;
+  plan.parkTrees = (masked) => { const t = performance.now(), r = parkTrees(world, plan, masked, slopeAt); stats.msTrees = Math.round(performance.now() - t); return r; };
   // Lawn more than 25 m from any lit walk, plaza or avenue (m2 per style): the "unlit lawn" check.
   plan.unlitLawn = () => {
     const res = {};
@@ -629,8 +746,15 @@ function vnoise(x, z) {
   return (h(ix, iz) * (1 - u) + h(ix + 1, iz) * u) * (1 - v) + (h(ix, iz + 1) * (1 - u) + h(ix + 1, iz + 1) * u) * v;
 }
 
+// Rows of the designed parks (planPark.js walks): [spacing, offset from the walk edge, species, both sides, chance]
+const WALK_ROW = {
+  river: [9, 3.2, 0, true, 1], upper: [11, 3.0, 0, true, 1], cross: [10, 2.8, 0, false, 1], link: [10, 2.8, 0, false, 1],
+  path: [13, 2.4, 0, true, 0.6], ring: [10, 3.0, 0, false, 1], spoke: [8, 2.4, 1, true, 1], avenue: [8, 2.6, 1, true, 1],
+};
+const UPLIT = 12;   // every designed-park tree within this distance of a walk edge is uplit
+
 function parkTrees(world, plan, masked, slopeAt) {
-  const B = PLAN_BOX, R = rng(6161);
+  const B = PLAN_BOX, R = rng(6161), CS3 = B.CELL;
   const out = [];
   const rows = new Set();
   const ok = (x, z, style) => {
@@ -640,45 +764,115 @@ function parkTrees(world, plan, masked, slopeAt) {
     return true;
   };
   const add = (x, z, scale, sp, glow) => out.push([x, world.heightAt(x, z), z, scale, sp + glow / 8]);
-  // rows along walks: scan the park on a 1.5 m grid and keep one tree per (walk, slot, side)
-  for (let z = B.Z0; z < B.Z1; z += 1.5) for (let x = B.X0; x < B.X1; x += 1.5) {
-    const cv = plan.coverAt(x, z);
-    if (cv.park < 0.5) continue;
-    const style = cv.style;
-    const c = style === STYLE.LANTERN || style === STYLE.QUAY ? plan.waterAt(x, z) : 0;
-    const p = parkPath(plan, style, x, z, c, cv.owner);
-    const row = ROW[p.id];
-    if (!row || p.plaza < 3) continue;
-    const [spacing, off, sp, glow, both] = row;
-    if (Math.abs(p.d - off) > 0.75) continue;
-    if (!both && p.side < 0) continue;
-    const slot = Math.round(p.s / spacing - 0.5);
-    if (Math.abs(p.s - (slot + 0.5) * spacing) > 0.75) continue;
-    const key = `${p.id},${slot},${p.side},${style},${Math.round(x / 400)},${Math.round(z / 400)}`;
-    if (rows.has(key) || !ok(x, z, style)) continue;
-    rows.add(key);
-    const willow = style === STYLE.QUAY || (style === STYLE.LANTERN && p.id === 0 && p.side < 0);
-    add(x, z, 0.72 + 0.12 * R(), willow ? 3 : sp, glow && (slot & 1) === 0 ? glow : 0);
+  const designed = (st) => st === STYLE.LANTERN || st === STYLE.SILK;
+  // ---- quay walk, city squares and avenues: rows along the analytic walks, on the park texels only
+  const CW = Math.ceil((B.X1 - B.X0) / CS3), CH = Math.ceil((B.Z1 - B.Z0) / CS3);
+  for (let j = 0; j < CH; j++) for (let i = 0; i < CW; i++) {
+    const cx = B.X0 + (i + 0.5) * CS3, cz = B.Z0 + (j + 0.5) * CS3;
+    const st = plan.styleAt(cx, cz);
+    if (!st || designed(st)) continue;
+    const cv = plan.coverAt(cx, cz);
+    for (const [ox, oz] of [[-0.75, -0.75], [0.75, -0.75], [-0.75, 0.75], [0.75, 0.75]]) {
+      const x = cx + ox, z = cz + oz, style = cv.style;
+      const c = style === STYLE.QUAY ? plan.waterAt(x, z) : 0;
+      const p = parkPath(plan, style, x, z, c, cv.owner);
+      const row = ROW[p.id];
+      if (!row || p.plaza < 3) continue;
+      const [spacing, off, sp, glow, both] = row;
+      if (Math.abs(p.d - off) > 0.75) continue;
+      if (!both && p.side < 0) continue;
+      const slot = Math.round(p.s / spacing - 0.5);
+      if (Math.abs(p.s - (slot + 0.5) * spacing) > 0.75) continue;
+      const key = `${p.id},${slot},${p.side},${style},${Math.round(x / 400)},${Math.round(z / 400)}`;
+      if (rows.has(key) || !ok(x, z, style)) continue;
+      rows.add(key);
+      add(x, z, 0.72 + 0.12 * R(), style === STYLE.QUAY ? 3 : sp, glow && (slot & 1) === 0 ? glow : 0);
+    }
   }
-  // groves: low-frequency noise, kept off walks and plazas
+  // groves of the quay walk and the city squares: low-frequency noise, kept off walks and plazas
   for (let z = B.Z0; z < B.Z1; z += 8) for (let x = B.X0; x < B.X1; x += 8) {
     const jx = x + (R() - 0.5) * 6, jz = z + (R() - 0.5) * 6, pick = R(), sc = R(), sp = R();
+    const st0 = plan.styleAt(jx, jz);
+    if (!st0 || st0 === STYLE.AVENUE || designed(st0)) continue;
     const cv = plan.coverAt(jx, jz);
-    if (cv.park < 0.5 || cv.style === STYLE.AVENUE) continue;
     const style = cv.style;
     const n = vnoise(jx / 70, jz / 70) * 0.7 + vnoise(jx / 23 + 9, jz / 23) * 0.3;
-    const thresh = style === STYLE.POCKET ? 0.62 : style === STYLE.SILK ? 0.78 : 0.63;
-    if (n < thresh || pick > 0.75) continue;
-    const c = style === STYLE.LANTERN || style === STYLE.QUAY ? plan.waterAt(jx, jz) : 0;
+    if (n < (style === STYLE.POCKET ? 0.62 : 0.63) || pick > 0.75) continue;
+    const c = style === STYLE.QUAY ? plan.waterAt(jx, jz) : 0;
     const p = parkPath(plan, style, jx, jz, c, cv.owner);
     if (p.d < 4 || p.plaza < 4 || !ok(jx, jz, style)) continue;
-    // one colour per grove (cell of about 120 m); most groves stay unlit
     const gc = vnoise(Math.floor(jx / 120) * 3.1, Math.floor(jz / 120) * 3.1);
     const gl = GROVE_GLOW[style] || [0, 0];
-    const lit = style === STYLE.SILK ? 0.6 : 0.4;
-    const glow = gc < lit ? gl[gc < lit * 0.6 ? 0 : 1] : 0;
-    const species = style === STYLE.SILK ? (sp < 0.5 ? 1 : 0) : c < 40 && c > 0 && sp < 0.6 ? 3 : sp < 0.12 ? 1 : 0;
+    const glow = gc < 0.4 ? gl[gc < 0.24 ? 0 : 1] : 0;
+    const species = c < 40 && c > 0 && sp < 0.6 ? 3 : sp < 0.12 ? 1 : 0;
     add(jx, jz, 0.7 + 0.45 * sc, species, glow);
+  }
+  // ---- Lantern Park and the Silk Road Garden: rows along the walks of the layout
+  const L = plan.layout;
+  const busy = new Map();   // lamps, lantern posts and trees in 6 m cells
+  const key6 = (x, z) => Math.floor(x / 6) * 7919 + Math.floor(z / 6);
+  const mark = (x, z) => { const k = key6(x, z); if (!busy.has(k)) busy.set(k, []); busy.get(k).push(x, z); };
+  const free = (x, z, d) => {
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      const v = busy.get((Math.floor(x / 6) + a) * 7919 + Math.floor(z / 6) + b);
+      if (v) for (let i = 0; i < v.length; i += 2) if (Math.hypot(v[i] - x, v[i + 1] - z) < d) return false;
+    }
+    return true;
+  };
+  for (const p of L.lamps) mark(p.x, p.z);
+  for (const p of L.posts) mark(p.x, p.z);
+  // uplight colour: one per grove cell of about 120 m (Lantern Park: gold, jade, warm white; garden: turquoise, magenta)
+  const glowAt = (x, z, st) => {
+    const g = vnoise(Math.floor(x / 120) * 3.1, Math.floor(z / 120) * 3.1);
+    if (st === STYLE.SILK) return g < 0.55 ? 3 : 4;
+    return g < 0.45 ? 1 : g < 0.72 ? 5 : 2;
+  };
+  const place = (x, z, st, scale, species) => {
+    const q = L.sample(x, z);
+    if (!q || q.style !== st || q.walk < 1.6 || q.plaza < 3 || q.pond < 2.5) return false;
+    if (!free(x, z, 3.2) || !ok(x, z, st)) return false;
+    mark(x, z);
+    add(x, z, scale, species, q.walk <= UPLIT ? glowAt(x, z, st) : 0);
+    return true;
+  };
+  for (const w of L.walks) {
+    const row = WALK_ROW[w.kind];
+    if (!row) continue;
+    const [spacing, off, sp, both, chance] = row;
+    const hw = { river: 2.4, upper: 1.8, cross: 1.6, link: 1.6, path: 1.1, ring: 1.8, spoke: 1.4, avenue: 3.0 }[w.kind];
+    const P = w.pts;
+    let acc = 0, next = spacing * 0.5, n = 0;
+    for (let i = 2; i < P.length; i += 2) {
+      const ax = P[i - 2], az = P[i - 1], bx = P[i], bz = P[i + 1], len = Math.hypot(bx - ax, bz - az);
+      if (len < 1e-6) continue;
+      const tx = (bx - ax) / len, tz = (bz - az) / len;
+      while (next <= acc + len) {
+        const t = (next - acc) / len, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+        for (const side of both ? [1, -1] : [(n & 1) ? -1 : 1]) {
+          if (R() > chance) continue;
+          const px = x - tz * side * (hw + off), pz = z + tx * side * (hw + off);
+          // the river walk: willows on the water side
+          const willow = w.style === STYLE.LANTERN && (w.kind === 'river' ? plan.waterAt(px, pz) < plan.waterAt(x, z) : plan.waterAt(px, pz) < 40);
+          place(px, pz, w.style, 0.72 + 0.12 * R(), willow ? 3 : sp);
+        }
+        next += spacing; n++;
+      }
+      acc += len;
+    }
+  }
+  // groves: low-frequency noise, off walks, plazas and ponds
+  for (const reg of L.regions) {
+    const st = reg.style;
+    for (let z = reg.Z0; z < reg.Z0 + reg.H * 2; z += 8) for (let x = reg.X0; x < reg.X0 + reg.W * 2; x += 8) {
+      const jx = x + (R() - 0.5) * 6, jz = z + (R() - 0.5) * 6, pick = R(), sc = R(), sp = R();
+      const n = vnoise(jx / 70, jz / 70) * 0.7 + vnoise(jx / 23 + 9, jz / 23) * 0.3;
+      if (n < (st === STYLE.SILK ? 0.74 : 0.6) || pick > 0.75) continue;
+      const q = L.sample(jx, jz);
+      if (!q || q.style !== st || q.walk < 4 || q.plaza < 4 || q.pond < 3) continue;
+      const c = plan.waterAt(jx, jz);
+      const species = st === STYLE.SILK ? (sp < 0.5 ? 1 : 0) : c < 40 && sp < 0.6 ? 3 : sp < 0.12 ? 1 : 0;
+      place(jx, jz, st, 0.7 + 0.45 * sc, species);
+    }
   }
   return out;
 }

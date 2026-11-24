@@ -444,6 +444,11 @@ export function buildInfillRuns(world) {
     const L = Math.hypot(v.bx - v.ax, v.bz - v.az);
     if (L > 30) runs.push({ ax: v.ax, az: v.az, dx: (v.bx - v.ax) / L, dz: (v.bz - v.az) / L, len: L, laneW: 2.8, lanes: 2, mode: 0, type: 6, district: v.di, infill: true });
   }
+  // check: no run crosses a lot footprint (existing or infill); counted points every 2 m inside a lot
+  let hits = 0;
+  for (const r of runs) hits += plan.lotHits(r.ax, r.az, r.ax + r.dx * r.len, r.az + r.dz * r.len, 0.01);
+  world.shared.planRunLotHits = hits;
+  if (hits && typeof __DEV__ !== 'undefined' && __DEV__) console.error(`I-016: ${hits} traffic-run points of the plan lie inside lot footprints`);
   return runs;
 }
 

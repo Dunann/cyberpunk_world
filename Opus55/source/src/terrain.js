@@ -67,6 +67,8 @@ export default {
       { binding: 8, visibility: VF, texture: { sampleType: 'float' } },
       { binding: 9, visibility: VF, sampler: { type: 'filtering' } },
       { binding: 10, visibility: VF, buffer: { type: 'uniform' } },
+      { binding: 11, visibility: VF, texture: { sampleType: 'float' } },   // park layout map (planPark.js)
+      { binding: 12, visibility: VF, texture: { sampleType: 'float' } },   // park light map
     ] });
     this.sampRep = d.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', maxAnisotropy: 8, addressModeU: 'repeat', addressModeV: 'repeat' });
     this.tuData = new Float32Array(4);
@@ -83,6 +85,8 @@ export default {
       { binding: 8, resource: this.tCanopy.createView() },
       { binding: 9, resource: this.sampRep },
       { binding: 10, resource: { buffer: this.tuBuf } },
+      { binding: 11, resource: world.plan.layTex.createView() },
+      { binding: 12, resource: world.plan.litTex.createView() },
     ] });
     this.pipe = ctx.renderer.gbufferPipeline({
       label: 'terrain', code: terrainDrawWGSL({ N, K: this.K.toFixed(3), LEAF, MORPH0: MORPH0.toFixed(3), simple: ctx.params.get('tdbg') === '1', park: parkWGSL(world.plan) }), groups: [this.layout],
