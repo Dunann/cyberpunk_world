@@ -4,3 +4,5 @@
 - 2026-11-24: Eval v1 harness written in `Opus55/eval/`: 14 fixed cameras plus motion bursts, a strict critic rubric, a blind pairwise judge, and the run-eval and make-pairs scripts.
 - 2026-11-24: Baseline evaluation run: all gates pass. GPU 9.64 ms average, 11.55 ms p99, 13.34 ms worst; functional 18/18.
 - 2026-11-24: Noise calibration started: two strict critics on the baseline, plus a pairwise judge comparing the baseline with itself.
+- 2026-11-24: Pairwise judge bias check: baseline against itself gave 22/22 ties (no false preferences).
+- 2026-11-24: Critic calibration: per-pose mean abs diff 0.27, zone means within 0.42. Smallest real change set to 0.5. Baseline zones A 5.33, B 5.34, G 5.12. Eval v1 frozen (tag eval-v1).
