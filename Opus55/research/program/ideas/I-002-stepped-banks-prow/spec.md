@@ -1,7 +1,8 @@
 ---
 id: I-002
 title: Stepped banks and the confluence prow: the steep peninsula banks become built terraces
-status: proposed
+status: rejected
+score: 5.0 (review-1 only; below 5.5)
 direction: Break an assumption (terrain under the city; zone A first)
 family: designed landform: stepped quay terraces in the heightmap, faced with wall geometry
 parent: none

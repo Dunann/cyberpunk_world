@@ -1,7 +1,7 @@
 ---
 id: I-015
 title: Hongyadong facade stack (prototype, judged on real images)
-status: accepted
+status: evaluating
 score: prototype track (coordinator decision; user-named priority 2; I-004 5.83 and I-011 6.0 failed review)
 direction: user-requested fix (the Hongyadong-style complex must look attached and grounded)
 family: landmark rebuild from the real cliff section

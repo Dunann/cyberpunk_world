@@ -11,7 +11,8 @@
 
 import { rng } from './math.js';
 import { DT } from './world.js';
-import { PART_WGSL, CULL_WGSL, DRAW_WGSL, PART_FLOATS } from './buildings_wgsl.js';
+import { PART_WGSL, CULL_WGSL, DRAW_WGSL, PART_FLOATS, FLAG } from './buildings_wgsl.js';
+import { selectTowerText, packSlots, buildGlyphArray, TEXT_WGSL, TEXT_MAX } from './buildings_text.js';
 import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges, walkways } from './buildings_gen.js';
 import { prepareLots, genLandmarks, genMarket } from './buildings_landmarks.js';
 import { genInfill, infillHeightStats } from './buildings_infill.js';
@@ -125,6 +126,17 @@ export default {
     world.shared.landmarkSites = B.sites;
     world.shared.buildingStats = { parts: P.count, props: B.props, bridges: B.bridges, walkways: B.walkways, shopProps: B.shopProps, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
 
+    // tower phrase show: choose the participating towers and flag the parts that carry a character
+    const text = selectTowerText(world, P);
+    if (text.glyphs.length > TEXT_MAX) text.glyphs.length = TEXT_MAX;
+    const textMap = new Uint32Array(Math.max(P.count, 1));
+    text.glyphs.forEach((g, k) => {
+      P.set(g.part, 15, P.get(g.part, 15) + FLAG.TEXT);
+      textMap[g.part] = k + 1;
+    });
+    world.shared.towerText = { stats: text.stats, phrases: text.phrases,
+      glyphs: text.glyphs.map((g) => ({ char: g.char, phrase: g.phrase, index: g.index, x: Math.round(g.x), z: Math.round(g.z), y: Math.round(g.yC), g: +g.g.toFixed(1), district: g.district })) };
+
     // ---------------- GPU resources
     const verts = [], idx = [];
     this.meshes = MESHES.map(([K, Rr]) => {
@@ -154,14 +166,27 @@ export default {
     this.cullUBuf = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.cullUBuf, 0, this.cullU);
 
+    // tower characters: overlay draw lists (one per mesh list, filled by the cull pass), slot data, glyph layers
+    this.textVisBuf = d.createBuffer({ size: TEXT_MAX * LISTS * 4, usage: GPUBufferUsage.STORAGE });
+    this.textArgsBuf = d.createBuffer({ size: this.argsTemplate.byteLength, usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.textMapBuf = d.createBuffer({ size: textMap.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(this.textMapBuf, 0, textMap);
+    const slots = packSlots(text.glyphs);
+    this.textSlotBuf = d.createBuffer({ size: slots.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(this.textSlotBuf, 0, slots);
+    this.glyphTex = buildGlyphArray(d, text.chars);
+    this.textCount = text.glyphs.length;
+
     const SB = (type, vis) => ({ visibility: vis, buffer: { type } });
     const C = GPUShaderStage.COMPUTE, V = GPUShaderStage.VERTEX, F = GPUShaderStage.FRAGMENT;
     this.cullLayout = d.createBindGroupLayout({ label: 'bld-cull', entries: [
       { binding: 0, ...SB('read-only-storage', C) }, { binding: 1, ...SB('storage', C) },
-      { binding: 2, ...SB('storage', C) }, { binding: 3, ...SB('uniform', C) }] });
+      { binding: 2, ...SB('storage', C) }, { binding: 3, ...SB('uniform', C) },
+      { binding: 4, ...SB('storage', C) }, { binding: 5, ...SB('storage', C) }] });
     this.cullGroup = d.createBindGroup({ layout: this.cullLayout, entries: [
       { binding: 0, resource: { buffer: this.partBuf } }, { binding: 1, resource: { buffer: this.visBuf } },
-      { binding: 2, resource: { buffer: this.argsBuf } }, { binding: 3, resource: { buffer: this.cullUBuf } }] });
+      { binding: 2, resource: { buffer: this.argsBuf } }, { binding: 3, resource: { buffer: this.cullUBuf } },
+      { binding: 4, resource: { buffer: this.textVisBuf } }, { binding: 5, resource: { buffer: this.textArgsBuf } }] });
     this.cullPipe = ctx.renderer.computePipeline({ label: 'buildings-cull', code: PART_WGSL + CULL_WGSL, groups: [this.cullLayout] });
 
     this.drawLayout = d.createBindGroupLayout({ label: 'bld-draw', entries: [
@@ -183,6 +208,28 @@ export default {
     this.pipe = d.createRenderPipeline({ label: 'buildings', layout, vertex, primitive,
       fragment: { module, entryPoint: 'fs', targets: GBUFFER_FORMATS.map((format) => ({ format })) },
       depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: false, depthCompare: 'greater-equal' } });
+
+    // Tower character overlay: same vertex shader and mesh lists, equal-depth test, writes only the emissive
+    // target. Colour blend one / one-minus-src-alpha dims the windows under each panel (alpha) and adds the
+    // character (rgb); alpha blend zero / one keeps the AO stored in the emissive alpha.
+    this.textDrawGroups = [];
+    for (let l = 0; l < LISTS; l++) {
+      this.textDrawGroups.push(d.createBindGroup({ layout: this.drawLayout, entries: [
+        { binding: 0, resource: { buffer: this.partBuf } },
+        { binding: 1, resource: { buffer: this.textVisBuf, offset: l * TEXT_MAX * 4, size: TEXT_MAX * 4 } }] }));
+    }
+    this.textLayout = d.createBindGroupLayout({ label: 'bld-text', entries: [
+      { binding: 0, ...SB('read-only-storage', F) }, { binding: 1, ...SB('read-only-storage', F) },
+      { binding: 2, visibility: F, texture: { viewDimension: '2d-array' } }] });
+    this.textGroup = d.createBindGroup({ layout: this.textLayout, entries: [
+      { binding: 0, resource: { buffer: this.textMapBuf } }, { binding: 1, resource: { buffer: this.textSlotBuf } },
+      { binding: 2, resource: this.glyphTex.createView({ dimension: '2d-array' }) }] });
+    const textModule = shader(d, WGSL_LIB + WGSL_FRAME + WGSL_LIGHT + GBUFFER_OUT + PART_WGSL + DRAW_WGSL + TEXT_WGSL, 'buildings-text');
+    const emisBlend = { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' } };
+    this.textPipe = d.createRenderPipeline({ label: 'buildings-text', layout: d.createPipelineLayout({ bindGroupLayouts: [ctx.renderer.frameLayout, this.drawLayout, this.textLayout] }),
+      vertex: { ...vertex, module: textModule }, primitive,
+      fragment: { module: textModule, entryPoint: 'fsText', targets: GBUFFER_FORMATS.map((format, k) => (k === 2 ? { format, blend: emisBlend } : { format, writeMask: 0 })) },
+      depthStencil: { format: DEPTH_FORMAT, depthWriteEnabled: false, depthCompare: 'greater-equal' } });
     this.cullDesc = { timestampWrites: undefined };
     this.groups = Math.ceil(N / 64);
     console.log(`buildings: ${P.count} parts, ${P.solid.length} solids, ${world.lots.length} lots, ${world.signSlots.length} sign slots, ${nl} lights, ${(performance.now() - t0).toFixed(0)} ms`);
@@ -190,6 +237,7 @@ export default {
 
   compute(ctx, enc) {
     ctx.device.queue.writeBuffer(this.argsBuf, 0, this.argsTemplate);
+    ctx.device.queue.writeBuffer(this.textArgsBuf, 0, this.argsTemplate);
     this.cullDesc.timestampWrites = ctx.prof.ts('bld-cull');
     const pass = enc.beginComputePass(this.cullDesc);
     pass.setPipeline(this.cullPipe);
@@ -207,6 +255,14 @@ export default {
       for (let l = 0; l < LISTS; l++) {
         pass.setBindGroup(1, this.drawGroups[l]);
         pass.drawIndexedIndirect(this.argsBuf, l * 20);
+      }
+    }
+    if (this.textCount > 0) {
+      pass.setPipeline(this.textPipe);
+      pass.setBindGroup(2, this.textGroup);
+      for (let l = 0; l < LISTS; l++) {
+        pass.setBindGroup(1, this.textDrawGroups[l]);
+        pass.drawIndexedIndirect(this.textArgsBuf, l * 20);
       }
     }
   },

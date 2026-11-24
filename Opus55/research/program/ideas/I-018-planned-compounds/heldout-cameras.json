@@ -1,0 +1,6 @@
+[
+ {"id":"H1","name":"yuzhong-north-aerial","pos":[-1100,300,-1350],"rel":false,"target":[-800,60,-300],"t":100},
+ {"id":"H2","name":"nanan-east-aerial","pos":[1600,240,2150],"rel":false,"target":[900,40,1300],"t":100},
+ {"id":"H3","name":"cbd-east-aerial","pos":[4350,260,-1150],"rel":false,"target":[3300,140,-1350],"t":100},
+ {"id":"H4","name":"cbd-avenue","pos":[3550,1.7,-450],"rel":true,"target":[3550,60,-1100],"t":100}
+]

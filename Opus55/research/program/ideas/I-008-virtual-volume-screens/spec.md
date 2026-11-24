@@ -1,7 +1,8 @@
 ---
 id: I-008
 title: Virtual-volume 3D screens and holograms
-status: proposed
+status: rejected
+score: 5.0 (review-1 only; below 5.5)
 direction: Wild card / borrow from another field (anamorphic billboards, interior mapping, volumetric displays)
 family: signage: 3D displays (parallax screens, raymarched holograms)
 parent: none
