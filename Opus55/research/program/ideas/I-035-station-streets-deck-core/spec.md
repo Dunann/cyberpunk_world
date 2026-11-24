@@ -1,7 +1,7 @@
 ---
 id: I-035
 title: Station streets and the CBD deck core - multi-level pedestrian levels placed by district rules, measured before proposing
-status: proposed
+status: in-review
 direction: User priority 7 (elevated walkways, crazy 3D feeling); revision of two rejected specs
 family: urban circulation: multi-level pedestrian network
 parent: I-027 + I-028
