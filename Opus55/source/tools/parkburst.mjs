@@ -2,7 +2,8 @@
 // sideways 0.6 m per frame with TAA running, as in the eval motion bursts), saved as PNG, plus the mean absolute
 // frame-to-frame difference per image (levels of 255) over the lower 2/3 of the frame (the ground).
 // Run it on the baseline and on the candidate with the same cameras: extra shimmer shows up as a larger
-// frame-to-frame difference.
+// frame-to-frame difference. --static keeps the camera still (TAA jitter only), which separates shimmer from the
+// image change that motion causes in any high-contrast scene.
 //   node tools/parkburst.mjs --poses-file out/i016r2/heldout.json --ids H3,H7,H10 --out out/i016r2/pb-cand [--file out/dev.html]
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,7 +31,7 @@ for (const p of set) {
   await page.evaluate(() => window.__frames(48));
   const files = [];
   for (let k = 0; k < 4; k++) {
-    if (k) await page.evaluate(() => { const c = window.__ctx.camOverride; c.x += Math.cos(c.yaw) * 0.6; c.z -= Math.sin(c.yaw) * 0.6; });
+    if (k && !args.includes('--static')) await page.evaluate(() => { const c = window.__ctx.camOverride; c.x += Math.cos(c.yaw) * 0.6; c.z -= Math.sin(c.yaw) * 0.6; });
     await page.evaluate(() => window.__frames(1));
     const b64 = await page.evaluate(() => window.__capture('image/png'));
     const f = path.join(out, `${p.id}-burst-${k}.png`);
