@@ -232,3 +232,22 @@ New `src/planPark.js` (layout), `src/gardenParks.js` (structures); `terrainPark.
   2,570 (2,382 uplit). Lights: 5,312 in total (+15 park, +120 infill lamps, +80 shop, +60 sign).
 - **Memory:** park layout and light maps about 2 x 3.3 MB (rgba16float, estimated), coverage map 3.3 MB.
 
+
+### After code review round 2 (merge with main / I-014)
+- **Pavilion light cap fixed:** `gardenParks.js` passed `light && allow`, so pavilions that call `lantern(p, 1.1)`
+  without a flag got the default `true`. It is now `light !== false && allow`: the garden adds 15 park lights
+  (378 against 363 without the plan), not 19.
+- **`plan.unlitLawn()`** now measures Lantern Park and the Silk Road Garden against the round-2 layout (distance to
+  the nearest lit walk, plaza or pond edge; walk, plaza and pond surfaces are not lawn). Lawn more than 25 m from a
+  lit feature: Lantern 2,772 m2, Silk 1,620 m2, quay 504 m2 (round 1's figure, 91,800 m2 for Lantern, was measured
+  against the old analytic walks). The 20 m gate is unchanged: Lantern 3.4%, Silk 2.4%.
+- **Merged main** (adopted I-014, tower phrase show) without conflicts. Interaction checked: the tower-text selection
+  (`selectTowerText`, which groups every building part, infill included) picks the same 15 glyphs and 6 phrases with
+  the plan, with `?noplan` and on main (same glyph hash), so the infill neither joins nor blocks the show.
+- **Checks on the merged build:** `?noplan` against the current main build on the held-out cameras H1, H3, H4, H7,
+  H8, H9, H10 (aligned PNG): identical (max tile 0.03). Dev checks: `avenueLotHits` 0, `planRunLotHits` 0,
+  `fixedPrefix` 948 street / 238 garden trees in both builds. `functional.mjs` 18/18. Both builds succeed; no WebGPU
+  errors. No eval poses were captured.
+- **Bench, one pair against the current main build** (shared GPU lock; a first pair with TAA p99/avg above 2 was
+  measured on a shared GPU and rejected): main 9.59 / p99 11.59 (TAA 1.044), candidate 9.31 / p99 12.08 (TAA 1.105),
+  delta -0.28 ms. One pair cannot resolve a 0.1 ms effect; the 3-pair round-2 mean (+0.12 ms) remains the estimate.
