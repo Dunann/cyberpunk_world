@@ -13,6 +13,7 @@ import { CAUSEWAYS, ISLANDS, BRIDGE_GAP, CAUSEWAY_TOP, lakeToWorld } from './ter
 import { LANDMARKS } from './world.js';
 import { rng } from './math.js';
 import { lookoutTower, lakesideVignette, cragLookout, riverbankLife, distantLights, hillsideLife } from './gardenViews.js';
+import { parkStructures } from './gardenParks.js';
 
 const C = {
   plaster: [0.58, 0.56, 0.52], tile: [0.03, 0.032, 0.036], wood: [0.17, 0.035, 0.022], dwood: [0.06, 0.035, 0.025],
@@ -339,6 +340,10 @@ export default {
       (this.sites ||= []).push([Math.round(x), Math.round(z), +ang.toFixed(2)]);
     }
 
+    // ---------------- land-use plan parks (I-016): lamps, lantern posts, gates and pavilions, after all of the above
+    this.parks = parkStructures({ M, world, C, col, lantern,
+      pavilion: (c, sides, r, plat, lan) => this._pavilion(M, c, sides, r, plat, col, lan) });
+
     // ---------------- lotus pads
     const padData = [];
     const patches = [[0, -430, 160], [-30, 170, 140], [-460, 20, 130], [560, -120, 120], [250, 380, 120], [-600, -330, 100], [385, -280, 55], [470, -300, 40], [-575, 150, 70], [-520, 220, 50]];
@@ -409,7 +414,7 @@ export default {
       { shaderLocation: 4, offset: 10 * f, format: 'float32' }, { shaderLocation: 5, offset: 11 * f, format: 'float32x2' }] }] });
     this.padPipe = r.gbufferPipeline({ label: 'lotus', code: GARDEN_WGSL, vs: 'vsPad', fs: 'fsPad', groups: [this.layout], cull: 'none',
       buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }] });
-    world.shared.garden = { lights: this.lightCount, compounds: this.compounds, hamlets: this.hamlets };
+    world.shared.garden = { lights: this.lightCount, compounds: this.compounds, hamlets: this.hamlets, parks: this.parks };
   },
 
   // Stone hump bridge across a causeway gap. a = {x, z, tx, tz} at the bridge centre.

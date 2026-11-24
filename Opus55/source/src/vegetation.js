@@ -200,7 +200,7 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   let sq = 0.85 + 0.3 * fract(T.b.y * 3.7);
   let local = vec3f(lxz.x / sq, pos.y * sq, lxz.y / sq) * s;
   let sp = T.b.z;
-  let amp = select(select(0.3, 0.8, sp == 2.0), 0.55, sp == 3.0) * sway * s;
+  let amp = select(select(0.3, 0.8, floor(sp) == 2.0), 0.55, floor(sp) == 3.0) * sway * s;
   let ph = T.b.y * 40.0 + T.a.x * 0.02;
   let t = time();
   let o0 = swayOff(t, ph, amp);
@@ -253,8 +253,17 @@ fn swayOff(t: f32, ph: f32, amp: f32) -> vec2f {
   let dLx = dpdx(i.lp.xz) * 0.12; let dLy = dpdy(i.lp.xz) * 0.12;
   return shadeTree(i, ff, vec4f(0.0), dLx, dLy);
 }
+// Uplight colours of park trees (land-use plan): glow index packed in the fractional part of the species (x / 8).
+fn glowColor(g: f32) -> vec3f {
+  if (g < 1.5) { return vec3f(1.0, 0.66, 0.32); }    // gold
+  if (g < 2.5) { return vec3f(0.62, 1.0, 0.86); }    // jade
+  if (g < 3.5) { return vec3f(0.35, 0.88, 1.0); }    // turquoise
+  if (g < 4.5) { return vec3f(1.0, 0.42, 0.85); }    // magenta
+  return vec3f(1.0, 0.84, 0.66);                      // warm white
+}
 fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
-  let sp = i.info.x; let hsh = i.info.y; let part = i.info.z;
+  let sp = floor(i.info.x); let hsh = i.info.y; let part = i.info.z;
+  let glow = round(fract(i.info.x) * 8.0);
   var n = normalize(i.n);
   let v = normalize(F.camPos.xyz - i.wp);
   var albedo: vec3f; var rough = 0.7; var mat = 1.0; var ao = 1.0; var emis = vec3f(0.0);
@@ -306,6 +315,13 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
     rough = 0.92;
     emis = albedo * vec3f(0.5, 0.62, 0.9) * (0.08 + 0.24 * top) * ao * mix(1.0, 0.35, farK);
   }
+  if (glow > 0.5) {
+    // uplit park tree: ground spotlights light the trunk and the underside of the crown, fading upward
+    let hr = saturate((i.wp.y - i.info.w) / select(12.0, 14.0, sp == 1.0));
+    let under = 0.2 + 0.8 * saturate(0.25 - n.y);
+    let up = (1.0 - smoothstep(0.05, 0.75, hr)) * under;
+    emis += glowColor(glow) * (albedo + vec3f(0.015)) * up * 12.0;
+  }
   var wet = select(0.0, 0.5, mat == 0.0);
   // moonlit mist lying in the valley hollows south of the city
   let mist = valleyMist(i.wp, dist, 0.5);
@@ -319,6 +335,21 @@ fn shadeTree(i: VOut, ff: bool, card: vec4f, dLx: vec2f, dLy: vec2f) -> GOut {
 `;
 
 // ---------------------------------------------------------------- CPU: exclusion mask
+
+function stampRectInto(m, cx, cz, hw, hd, ang, pad) {
+  const R = MASK_RES, S = TERRAIN.SIZE / R, O = TERRAIN.ORIGIN;
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const ex = Math.abs(c) * (hw + pad) + Math.abs(s) * (hd + pad), ez = Math.abs(s) * (hw + pad) + Math.abs(c) * (hd + pad);
+  const i0 = Math.max(0, Math.floor((cx - ex - O) / S)), i1 = Math.min(R - 1, Math.ceil((cx + ex - O) / S));
+  const j0 = Math.max(0, Math.floor((cz - ez - O) / S)), j1 = Math.min(R - 1, Math.ceil((cz + ez - O) / S));
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const x = O + (i + 0.5) * S - cx, z = O + (j + 0.5) * S - cz;
+    const lx = x * c + z * s, lz = -x * s + z * c;
+    if (Math.abs(lx) <= hw + pad && Math.abs(lz) <= hd + pad) m[j * R + i] = 255;
+  }
+}
+// infill lots of the land-use plan (stamped after the street-tree filter, see init)
+function stampLots(m, lots) { for (const L of lots || []) stampRectInto(m, L.x, L.z, L.w / 2, L.d / 2, L.angle, 2); }
 
 function buildMask(world) {
   const R = MASK_RES, S = TERRAIN.SIZE / R, O = TERRAIN.ORIGIN;
@@ -433,11 +464,40 @@ export default {
 
     // fixed trees: street avenues + garden
     // street trees also respect the exclusion mask (landmark plazas, viewpoint sightlines)
-    const fixed = (await this._streetTrees(ctx)).filter((t) => {
+    // Land-use plan (I-016): the filter mask also holds the reserve rectangles of the hamlets the plan suppressed, so
+    // it is exactly the mask of a build without the plan, and the street trees and the rng(4242) draws below stay the
+    // same by construction (before round 2 this was only true by measurement).
+    const supp = world.shared.suppressedReserve || [];
+    let filterMask = mask;
+    if (supp.length) { filterMask = mask.slice(); for (const g of supp) stampRectInto(filterMask, g.x, g.z, g.hw, g.hd, g.angle || 0, 2); }
+    const street = await this._streetTrees(ctx);
+    const keepTree = (m) => (t) => {
       const i = Math.floor((t[0] - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES), j = Math.floor((t[2] - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES);
-      return !(i >= 0 && j >= 0 && i < MASK_RES && j < MASK_RES && mask[j * MASK_RES + i]);
-    });
+      return !(i >= 0 && j >= 0 && i < MASK_RES && j < MASK_RES && m[j * MASK_RES + i]);
+    };
+    const fixed = street.filter(keepTree(filterMask));
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
+      // dev check: every hamlet reserve, kept or suppressed, reached the filter mask
+      const g = world.shared.garden || {};
+      console.assert(!world.plan || supp.length === 0 || g.hamlets > 0, 'I-016: suppressed hamlet reserves without hamlets');
+      world.shared.fixedPrefix = { street: fixed.length, streetIfSuppressedDropped: street.filter(keepTree(mask)).length, garden: (world.shared.gardenTrees || []).length, suppressedReserve: supp.length };
+    }
     for (const g of world.shared.gardenTrees || []) fixed.push(g);
+    // land-use plan (I-016): park trees are appended after every existing fixed tree (so the rng(4242) draws of
+    // those stay the same); infill lots are stamped into the mask only now, after the street-tree filter
+    if (world.plan) {
+      const masked = (x, z) => {
+        const i = Math.floor((x - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES), j = Math.floor((z - TERRAIN.ORIGIN) / TERRAIN.SIZE * MASK_RES);
+        return i >= 0 && j >= 0 && i < MASK_RES && j < MASK_RES && mask[j * MASK_RES + i] > 0;
+      };
+      const parkTrees = world.plan.parkTrees(masked);
+      for (const t of parkTrees) fixed.push(t);
+      world.plan.bakeTreeLight(parkTrees);   // ground glow under the uplit trees
+      this.parkTreeCount = parkTrees.length;
+      world.shared.parkTrees = { count: parkTrees.length, uplit: parkTrees.filter((t) => t[4] % 1 > 0).length };
+      stampLots(mask, world.infillLots);
+      d.queue.writeTexture({ texture: this.maskTex }, mask, { bytesPerRow: MASK_RES }, [MASK_RES, MASK_RES]);
+    }
     this.nFixed = fixed.length;
     const fd = new Float32Array(Math.max(fixed.length, 1) * 8);
     const R = rng(4242);

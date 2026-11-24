@@ -12,7 +12,8 @@
 import { TERRAIN } from './common.js';
 import { FAR, generateTerrain } from './terrainGen.js';
 import { terrainDrawWGSL } from './terrainShade.js';
-import { StreetLamps } from './terrainLamps.js';
+import { StreetLamps, districtLampCandidates, infillLampCandidates } from './terrainLamps.js';
+import { parkWGSL } from './terrainPark.js';
 import { Embankments } from './terrainBank.js';
 
 const LEAF = 64;                         // leaf patch size (m)
@@ -66,6 +67,8 @@ export default {
       { binding: 8, visibility: VF, texture: { sampleType: 'float' } },
       { binding: 9, visibility: VF, sampler: { type: 'filtering' } },
       { binding: 10, visibility: VF, buffer: { type: 'uniform' } },
+      { binding: 11, visibility: VF, texture: { sampleType: 'float' } },   // park layout map (planPark.js)
+      { binding: 12, visibility: VF, texture: { sampleType: 'float' } },   // park light map
     ] });
     this.sampRep = d.createSampler({ magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear', maxAnisotropy: 8, addressModeU: 'repeat', addressModeV: 'repeat' });
     this.tuData = new Float32Array(4);
@@ -82,9 +85,11 @@ export default {
       { binding: 8, resource: this.tCanopy.createView() },
       { binding: 9, resource: this.sampRep },
       { binding: 10, resource: { buffer: this.tuBuf } },
+      { binding: 11, resource: world.plan.layTex.createView() },
+      { binding: 12, resource: world.plan.litTex.createView() },
     ] });
     this.pipe = ctx.renderer.gbufferPipeline({
-      label: 'terrain', code: terrainDrawWGSL({ N, K: this.K.toFixed(3), LEAF, MORPH0: MORPH0.toFixed(3), simple: ctx.params.get('tdbg') === '1' }), groups: [this.layout],
+      label: 'terrain', code: terrainDrawWGSL({ N, K: this.K.toFixed(3), LEAF, MORPH0: MORPH0.toFixed(3), simple: ctx.params.get('tdbg') === '1', park: parkWGSL(world.plan) }), groups: [this.layout],
       buffers: [{ arrayStride: 8, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }] }],
     });
 
@@ -99,8 +104,12 @@ export default {
     this.count = 0;
     ctx.terrainEarly = [];
     this.lamps = new StreetLamps();
-    await this.lamps.init(ctx, this);
+    await this.lamps.init(ctx, this, { candidates: districtLampCandidates(), valid: 'lampValid', maxLights: [240, 380, 520] });
     world.shared.streetLamps = this.lamps.count;
+    // the plan's infill streets: own candidates, own validation rule and own real-light pool
+    this.infillLamps = new StreetLamps();
+    await this.infillLamps.init(ctx, this, { candidates: infillLampCandidates(world), valid: 'infillLampValid', maxLights: [60, 90, 120] });
+    world.shared.infillStreetLamps = this.infillLamps.count;
     this.bank = new Embankments();
     this.bank.init(ctx);
     ctx.terrainEarly.push(this.bank);
@@ -230,14 +239,17 @@ export default {
     this._sel(LEVELS, 0, 0);
     ctx.device.queue.writeBuffer(this.patchBuf, 0, this.patchData.buffer, 0, this.count * 16);
     this.lamps.update(ctx);
+    this.infillLamps.update(ctx);
     this.bank.update(ctx);
     this.tuData[0] = this.lamps.realRange;
+    this.tuData[1] = this.infillLamps.realRange;
     ctx.device.queue.writeBuffer(this.tuBuf, 0, this.tuData);
   },
 
   gbuffer(ctx, pass) {
     if (ctx.hideA > 1) return;
     this.lamps.draw(ctx, pass);
+    this.infillLamps.draw(ctx, pass);
     const early = ctx.terrainEarly;
     for (let i = 0; i < early.length; i++) early[i].drawEarly(ctx, pass);
     if (!ctx.terrainLateHost) this.drawGround(ctx, pass);

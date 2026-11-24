@@ -1,11 +1,11 @@
 // Functional checks: click to start (pointer lock + audio), movement, fly/walk toggle, viewpoints, rain toggle,
 // collision with buildings, no WebGPU errors, JS heap stays flat while moving.
-//   node tools/functional.mjs [--file out/dev.html]
+//   node tools/functional.mjs [--file out/dev.html] [--profile name]
 import { launch } from './launch.mjs';
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf('--' + k); return i >= 0 ? args[i + 1] : d; };
-const { page, close } = await launch({ file: opt('file', 'out/dev.html'), query: '', profileName: 'opus55-functional' });
+const { page, close } = await launch({ file: opt('file', 'out/dev.html'), query: '', profileName: opt('profile', 'opus55-functional') });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const check = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  (' + detail + ')' : ''}`); };

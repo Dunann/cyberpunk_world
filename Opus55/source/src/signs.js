@@ -5,9 +5,12 @@
 
 import { MeshBuilder, VERTEX_LAYOUT, makeCamTest } from './trafficGeom.js';
 import { buildSignAtlas } from './signAtlas.js';
-import { placeSigns, selectLights, SIGN_FLOATS } from './signPlace.js';
+import { placeSigns, placeInfillSigns, selectLights, SIGN_FLOATS } from './signPlace.js';
 
 const SIGN_LIGHT_BUDGET = 2150;
+const INFILL_SIGN_LIGHTS = 60;   // separate pool for the land-use plan's infill signs
+const PARK_LANTERN_SCALE = 1.3;  // park lanterns (land-use plan) are a little larger than the street ones
+const PARK_LANTERN_DIST = 900;   // and drawn up to this distance
 const OWN_SIGN_LIGHTS = 64;     // separate allowance for the Hongyadong complex's sign lights
 
 const SIGN_WGSL = /* wgsl */ `
@@ -399,27 +402,44 @@ export default {
     const d = ctx.device;
     const q = ctx.quality.level;
     const res = placeSigns(ctx.world, this.atlas, q);
+    // land-use plan infill (I-016): second pass with its own stream; its rows form their own cells after all others
+    const inf = placeInfillSigns(ctx.world, this.atlas, q);
     // rank by area (screens and billboards first); far away only signs of 6 m2 and more are drawn
-    // the Hongyadong complex's signs (res.ownRows) get their own cells, so the city's sign cells stay as they were
+    // the Hongyadong complex's signs (res.ownRows) and the land-use plan's infill signs (appended after res.signs) get
+    // cells of their own, so the city's sign cells stay as they were
     const own = res.ownRows;
-    this.cells = new Cells(res.signs, 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6, (i) => (i >= own[0] && i < own[1] ? 1 : 0));
+    this.cells = new Cells(res.signs.concat(inf.signs), 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6,
+      (i) => (i >= own[0] && i < own[1] ? 1 : i >= res.signs.length ? 2 : 0));
     const arr = new Float32Array(Math.max(1, this.cells.rows.length) * SIGN_FLOATS);
     this.cells.rows.forEach((r, i) => arr.set(r, i * SIGN_FLOATS));
     this.buf = d.createBuffer({ label: 'signs', size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.buf, 0, arr);
     this.group = d.createBindGroup({ layout: this.layout, entries: [
       { binding: 0, resource: { buffer: this.buf } }, { binding: 1, resource: this.atlas.view }, { binding: 2, resource: this.sampler }] });
-    this.lanCells = new Cells(res.lanterns, 160, 0, 2, 2);
+    this.lanCells = new Cells(res.lanterns.concat(inf.lanterns), 160, 0, 2, 2, undefined, 0, (i) => (i >= res.lanterns.length ? 1 : 0));
     const la = new Float32Array(Math.max(1, this.lanCells.rows.length) * 8);
     this.lanCells.rows.forEach((r, i) => la.set(r, i * 8));
     this.lanBuf = d.createBuffer({ label: 'lanterns', size: la.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.lanBuf, 0, la);
     this.lanGroup = d.createBindGroup({ layout: this.lanLayout, entries: [{ binding: 0, resource: { buffer: this.lanBuf } }] });
+    // land-use plan parks (I-016): red lanterns hanging from the lantern posts of Lantern Park (gardenParks.js);
+    // the same instanced lantern, in cells of their own, drawn farther out (they mark the walks seen from above)
+    const posts = (ctx.world.plan && ctx.world.plan.layout.posts) || [];
+    const parkRows = posts.map((p, i) => [p.x + p.nx * 0.5, ctx.world.heightAt(p.x, p.z) + 2.78, p.z + p.nz * 0.5, i * 0.618 % 1 * 6.28, PARK_LANTERN_SCALE, 0, 0.6, Math.atan2(p.nz, p.nx)]);
+    this.parkLanCells = new Cells(parkRows, 160, 0, 2, 2);
+    const pl = new Float32Array(Math.max(1, parkRows.length) * 8);
+    this.parkLanCells.rows.forEach((r, i) => pl.set(r, i * 8));
+    this.parkLanBuf = d.createBuffer({ label: 'park-lanterns', size: pl.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(this.parkLanBuf, 0, pl);
+    this.parkLanGroup = d.createBindGroup({ layout: this.lanLayout, entries: [{ binding: 0, resource: { buffer: this.parkLanBuf } }] });
     const budget = Math.min(SIGN_LIGHT_BUDGET, 8192 - ctx.lights.count - 64);
     // the complex's sign lights (tagged c[9]) are chosen separately, so the city's selection is unchanged
     const lights = selectLights(res.lightC.filter((c) => !c[9]), budget).concat(selectLights(res.lightC.filter((c) => c[9]), OWN_SIGN_LIGHTS));
     for (const L of lights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
-    this.stats = { signs: res.signs.length, lanterns: res.lanterns.length, lights: lights.length };
+    // infill sign lights: own pool, selected after the existing selection
+    const infLights = selectLights(inf.lightC, INFILL_SIGN_LIGHTS);
+    for (const L of infLights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
+    this.stats = { signs: res.signs.length, lanterns: res.lanterns.length, lights: lights.length, infillSigns: inf.signs.length, infillLights: infLights.length };
     ctx.world.shared.signStats = this.stats;
     this.maxDist = [900, 1300, 1700][q];
     this.midDist = [350, 450, 600][q];
@@ -452,6 +472,15 @@ export default {
       pass.setVertexBuffer(0, this.lanMesh.vb);
       pass.setIndexBuffer(this.lanMesh.ib, 'uint32');
       for (let i = 0; i < l.draws; i++) pass.drawIndexed(this.lanMesh.count, l.drawCount[i], 0, 0, l.drawFirst[i]);
+    }
+    const pl = this.parkLanCells;
+    pl.cull(this.test, PARK_LANTERN_DIST);
+    if (pl.draws) {
+      pass.setPipeline(this.lanPipe);
+      pass.setBindGroup(1, this.parkLanGroup);
+      pass.setVertexBuffer(0, this.lanMesh.vb);
+      pass.setIndexBuffer(this.lanMesh.ib, 'uint32');
+      for (let i = 0; i < pl.draws; i++) pass.drawIndexed(this.lanMesh.count, pl.drawCount[i], 0, 0, pl.drawFirst[i]);
     }
   },
 };
