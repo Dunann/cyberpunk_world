@@ -251,3 +251,33 @@ New `src/planPark.js` (layout), `src/gardenParks.js` (structures); `terrainPark.
 - **Bench, one pair against the current main build** (shared GPU lock; a first pair with TAA p99/avg above 2 was
   measured on a shared GPU and rejected): main 9.59 / p99 11.59 (TAA 1.044), candidate 9.31 / p99 12.08 (TAA 1.105),
   delta -0.28 ms. One pair cannot resolve a 0.1 ms effect; the 3-pair round-2 mean (+0.12 ms) remains the estimate.
+
+### Merge with main after I-015 (Hongyadong rebuild), commit 2c26188
+- **Conflicts resolved:**
+  - `buildings.js`: both imports. `finishComplex(B, world)` runs before `genInfill(B, world)`, so the complex's
+    unseeded parts keep the seeds they have on main (the infill's own parts shift instead; they are new content).
+  - `buildings_landmarks.js`: I-015's side (`hongyadong`/`devMaskComplex` import, `earlierStiltsFootprint()`); the
+    `stiltsSite` import is dropped. `plan.js` keeps its own `stiltsSite()` for the keep-out.
+  - `signs.js`: both constant blocks; I-015's `Cells(..., group(i))` signature. Sign cells: complex rows group 1,
+    infill rows (appended after `res.signs`) group 2. The lantern cells call that auto-merged with the old `Set`
+    argument now passes `(i) => i >= res.lanterns.length ? 1 : 0`.
+  - `Opus55/index.html` rebuilt and committed.
+- **Checks (all GPU work through the shared lock):**
+  - `?noplan` against the current main build, held-out cameras H1, H3, H4, H7, H8, H9, H10, aligned PNG: identical
+    (max tile 0.00).
+  - `tools/hyd-identity.mjs`, main against the plan build: all 144,984 main parts are identical at the same index
+    (complex included: 1,306 earlier-complex indices, late ranges from 133,904); the plan build adds 2,016 infill parts
+    after them. The first 83,545 signs, 14,806 lanterns and 58,715 slots are identical (same hashes); the plan adds
+    5,619 infill signs and 136 park/infill lanterns, all outside the complex box. All 5,110 main lights are present;
+    +275 outside the box (120 infill lamp slots, 80 shop, 60 sign, 15 park). Colliders: +268 (infill buildings,
+    pavilions); 5 of main's are missing, at (1386, -422), (1389, -431), (1776, -214), (1770, -207), (1764, -200), outside
+    the complex box on plan land, consistent with the hamlets the plan suppresses (round 1 design).
+  - Tower phrase show: same 15 glyphs and 6 phrases with the plan, with `?noplan` and on main.
+  - Dev checks: `avenueLotHits` 0, `planRunLotHits` 0, `fixedPrefix` 948 street / 238 garden trees (both builds).
+  - `functional.mjs` 18/18. Both builds succeed; no WebGPU errors.
+  - Bench pair against main: main 9.62 / p99 11.76 (TAA 1.045), candidate 9.81 / p99 11.91 (TAA 1.057), +0.19 ms.
+- **Keep-out against the new complex:** the plan's keep-out is 400 m around the stilt site found by the original
+  search, (240, -140), as the spec states. The new complex's parts span x 128..324, z -358..104 (about 500 m), so the
+  nearest plan land is 291 m from the complex's nearest part (across the Jade River), not 400 m. The spec's literal
+  rule (400 m around the site) holds; a 400 m clearance from the actual footprint does not. Not changed here (no rule
+  changes in this step): widening the keep-out to the footprint would remove some plan land and change judged content.
