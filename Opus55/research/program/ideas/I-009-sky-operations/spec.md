@@ -1,7 +1,7 @@
 ---
 id: I-009
 title: Sky operations: airships, spaceport and vertiports
-status: accepted
+status: code-review
 score: 5.67 (review-1 only; prototype track, user priority 5 "more technology"; build with review-1 fixes 1-15)
 direction: Wild card / borrow from another field (air traffic control and airport lighting, launch photography, junk-sail design)
 family: technology: large air and space traffic with readable operations
@@ -178,3 +178,25 @@ Continue if all of these hold:
 - **TAA on strobes and plume:** strobes and the bright plume can flicker or ghost under TAA. Use sprite motion vectors (`writeMotion`), clamp the HDR, and keep strobes at least 0.08 s long.
 - **Merge conflicts:** the `buildings_gen.js` helipad hook may conflict with buildings ideas I-004..006. It is two additive lines.
 - **Monorails not included:** visible monorails in the hero zones are not part of this idea, because new routes would interfere with the layout and waterfront ideas. They are a follow-up candidate.
+
+## Target poses (review-1 fix 2, computed by rule on the prototype build)
+Computed with `node tools/skyops-check.mjs targets --poses-file ../eval/poses-v1.json` at each pose's time. Only on-screen samples not hidden by nearer opaque depth count. A pose is a target when a hull is at least 150 px long or a trail (opacity at least 0.2) is at least 250 px tall. A6 is dropped regardless.
+
+| Pose | t | Longest visible hull (px) | Tallest visible trail (px) | Target |
+|---|---|---|---|---|
+| A1 | 100 | 0 | 0 | no |
+| A2 | 100 | 0 | 0 | no |
+| A3 | 100 | 2 | 0 | no |
+| A4 | 100 | 0 | 0 | no |
+| A5 | 15 | 0 | 0 | no |
+| A6 | 100 | 0 | 0 | no (dropped) |
+| B1 | 45 | 0 | 268 | yes |
+| B2 | 100 | 0 | 0 | no |
+| B3 | 100 | 6 | 439 | yes |
+| B4 | 50 | 0 | 523 | yes |
+| G1 | 40 | 111 | 351 | yes |
+| G2 | 100 | 0 | 0 | no |
+| G3 | 100 | 141 | 279 | yes |
+| G4 | 70 | 12 | 296 | yes |
+
+**Targets: B1, B3, B4, G1, G3, G4** (6 of 14). All of them pass through the launch trail; no airship reaches 150 px at any pose time.
