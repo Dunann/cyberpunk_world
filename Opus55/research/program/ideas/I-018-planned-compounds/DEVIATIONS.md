@@ -169,3 +169,85 @@ Other checks:
   - `TEXT_MAX` is now in main's `buildings_wgsl.js`, so no patch line is needed.
   - The coverage for the plan rule as written is A6 48.8% and G1 14.3% (review-1).
   - The final rule replaces 913 lots, not 1,002: the Liziba rule and the any-height front-row rule keep more lots. Coverage was not re-measured on eval poses, to keep them unseen before the freeze.
+
+## Round 2 (judge-driven fix round)
+Both judges preferred main at A4 and on all four frames of the street burst. The candidate had removed skybridges across the street end, and some crowned towers (Art Deco gold spire, gold crown, pink-striped crown). Two world rules were added. No art rule changed.
+
+### The two new rules
+1. **Skybridge anchors (`keepBridgeAnchors`).**
+   - Every lot holding either tower of a skybridge, as recorded by `skybridges()` (rng 5150, `B.bridgeRecs` hill-tower indices), is kept as it is.
+   - Walkways need no extra rule: they hang between podiums, which are never replaced, and their parts sit outside every replaced range.
+   - New dev check `compoundStats.skybridges`: **320 of 320 skybridges intact**. That means both anchor lots are not replaced and neither of the bridge's two parts is masked. `bridgesRemoved` is now 0.
+2. **Distinctive crowns (`keepCrowns: lit, pagoda, spire, helipad, antenna`).**
+   - A lot is kept when any tower on it got one of these crown kinds, as recorded by `crown()` after the height cap.
+   - These are the crowns with their own silhouette: the stepped up-lit crown with fins (the "Art Deco gold" and "pink-striped" crowns are this kind), the pagoda roof, the spire, the helipad and the single antenna mast.
+   - The plant and roof kinds stay replaceable: machine, antennas, setback, garden, and billboard. Billboard counts are already held by the accent quota.
+
+### Frozen rules
+- `RULES` hash **0ca424cb** (was b4c11f80; only the two keys above were added).
+- `buildings_compound.js` blob **fbde01954dd5147f8134c60468f1b49d17a190da**.
+
+### Lots kept, by reason
+Out of 1,079 candidate tower lots in Yuzhong and Nan'an:
+
+| Reason | First reason per lot | Each rule's own count |
+|---|---|---|
+| Skybridge anchor | 409 | 431 |
+| Distinctive crown | 181 | 294 |
+| textFront | 47 | 88 |
+| textCorridor | 28 | 48 |
+| Landmark | 27 | 27 |
+| Station | 9 | 9 |
+| Complex | 0 | 0 |
+
+- **Replaced:** 378 lots (Yuzhong 186, was 631; Nan'an 192, was 282) in 278 compounds.
+- **Parts:** 12,883 replaced and 8,436 added. Final list 142,553 parts (main 147,000).
+- **Crown kinds on the candidate lots**, for reference: machine 281, setback 158, garden 150, billboard 147, antennas 139, lit 138, pagoda 130, spire 14, antenna 11, helipad 8.
+
+### Height mix (per lot, main → I-018)
+| District | Mean | Lots over 100 m |
+|---|---|---|
+| Yuzhong | 109.8 → 109.7 m | 99 → 99 |
+| Nan'an | 72.1 → 72.0 m | 46 → 46 |
+
+Every 10 m band is within 2 lots of main.
+
+### Accents on replaced lots (main → I-018)
+| District | Lit crowns | Billboards | Roof neon lines | EDGE | CROWNLIT |
+|---|---|---|---|---|---|
+| Yuzhong | 0 → 0 | 33 → 34 | 91 → 91 | 29 → 30 | 31 → 31 |
+| Nan'an | 0 → 0 | 31 → 31 | 26 → 26 | 9 → 9 | 0 → 0 |
+
+- Every lit crown, pagoda and spire of main is now kept in place.
+- Compounds still draw `pagoda` from their non-quota crown list (an art rule, left unchanged), so the city-wide pagoda count is a little higher than main's.
+
+### Identity against main
+All checks pass, as in round 1:
+- **Parts:** the full prefix is identical at 147,000 of 147,000. The compacted list equals the kept parts followed by the compound parts.
+- **Signs:** only the 64 dead rows differ (zeroed). 65 compound rows are added.
+- **Lights:** 42 dropped and 42 added, with the order kept. The total is unchanged at 5,385.
+- **Colliders:** 537 replaced and 957 added.
+- **Crowd, cars, air paths, tower text, I-016 infill and fixed prefix:** identical.
+- **Tower text:** the same 6 phrases, and the dev re-run matches.
+- **hyd-identity:** 145,694 parts the same and 0 different outside the complex. The 1,306 complex parts lie inside its box.
+
+### Checks
+- **Functional:** 18/18.
+- **Bench pair** (dev builds, through the lock, profile `opus55-I018`):
+
+  | Run | GPU avg | p99 | max | TAA p99/avg | gbuffer | bld-cull |
+  |---|---|---|---|---|---|---|
+  | main | 9.722 | 11.85 | 13.00 | 1.054 | 2.592 | 0.184 |
+  | round 2 | 9.776 | 11.88 | 13.34 | 1.052 | 2.622 | 0.166 |
+
+  That is **+0.054 ms**, with no WebGPU errors.
+- **Held-out views:** H1, H2, H5 and H6, plus two new street-level cameras placed by rule:
+  - **H7 Yuzhong street:** pos (-750, 1.7 rel, -150), target (-1035, 217, -244).
+  - **H8 Nan'an street:** pos (744, 1.7 rel, 1413), target (450, 95, 1472).
+  - The rule: the street intersection nearest the compound-lot centroid among those at least 400 m from every eval camera, 1.7 m above the ground, looking 300 m along the street axis that points most toward the centroid, 80 m above the ground there.
+  - Round-1 H5 was an aerial camera, not a street camera.
+  - At H7 the street, its walkways and its skybridges match main.
+- No eval pose was captured.
+
+### Effect on the idea
+Most of the round-1 change is gone. In Yuzhong only 186 of 631 lots are still replaced, so A6's changed area will be much smaller. At H5, the large plain box tower that round-1's judge marked as a major defect in main is now kept, because it anchors a skybridge. If the program wants more coverage back while keeping the bridges exact, the next option is a narrower anchor rule, such as keeping only skybridges that cross a street. That would be a new rule, decided on held-out views.

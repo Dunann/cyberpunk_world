@@ -31,6 +31,10 @@ export const RULES = {
   landmarkMargin: 60,             // lots within landmark radius + this are kept (m, lot centre)
   stationMargin: 120,             // lots within this of the Liziba monorail station are kept (landmark rule)
   complexMargin: 60,              // lots within this of the Hongyadong complex are kept
+  // round 2 (judge-driven): lots kept as they are
+  keepBridgeAnchors: true,        // lots whose tower anchors a skybridge (skybridges(), rng 5150)
+  keepCrowns: ['lit', 'pagoda', 'spire', 'helipad', 'antenna'],   // lots whose tower has a distinctive crown kind
+                                  // (stepped lit crown, pagoda, spire, helipad, antenna mast) as built by crown()
   streetInset: 1.5,               // tower to lot edge on street sides (m)
   lotGap: 4,                      // gap between the lots of a block (world.js _buildLots)
   gapK: 0.6,                      // gap between neighbouring towers of a compound >= gapK * W
@@ -326,7 +330,32 @@ export function buildCompounds(B, world) {
     }
     if (why) keep.set(k, why);
   }
-  for (const [k, why] of textExclusions(B, world, recs, candIdx)) if (!keep.has(k)) keep.set(k, why);
+  // skybridge anchors: the lots holding either tower of a skybridge (hill tower index -> lot)
+  const hillOf = new Map();
+  recs.forEach((r, k) => { for (let h = r.h0; h < r.h1; h++) hillOf.set(h, k); });
+  const anchorLots = new Set();
+  if (rules.keepBridgeAnchors) for (const br of B.bridgeRecs) for (const h of [br.i, br.j]) if (hillOf.has(h)) anchorLots.add(hillOf.get(h));
+  // distinctive crowns: the crown kinds actually built on the lot (crown() records them after the height cap)
+  const crownLots = new Set();
+  stats.candidateCrowns = {};
+  for (const k of candIdx) {
+    for (const t of recs[k].crowns) stats.candidateCrowns[t] = (stats.candidateCrowns[t] || 0) + 1;
+    if (recs[k].crowns.some((t) => rules.keepCrowns.includes(t))) crownLots.add(k);
+  }
+  const textKeep = textExclusions(B, world, recs, candIdx);
+  // every rule's own count (a lot can meet several), then the first reason per lot
+  stats.keptByRule = { landmark: 0, station: 0, complex: 0, skybridge: 0, crown: 0, textFront: 0, textCorridor: 0 };
+  for (const why of keep.values()) stats.keptByRule[why]++;
+  for (const k of candIdx) {
+    if (anchorLots.has(k)) stats.keptByRule.skybridge++;
+    if (crownLots.has(k)) stats.keptByRule.crown++;
+    if (textKeep.has(k)) stats.keptByRule[textKeep.get(k)]++;
+    if (keep.has(k)) continue;
+    if (anchorLots.has(k)) keep.set(k, 'skybridge');
+    else if (crownLots.has(k)) keep.set(k, 'crown');
+    else if (textKeep.has(k)) keep.set(k, textKeep.get(k));
+  }
+  stats.candidates = candIdx.size;
   for (const why of keep.values()) stats.kept[why] = (stats.kept[why] || 0) + 1;
 
   // 2. compounds: the remaining tower lots of each street block
@@ -435,6 +464,13 @@ export function buildCompounds(B, world) {
     const c = built.find((cc) => cc.recs.includes(ra || rb));
     if (c) c.replacedParts += 2;
   }
+  // dev check: every skybridge's two anchor towers and its own parts are unchanged
+  let bridgesIntact = 0;
+  for (const br of B.bridgeRecs) {
+    const lots = [br.i, br.j].map((h) => recs[hillOf.get(h)]);
+    if (!mask[br.p0] && !mask[br.p0 + 1] && lots.every((r) => r && !compLots.has(r))) bridgesIntact++;
+  }
+  stats.skybridges = { total: B.bridgeRecs.length, intact: bridgesIntact };
   let replacedProps = 0;
   for (let i = 0; i < P.count; i++) if (mask[i] && (P.get(i, 15) & FLAG.PROP)) replacedProps++;
   B.props -= replacedProps;

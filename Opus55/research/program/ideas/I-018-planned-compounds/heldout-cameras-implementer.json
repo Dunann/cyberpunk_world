@@ -96,5 +96,39 @@
   ],
   "t": 100,
   "rule": "450 m from the compound-lot centroid, 8-way bearing farthest from every eval camera (1040 m), 180 m above ground, aimed at the centroid 40 m up"
+ },
+ {
+  "id": "H7",
+  "name": "yuzhong-street",
+  "pos": [
+   -750,
+   1.7,
+   -150
+  ],
+  "rel": true,
+  "target": [
+   -1035,
+   217,
+   -244
+  ],
+  "t": 100,
+  "rule": "street intersection nearest the compound-lot centroid among those >=400 m from every eval camera (425 m); 1.7 m above ground; looking 300 m along the street axis most toward the centroid, 80 m above the ground there"
+ },
+ {
+  "id": "H8",
+  "name": "nanan-street",
+  "pos": [
+   744,
+   1.7,
+   1413
+  ],
+  "rel": true,
+  "target": [
+   450,
+   95,
+   1472
+  ],
+  "t": 100,
+  "rule": "street intersection nearest the compound-lot centroid among those >=400 m from every eval camera (749 m); 1.7 m above ground; looking 300 m along the street axis most toward the centroid, 80 m above the ground there"
  }
 ]
