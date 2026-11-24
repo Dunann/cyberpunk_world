@@ -6,3 +6,4 @@
 - 2026-11-24: Noise calibration started: two strict critics on the baseline, plus a pairwise judge comparing the baseline with itself.
 - 2026-11-24: Pairwise judge bias check: baseline against itself gave 22/22 ties (no false preferences).
 - 2026-11-24: Critic calibration: per-pose mean abs diff 0.27, zone means within 0.42. Smallest real change set to 0.5. Baseline zones A 5.33, B 5.34, G 5.12. Eval v1 frozen (tag eval-v1).
+- 2026-11-24: Loop started. Generators: I-001..003 (Fable xhigh, break an assumption: city continuity/waterfront), I-004..006 (Opus, attack the weakness: buildings/Hongyadong), I-007..009 (Opus, wild card: signage/technology).
