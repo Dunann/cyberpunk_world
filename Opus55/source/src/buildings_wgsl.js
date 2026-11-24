@@ -21,6 +21,8 @@ export const FLAG = {
 export const MAT = {
   CONCRETE: 0, RES: 1, OFFICE: 2, GLASS: 3, STONE: 4, SHOP: 5, BRICK: 6, TILE: 7, WOOD: 8, FELT: 9,
   METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17, CRYSTAL: 18, CARPET: 19, AC: 20,
+  // Hongyadong complex (buildings_stilts.js): sandstone ashlar (winW 1 = stair treads), WOOD wall variants, gallery railing
+  MASONRY: 21, PLASTER: 22, LACQUER: 23, SHOPWOOD: 24, RAIL: 25,
 };
 
 export const PART_WGSL = /* wgsl */ `
@@ -582,10 +584,18 @@ fn carpet(p: vec2f) -> vec3f {
       S.emis = col * prm * 0.6;
     } else if (mat == 7u || mat == 12u) {
       S.alb = col * 0.6;
+    } else if (mat == 8u || (mat >= 22u && mat <= 24u)) {
+      // Hongyadong gallery deck: wet timber planks (0.15 m boards across the part's local z), glossy
+      let lp = rot2(-P.a.w) * (wp.xz - P.a.xz);
+      let fwz = fwp / 0.15;
+      let joint = (1.0 - pulse(0.06, 0.94, fract(lp.y / 0.15), fwz)) * (1.0 - smoothstep(0.3, 0.8, fwz));
+      S.alb = vec3f(0.11, 0.06, 0.035) * (0.8 + 0.4 * hash11u(u32(floor(lp.y / 0.15) + 4096.0))) * (1.0 - 0.6 * joint);
+      S.rough = 0.4; S.wet = 0.85;
     }
   } else if (isCap && n.y < -0.5) {
     S.alb = vec3f(0.05); S.rough = 0.9;
     if (mat == 11u) { S.emis = col * prm * 0.5; }
+    if (mat == 8u && prm > 2.0) { S.alb = vec3f(0.12, 0.07, 0.04); S.emis = vec3f(1.0, 0.6, 0.28) * (prm - 2.0) * 0.5; }
     if (mat == 0u && prm > 1.0) { S.alb = col * 0.5; S.emis = col * vec3f(1.0, 0.7, 0.45) * (prm - 1.0) * 0.4; }
     if (mat == 3u || mat == 13u) { S.alb = vec3f(0.03, 0.035, 0.045); S.emis = col * 0.15 * prm; }
   } else if (mat == 1u || mat == 0u || mat == 2u) {
@@ -868,14 +878,20 @@ fn carpet(p: vec2f) -> vec3f {
         S.emis = S.alb * 0.3;
       }
     }
-  } else if (mat == 8u) {
-    // ---------------- Hongyadong wood with glowing lattices
+  } else if (mat == 8u || (mat >= 22u && mat <= 24u)) {
+    // ---------------- Hongyadong wood with glowing lattices (22 plaster with timber frame, 23 red lacquer,
+    // 24 open shopfront on the lower floor)
     let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, 0.8, 4u, 2.4);
     // lattice bars: 1 in the panes, 0 on the bars (4 x 5 panes per window, bars at least ~1 px wide)
     let barX = 1.0 - pulse(0.1, 0.9, fract(G.f.x * 4.0), max(fw.x * 4.0 / G.cw, 0.05));
     let barY = 1.0 - pulse(0.1, 0.9, fract(G.f.y * 5.0), max(fw.y * 5.0 / floorH, 0.05));
     let lat = 1.0 - max(barX, barY) * G.det;
-    let wood = col * (0.7 + 0.3 * vnoise2(vec2f(fd * 3.0, wp.y * 0.3)));
+    var wood = col * (0.7 + 0.3 * vnoise2(vec2f(fd * 3.0, wp.y * 0.3)));
+    if (mat == 22u) {
+      // white plaster between timber posts (window cell edges) and floor beams; averages out when far
+      let tim = saturate(2.0 - pulse(0.07, 0.93, G.f.x, fw.x / G.cw) - pulse(0.1, 0.9, G.f.y, fw.y / floorH));
+      wood = mix(vec3f(0.5, 0.47, 0.41) * (0.85 + 0.2 * vnoise2(vec2f(fd * 0.7, wp.y * 0.7))), wood, mix(0.35, tim, G.det));
+    }
     S.alb = mix(wood, vec3f(0.1, 0.06, 0.02), G.cov);
     let gold = vec3f(1.0, 0.62, 0.22);
     // lit rooms behind the lattice (parallax interiors), each window a slightly different warmth
@@ -885,7 +901,46 @@ fn carpet(p: vec2f) -> vec3f {
     S.alb = mix(S.alb, wood * 0.6, (1.0 - lat) * G.cov);
     // beam lines glow
     S.emis += gold * 0.9 * pulse(0.0, 0.05, G.f.y, fw.y / floorH) * G.det;
-    S.rough = 0.6;
+    S.rough = select(0.6, 0.32, mat == 23u);
+    if (mat == 24u && yRel > 0.0 && yRel < floorH) {
+      // open shopfront: the lower floor is open to the gallery between posts, lit shop interiors behind
+      let post = 1.0 - pulse(0.06, 0.94, G.f.x, fw.x / G.cw);
+      let open = (1.0 - post) * pulse(0.0, 0.78, yRel / floorH, fw.y / floorH);
+      var room = vec3f(0.55);
+      if (open > 0.0 && G.det > 0.01) {
+        room = interior(vec2f(G.f.x, yRel / (floorH * 0.78)), vt, vec3f(G.cw * scale, floorH * 0.78, 5.0), hash21(G.id + seed), 2u);
+      }
+      let tint = mix(vec3f(1.0, 0.82, 0.6), hsv(fract(hash21(G.id + seed * 1.7) * 5.0), 0.35, 1.0), 0.3);
+      S.alb = mix(S.alb, vec3f(0.012), open);
+      S.emis = mix(S.emis, room * tint * 0.75, open);
+      S.rough = mix(S.rough, 0.35, open);
+    }
+  } else if (mat == 21u) {
+    // ---------------- sandstone ashlar (0.6 x 0.3 m blocks): mortar fades to its average when small, water
+    // streaks and moss from the top edge, a warm wash from the gallery lights near the top; winW 1 = stair treads
+    let bv = wp.y / 0.3;
+    let bu = fd / 0.6 + 0.5 * floor(bv);
+    let mf = 1.0 - smoothstep(0.15, 0.5, max(fw.x / 0.6, fw.y / 0.3));
+    let mort = max(pulse(0.0, 0.08, fract(bv), fw.y / 0.3), pulse(0.0, 0.05, fract(bu), fw.x / 0.6));
+    var c = col * (0.85 + 0.3 * (hash21(floor(vec2f(bu, bv))) - 0.5) * mf + 0.2 * vnoise2(vec2f(fd * 0.25, wp.y * 0.15)));
+    c = mix(c, c * 0.5, mort * mf + 0.12 * (1.0 - mf));
+    let dTop = max(topY - wp.y, 0.0);
+    let streak = vnoise2(vec2f(fd * 1.3 + seed, 0.5)) * exp(-dTop / 5.0);
+    c *= 1.0 - 0.5 * smoothstep(0.35, 0.75, streak);
+    c = mix(c, vec3f(0.05, 0.08, 0.035), (1.0 - smoothstep(0.0, 0.5, dTop)) * 0.6);
+    if (u32(P.e.z + 0.5) == 1u) { c *= 1.0 - 0.5 * pulse(0.0, 0.3, fract(wp.y / 0.18), fw.y / 0.18); }
+    S.alb = c; S.rough = 0.75; S.wet = 0.7;
+    S.emis = c * vec3f(1.0, 0.62, 0.32) * prm * exp(-dTop / 2.5);
+  } else if (mat == 25u) {
+    // ---------------- gallery railing: timber balusters and rails; warm gallery light shows between balusters,
+    // the top rail glows on some families (param)
+    let hf = saturate((wp.y - P.a.y) / max(P.b.z, 0.1));
+    let bal = 1.0 - pulse(0.3, 0.7, fract(fd / 0.18), fw.x / 0.18);
+    let balF = mix(0.45, bal, 1.0 - smoothstep(0.2, 0.5, fw.x / 0.18));
+    let topR = pulse(0.86, 1.1, hf, fw.y / max(P.b.z, 0.1));
+    let solidM = saturate(balF + topR + pulse(-0.1, 0.1, hf, fw.y / max(P.b.z, 0.1)));
+    S.alb = mix(vec3f(0.015, 0.01, 0.008), col, solidM); S.rough = 0.6;
+    S.emis = vec3f(1.0, 0.6, 0.3) * 0.3 * (1.0 - solidM) + vec3f(1.0, 0.62, 0.28) * prm * topR;
   } else if (mat == 9u) {
     // ---------------- felt (ger), white with ornament bands
     let hf = saturate((wp.y - P.a.y) / max(P.b.z, 1.0));

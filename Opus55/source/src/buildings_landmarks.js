@@ -1,9 +1,10 @@
-// Landmark buildings (bespoke part assemblies), the Hongyadong-style stilt complex, the steppe night market,
-// and lot preparation around the verification viewpoints.
+// Landmark buildings (bespoke part assemblies), the steppe night market,
+// and lot preparation around the verification viewpoints. The Hongyadong complex is in buildings_stilts.js.
 
 import { FLAG, MAT } from './buildings_wgsl.js';
 import { Builder, PAL, gerHut, minaret } from './buildings_gen.js';
 import { DT } from './world.js';
+import { hongyadong, devMaskComplex } from './buildings_stilts.js';
 
 const TAU = Math.PI * 2;
 const RED = [1, 0.08, 0.05];
@@ -498,77 +499,6 @@ function ridgeTower(B, R, L, world) {
   B.light(x, g + 4, z + 40, 30, [1, 0.4, 0.7], 70, 3);
 }
 
-// Hongyadong-style stilt complex stacked down the Jade River bank.
-function stilts(B, R, L, world) {
-  // find the steepest stretch of bank within 900 m of the hint point
-  let best = null;
-  for (let x = L.x - 900; x <= L.x + 900; x += 20) for (let z = L.z - 900; z <= L.z + 900; z += 20) {
-    const d = world.waterDist(x, z);
-    if (d < 7 || d > 13) continue;
-    const e = 3;
-    let gx = world.waterDist(x + e, z) - world.waterDist(x - e, z), gz = world.waterDist(x, z + e) - world.waterDist(x, z - e);
-    const gl = Math.hypot(gx, gz) || 1; gx /= gl; gz /= gl;
-    const rise = world.heightAt(x + gx * 55, z + gz * 55) - world.heightAt(x, z);
-    const score = rise - Math.hypot(x - L.x, z - L.z) * 0.012;
-    if (!best || score > best.score) best = { x, z, gx, gz, score };
-  }
-  if (!best) return;
-  B.sites.stilts = { x: best.x, z: best.z, nx: -best.gx, nz: -best.gz };
-  // walk along the bank (iso-line of water distance ~10 m) in both directions
-  const cols = [];
-  for (const dir of [1, -1]) {
-    let x = best.x, z = best.z, gx = best.gx, gz = best.gz;
-    for (let i = 0; i < 9; i++) {
-      if (dir === 1 || i > 0) cols.push({ x, z, gx, gz });
-      // step along the bank tangent
-      x += -gz * 17 * dir; z += gx * 17 * dir;
-      // re-project to water distance ~10
-      for (let it = 0; it < 4; it++) {
-        const e = 3;
-        let nx = world.waterDist(x + e, z) - world.waterDist(x - e, z), nz = world.waterDist(x, z + e) - world.waterDist(x, z - e);
-        const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
-        const d = world.waterDist(x, z);
-        x -= nx * (d - 10); z -= nz * (d - 10);
-        gx = nx; gz = nz;
-      }
-    }
-  }
-  const wood = [0.2, 0.07, 0.045];
-  const roofC = [0.1, 0.1, 0.11];
-  for (const c of cols) {
-    const a = Math.atan2(-c.gx, c.gz);   // local +z points inland, local -z faces the river
-    const top = world.heightAt(c.x + c.gx * 60, c.z + c.gz * 60) + 6 + R() * 6;
-    const fl = 3.6;
-    let y = 7; // deck on stilts above the water
-    // stilts under the first tier
-    for (const sx of [-6, -2, 2, 6]) for (const sz of [-3.5, 0.5]) {
-      const [px, pz] = Builder.tw(c.x, c.z, a, sx, sz);
-      B.prop({ x: px, y0: -1, z: pz, hw: 0.32, h: y + 1, kind: 2, prm: 8, mat: MAT.CONCRETE, col: [0.25, 0.18, 0.12] });
-    }
-    let k = 0;
-    while (y < top && k < 12) {
-      const floors = 2 + (R() < 0.4 ? 1 : 0);
-      const h = floors * fl;
-      const inland = k * 7.5;
-      const [bx, bz] = Builder.tw(c.x, c.z, a, 0, inland + 2);
-      const bw = 5.2 + R() * 2.2, bd = 4.2 + 0.3 * k;
-      B.part({ x: bx, y0: k === 0 ? y : Math.max(y - 30, -1), z: bz, a, hw: bw, hd: bd, h: k === 0 ? h : h + (y - Math.max(y - 30, -1)), mat: MAT.WOOD, col: wood, floorH: fl, winW: 1.6, baseY: 7, param: 1.1 + R() * 0.4, seed: R() * 999, solid: true });
-      y += h;
-      // overhanging upturned roof with glowing eaves
-      B.part({ x: bx, y0: y - 0.25, z: bz, a, hw: bw + 1.7, hd: bd + 1.7, h: 3.2, prof: 4, taper: 0.2, mat: MAT.ROOFTILE, col: roofC, param: 2.2, flags: FLAG.BOTTOM });
-      // lanterns under the eave
-      for (const lx of [-bw + 1, -bw / 3, bw / 3, bw - 1]) {
-        const [qx, qz] = Builder.tw(c.x, c.z, a, lx, inland + 2 - bd - 0.9);
-        B.prop({ x: qx, y0: y - 1.6, z: qz, hw: 0.32, h: 0.75, kind: 2, prm: 8, mat: MAT.EMIT, col: [1, 0.1, 0.03], param: 5, winW: 2, flags: FLAG.BOTTOM });
-      }
-      k++;
-    }
-    const [lx, lz] = Builder.tw(c.x, c.z, a, 0, -4);
-    B.light(lx, 9, lz, 22, [1, 0.62, 0.25], 60, 5);
-    if (k > 3) { const [mx, mz] = Builder.tw(c.x, c.z, a, 0, 10); B.light(mx, y - 6, mz, 22, [1, 0.6, 0.25], 50, 5); }
-  }
-}
-
 // ------------------------------------------------------------------ added landmarks
 
 // Crystal Lance (Jiangbei): a faceted crystalline supertall. Hexagonal segments, each rotated 30 degrees from the
@@ -723,8 +653,10 @@ function registan(B, R, L, world) {
 }
 
 export function genLandmarks(B, R, world) {
+  let complex = null;
   for (const L of world.landmarks) {
     const g = world.heightAt(L.x, L.z);
+    if (L.id === 'stilts') { const i0 = B.P.count; hongyadong(B, L, world); complex = [i0, B.P.count]; continue; }
     switch (L.id) {
       case 'twist': twist(B, R, L, g); break;
       case 'twin': twin(B, R, L, g); break;
@@ -733,7 +665,6 @@ export function genLandmarks(B, R, world) {
       case 'crown': jinCrown(B, R, L, g); break;
       case 'raffles': raffles(B, R, L, world); break;
       case 'ridge': ridgeTower(B, R, L, world); break;
-      case 'stilts': stilts(B, R, L, world); break;
       case 'gerdome': gerdome(B, R, L, world); break;
       case 'registan': registan(B, R, L, world); break;
       case 'crystal': crystal(B, R, L, g); break;
@@ -741,4 +672,5 @@ export function genLandmarks(B, R, world) {
       default: break;
     }
   }
+  if (complex) devMaskComplex(B, complex[0], complex[1]);
 }
