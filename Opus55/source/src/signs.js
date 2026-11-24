@@ -11,6 +11,7 @@ const SIGN_LIGHT_BUDGET = 2150;
 const INFILL_SIGN_LIGHTS = 60;   // separate pool for the land-use plan's infill signs
 const PARK_LANTERN_SCALE = 1.3;  // park lanterns (land-use plan) are a little larger than the street ones
 const PARK_LANTERN_DIST = 900;   // and drawn up to this distance
+const OWN_SIGN_LIGHTS = 64;     // separate allowance for the Hongyadong complex's sign lights
 
 const SIGN_WGSL = /* wgsl */ `
 struct Sign { a: vec4f, b: vec4f, c: vec4f, d: vec4f, e: vec4f, f: vec4f };
@@ -316,9 +317,9 @@ function lanternMesh() {
 // Spatial cells for CPU culling of instanced draws.
 class Cells {
   // sizeOf(row) ranks rows inside a cell (largest first); rows with sizeOf >= big are drawn in the far tier.
-  // Rows in `apart` (a Set) get cells of their own, sorted after all the others.
-  constructor(rows, size, xi, zi, reach, sizeOf = () => 1, big = 0, apart = null) {
-    const keyed = rows.map((r) => ({ r, k: Math.floor(r[xi] / size) * 4096 + Math.floor(r[zi] / size) + (apart && apart.has(r) ? 1e9 : 0), s: sizeOf(r) }));
+  // group(i) > 0 puts row i into separate cells (kept after all others), so its rows never change other cells
+  constructor(rows, size, xi, zi, reach, sizeOf = () => 1, big = 0, group = () => 0) {
+    const keyed = rows.map((r, i) => ({ r, k: Math.floor(r[xi] / size) * 4096 + Math.floor(r[zi] / size) + group(i) * 1e7, s: sizeOf(r) }));
     keyed.sort((a, b) => a.k - b.k || b.s - a.s);
     this.rows = keyed.map((o) => o.r);
     const cells = [];
@@ -404,14 +405,18 @@ export default {
     // land-use plan infill (I-016): second pass with its own stream; its rows form their own cells after all others
     const inf = placeInfillSigns(ctx.world, this.atlas, q);
     // rank by area (screens and billboards first); far away only signs of 6 m2 and more are drawn
-    this.cells = new Cells(res.signs.concat(inf.signs), 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6, new Set(inf.signs));
+    // the Hongyadong complex's signs (res.ownRows) and the land-use plan's infill signs (appended after res.signs) get
+    // cells of their own, so the city's sign cells stay as they were
+    const own = res.ownRows;
+    this.cells = new Cells(res.signs.concat(inf.signs), 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6,
+      (i) => (i >= own[0] && i < own[1] ? 1 : i >= res.signs.length ? 2 : 0));
     const arr = new Float32Array(Math.max(1, this.cells.rows.length) * SIGN_FLOATS);
     this.cells.rows.forEach((r, i) => arr.set(r, i * SIGN_FLOATS));
     this.buf = d.createBuffer({ label: 'signs', size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(this.buf, 0, arr);
     this.group = d.createBindGroup({ layout: this.layout, entries: [
       { binding: 0, resource: { buffer: this.buf } }, { binding: 1, resource: this.atlas.view }, { binding: 2, resource: this.sampler }] });
-    this.lanCells = new Cells(res.lanterns.concat(inf.lanterns), 160, 0, 2, 2, undefined, 0, new Set(inf.lanterns));
+    this.lanCells = new Cells(res.lanterns.concat(inf.lanterns), 160, 0, 2, 2, undefined, 0, (i) => (i >= res.lanterns.length ? 1 : 0));
     const la = new Float32Array(Math.max(1, this.lanCells.rows.length) * 8);
     this.lanCells.rows.forEach((r, i) => la.set(r, i * 8));
     this.lanBuf = d.createBuffer({ label: 'lanterns', size: la.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -428,7 +433,8 @@ export default {
     d.queue.writeBuffer(this.parkLanBuf, 0, pl);
     this.parkLanGroup = d.createBindGroup({ layout: this.lanLayout, entries: [{ binding: 0, resource: { buffer: this.parkLanBuf } }] });
     const budget = Math.min(SIGN_LIGHT_BUDGET, 8192 - ctx.lights.count - 64);
-    const lights = selectLights(res.lightC, budget);
+    // the complex's sign lights (tagged c[9]) are chosen separately, so the city's selection is unchanged
+    const lights = selectLights(res.lightC.filter((c) => !c[9]), budget).concat(selectLights(res.lightC.filter((c) => c[9]), OWN_SIGN_LIGHTS));
     for (const L of lights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
     // infill sign lights: own pool, selected after the existing selection
     const infLights = selectLights(inf.lightC, INFILL_SIGN_LIGHTS);

@@ -14,7 +14,7 @@ import { DT } from './world.js';
 import { PART_WGSL, CULL_WGSL, DRAW_WGSL, PART_FLOATS, FLAG } from './buildings_wgsl.js';
 import { selectTowerText, packSlots, buildGlyphArray, TEXT_WGSL, TEXT_MAX } from './buildings_text.js';
 import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges, walkways } from './buildings_gen.js';
-import { prepareLots, genLandmarks, genMarket } from './buildings_landmarks.js';
+import { prepareLots, genLandmarks, genMarket, finishComplex } from './buildings_landmarks.js';
 import { genInfill, infillHeightStats } from './buildings_infill.js';
 import { WGSL_LIB, WGSL_FRAME, GBUFFER_OUT } from './common.js';
 import { WGSL_LIGHT, GBUFFER_FORMATS, DEPTH_FORMAT } from './renderer.js';
@@ -74,7 +74,9 @@ function generate(ctx) {
   }
   B.bridges = skybridges(B, rng(5150));
   B.walkways = walkways(B, rng(5151));
-  // land-use plan infill (I-016): generated last, with its own sign slots and lights
+  finishComplex(B, world);   // the Hongyadong complex's remaining parts and its sign slots go after everything else
+  // land-use plan infill (I-016): generated after the complex, so the complex's unseeded parts keep the seeds they
+  // have without the plan; with its own sign slots and lights
   B.infill = genInfill(B, world);
   return B;
 }
@@ -97,14 +99,17 @@ export default {
       world.addCollider(g(0), g(1) + h / 2, g(2), hw, h / 2, hd, g(3));
     }
 
-    // lights: landmark/flood/market lights first, then shop spill lights spread evenly over the city
+    // lights: landmark/flood/market lights first, then shop spill lights spread evenly over the city.
+    // The Hongyadong complex's lights (tagged l[9]) have their own allowance; the rest of the city keeps the budget
+    // it had beside the earlier complex (B.lightsReserved of its lights), so the same shop lights survive.
     const L = B.lights;
     const hi = L.filter((l) => l[8] > 1), lo = L.filter((l) => l[8] <= 1);
     const rl = rng(4242);
     for (let i = lo.length - 1; i > 0; i--) { const j = Math.floor(rl() * (i + 1)); const t = lo[i]; lo[i] = lo[j]; lo[j] = t; }
-    let nl = 0;
+    const cityBudget = LIGHT_BUDGET - (B.lightsReserved || 0);
+    let nl = 0, nCity = 0;
     for (const l of hi.concat(lo)) {
-      if (nl >= LIGHT_BUDGET) break;
+      if (!l[9]) { if (nCity >= cityBudget) continue; nCity++; }
       ctx.lights.add(l[0], l[1], l[2], l[3], l[4], l[5], l[6], l[7]);
       nl++;
     }
@@ -124,6 +129,7 @@ export default {
     world.shared.towerTops = lm.concat(cbd, bund).map((t) => ({ x: t.x, y: t.y, z: t.z }));
     world.shared.ledFacades = B.led;
     world.shared.landmarkSites = B.sites;
+    if (typeof __DEV__ !== 'undefined' && __DEV__) this.devParts = P;   // dev identity checks (tools/hyd-identity.mjs)
     world.shared.buildingStats = { parts: P.count, props: B.props, bridges: B.bridges, walkways: B.walkways, shopProps: B.shopProps, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
 
     // tower phrase show: choose the participating towers and flag the parts that carry a character
