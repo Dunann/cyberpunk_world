@@ -1,7 +1,8 @@
 ---
 id: I-013
 title: Skyline variety: a crown library with a neighbour rule, and refuge-floor cuts that fade with distance
-status: proposed
+status: rejected
+score: 5.0 (review-1 4.67, review-2 5.33)
 direction: from review of I-005 (Attack the weakness, user priority 1)
 family: massing and silhouette grammar (crowns, tower cuts), RNG-isolated
 parent: I-005

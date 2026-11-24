@@ -17,3 +17,5 @@
 - 2026-11-24: I-011 rejected (6.0/6.0). Prototype track (user-named priority 2): I-015 Hongyadong stack with both reviews' fixes.
 - 2026-11-24: I-012 (facade relief, A4/B2) and I-013 (crowns and cuts, G1/A6/A3) proposed as the focused split of I-005.
 - 2026-11-24: I-001 rejected (5.83). Combined revision I-016 requested from the Fable generator (urban infill + I-003 parks, lot-coverage mask, same-bank owners, ground-relative caps, isolated RNG streams).
+- 2026-11-24: I-013 rejected (5.0). Minimal revision I-017 requested (replace lit pyramids only, unchanged streams for everything else, no cuts).
+- 2026-11-24: PROCESS CHANGE (coordinator): 0 of 11 ideas reached the 7 bar (range 4.67-6.33) with the strict reviewers. From now on, an idea scoring at least 5.5 on a user-stated priority goes to a prototype that must include all the reviewers' fixes. Adoption still requires the blind pairwise judge, the GPU and functional gates and no clear loss anywhere, so quality is gated on real images rather than predictions.
