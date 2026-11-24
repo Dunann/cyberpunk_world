@@ -21,3 +21,4 @@
 - 2026-11-24: PROCESS CHANGE (coordinator): 0 of 11 ideas reached the 7 bar (range 4.67-6.33) with the strict reviewers. From now on, an idea scoring at least 5.5 on a user-stated priority goes to a prototype that must include all the reviewers' fixes. Adoption still requires the blind pairwise judge, the GPU and functional gates and no clear loss anywhere, so quality is gated on real images rather than predictions.
 - 2026-11-24: I-009 to prototype track after one review (5.67, at least 5.5, user priority 5). Scope reduced by review-1 fixes: airships and launch only.
 - 2026-11-24: I-017 rejected (5.0). Crown-variety family dropped for now: three attempts with small expected impact.
+- 2026-11-24: I-016 confluence plan proposed (combined I-001 + I-003; build first, then paint; targets G2, G3, B3; G1 and G4 forecast as watched).
