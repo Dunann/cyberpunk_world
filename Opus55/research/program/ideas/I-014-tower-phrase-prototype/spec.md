@@ -1,7 +1,7 @@
 ---
 id: I-014
 title: Tower phrase show (prototype, judged on real images)
-status: evaluating
+status: implementing
 score: prototype track (coordinator decision; see LOG.md)
 direction: user-requested feature (skyscrapers with text light shows); consolidates I-007/I-010 reviews
 family: signage: tower-scale facade text
