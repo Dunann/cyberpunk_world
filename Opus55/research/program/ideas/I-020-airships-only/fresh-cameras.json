@@ -1,0 +1,10 @@
+[
+  {"id":"S01","zone":"S","name":"confluence-300m-right-118deg","pos":[425.5,563,505.1],"rel":false,"target":[536.2,530.2,226.3],"t":66.188},
+  {"id":"S02","zone":"S","name":"bund-cbd-700m-left-104deg","pos":[2424,384,-695.6],"rel":false,"target":[2260.8,403.5,-1376.3],"t":299.477},
+  {"id":"S03","zone":"S","name":"west-300m-left-107deg","pos":[-2629.6,317.8,545.8],"rel":false,"target":[-2454.1,292.4,789.1],"t":181.068},
+  {"id":"S04","zone":"S","name":"confluence-700m-right-94deg","pos":[789.2,486,906.5],"rel":false,"target":[803.7,527.9,206.7],"t":110.901},
+  {"id":"S05","zone":"S","name":"bund-cbd-300m-left-89deg","pos":[2035.5,345.5,-1149.1],"rel":false,"target":[2211.5,405.4,-1392.1],"t":308.244},
+  {"id":"S06","zone":"S","name":"west-700m-left-62deg","pos":[-2667.2,292,1716.7],"rel":false,"target":[-2574.2,290.7,1022.9],"t":94.193},
+  {"id":"S07","zone":"S","name":"confluence-300m-left-99deg","pos":[697.6,557.2,689.2],"rel":false,"target":[627.1,530.5,397.6],"t":207.263},
+  {"id":"S08","zone":"S","name":"bund-cbd-700m-right-68deg","pos":[2592.4,313.1,-1987.9],"rel":false,"target":[2187,406.6,-1417.2],"t":34.958}
+]
