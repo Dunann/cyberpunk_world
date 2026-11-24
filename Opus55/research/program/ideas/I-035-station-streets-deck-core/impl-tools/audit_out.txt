@@ -1,0 +1,6 @@
+signs 73957 relocation: {"moved":370,"slid":38,"hung":324,"hungNoBracket":21,"failed":0,"screensLifted":2,"mounts":521}
+sign boxes entering a layout box: 0 
+layout boxes entering a non-host part: {}
+street lamps entering a layout box: 0
+track samples entering a layout box (exits excluded: they meet the station by design): 0
+mounts 521 deck sign rows [ 73957, 73957 ]
