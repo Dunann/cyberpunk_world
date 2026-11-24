@@ -9,3 +9,4 @@
 | I-014 round 2 (7c8592b) | B1 (by declared rule) | judge C: 1/1, 0 (G3, G4 slight losses); judge D: 1/1, 0 | pass (9.57 / 9.51 vs base 9.51 / 9.57) | **adopted**; result review: holds with caveats (gain at B1 only, roughly neutral elsewhere) | pending |
 | I-009 round 1 (7dc6eb0) | B1, B3, B4, G1, G3, G4 | judge A: 2/6, 0; judge B: 0/6, 0 | pass | not adopted; fix round | — |
 | I-015 round 2 (6cdfcf7) | A1, A2, A3, G2 | judge A: 4/4 (all clear), 0; judge B: 4/4 (3 clear), 0 | pass (9.55 / 9.62 vs main 9.55 / 9.56) | **adopted**; result review: holds with caveats (traffic and crowds reshuffled by a freed street; judge B ran a command) | pending |
+| I-009 round 3 (b3d59af) | B1, B3, B4, G1, G3, G4 | judge C: 0/6 (B3 clear loss) | pass | **blocked**: the launch trail loses at every distance; close airships win (u62) | — |
