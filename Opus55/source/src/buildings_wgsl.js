@@ -16,6 +16,7 @@ export const FLAG = {
   NOTOP: 1, BOTTOM: 2, LED: 4, ARCADE: 8, FLOOD: 16, EDGE: 32, ROUND: 64, CURVED: 128, PROP: 256,
   CAPFACADE: 512, BALC: 1024, BLINK: 2048, PORTAL: 4096, RIBS: 8192, NOWIN: 16384, CROWNLIT: 32768, NOBOX: 65536,
   DETAIL: 131072,   // small street-dressing prop: culled below 8 px instead of the global minimum
+  TEXT: 262144,     // carries a tower character: also appended to the overlay lists (buildings_text.js)
 };
 
 export const MAT = {
@@ -33,6 +34,9 @@ export const CULL_WGSL = /* wgsl */ `
 @group(1) @binding(1) var<storage, read_write> vis: array<u32>;
 @group(1) @binding(2) var<storage, read_write> args: array<atomic<u32>>;
 @group(1) @binding(3) var<uniform> cullU: vec4f; // x part count, y list stride (entries), z lod bias, w min pixel size
+@group(1) @binding(4) var<storage, read_write> textVis: array<u32>;            // overlay lists (tower characters)
+@group(1) @binding(5) var<storage, read_write> textArgs: array<atomic<u32>>;
+const TEXT_STRIDE = 64u;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u) {
@@ -70,6 +74,11 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
   } else if (pix > 70.0) { list = 0u; }
   let k = atomicAdd(&args[list * 5u + 1u], 1u);
   vis[list * u32(cullU.y) + k] = i;
+  // tower characters: the same part again, in the overlay list with the same mesh LOD (equal-depth test)
+  if ((flags & 262144u) != 0u) {
+    let kt = atomicAdd(&textArgs[list * 5u + 1u], 1u);
+    if (kt < TEXT_STRIDE) { textVis[list * TEXT_STRIDE + kt] = i; }
+  }
 }
 `;
 
