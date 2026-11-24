@@ -1,7 +1,7 @@
 ---
 id: I-037
 title: Prow Terraces - the Raffles look-alike becomes a cluster rising landward with a climbing stair of sky halls, on lit Confluence Steps that cover the bare tip (the A3 wedge)
-status: proposed
+status: in-review
 direction: Attack the weakness (critical A3 wedge; critic 2: Raffles City replica); revision of I-031 after review
 family: landmark design plus site completion: bespoke parts built on the old records and replaced after generation, terraced podium on bare land
 parent: I-031

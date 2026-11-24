@@ -1,7 +1,7 @@
 ---
 id: I-036
 title: CBD hero trio - Braid, Tripod Lantern and Offset Pair replace the Shanghai Tower, Bank of China and Petronas look-alikes, with the light show, edge strips, searchlights and tower text kept exactly
-status: proposed
+status: in-review
 direction: Attack the weakness (critic 2: near-replica landmarks); revision of I-031 after review
 family: landmark design: bespoke part assemblies, built on the old records and replaced after generation
 parent: I-031
