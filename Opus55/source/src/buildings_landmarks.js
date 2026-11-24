@@ -499,6 +499,91 @@ function ridgeTower(B, R, L, world) {
   B.light(x, g + 4, z + 40, 30, [1, 0.4, 0.7], 70, 3);
 }
 
+// The stilt complex that buildings_stilts.js replaced drew from the shared landmark stream R, took part indices
+// (parts added without a seed get one from their index), props from the shared prop budget, and high-priority
+// lights. This replays its bank walk and tier loop (terrain queries only, no parts) and draws R exactly as it did,
+// so everything generated after it (steppe landmarks, the market, districts, signs) keeps its values.
+// Returns the earlier complex's part, prop and light counts; B.props is advanced by its props.
+function earlierStiltsFootprint(B, R, L, world) {
+  const n = { parts: 0, props: 0, lights: 0 };
+  let best = null;
+  for (let x = L.x - 900; x <= L.x + 900; x += 20) for (let z = L.z - 900; z <= L.z + 900; z += 20) {
+    const d = world.waterDist(x, z);
+    if (d < 7 || d > 13) continue;
+    const e = 3;
+    let gx = world.waterDist(x + e, z) - world.waterDist(x - e, z), gz = world.waterDist(x, z + e) - world.waterDist(x, z - e);
+    const gl = Math.hypot(gx, gz) || 1; gx /= gl; gz /= gl;
+    const rise = world.heightAt(x + gx * 55, z + gz * 55) - world.heightAt(x, z);
+    const score = rise - Math.hypot(x - L.x, z - L.z) * 0.012;
+    if (!best || score > best.score) best = { x, z, gx, gz, score };
+  }
+  if (!best) return n;
+  const prop = () => { if (B.props < B.propBudget) { B.props++; n.parts++; n.props++; } };
+  const cols = [];
+  for (const dir of [1, -1]) {
+    let x = best.x, z = best.z, gx = best.gx, gz = best.gz;
+    for (let i = 0; i < 9; i++) {
+      if (dir === 1 || i > 0) cols.push({ x, z, gx, gz });
+      x += -gz * 17 * dir; z += gx * 17 * dir;
+      for (let it = 0; it < 4; it++) {
+        const e = 3;
+        let nx = world.waterDist(x + e, z) - world.waterDist(x - e, z), nz = world.waterDist(x, z + e) - world.waterDist(x, z - e);
+        const nl = Math.hypot(nx, nz) || 1; nx /= nl; nz /= nl;
+        const d = world.waterDist(x, z);
+        x -= nx * (d - 10); z -= nz * (d - 10);
+        gx = nx; gz = nz;
+      }
+    }
+  }
+  for (const c of cols) {
+    const top = world.heightAt(c.x + c.gx * 60, c.z + c.gz * 60) + 6 + R() * 6;
+    let y = 7;
+    for (let i = 0; i < 8; i++) prop();                  // stilts
+    let k = 0;
+    while (y < top && k < 12) {
+      const floors = 2 + (R() < 0.4 ? 1 : 0);
+      R(); R(); R();                                     // width, glow and seed of the tier
+      n.parts += 2;                                      // tier body and roof
+      y += floors * 3.6;
+      for (let i = 0; i < 4; i++) prop();                // lanterns
+      k++;
+    }
+    n.lights += k > 3 ? 2 : 1;
+  }
+  return n;
+}
+
+// Places the Hongyadong complex (buildings_stilts.js) without changing anything outside it: the replayed
+// footprint of the earlier complex keeps the shared stream and the prop count; the complex's first parts take
+// the earlier complex's part indices and the rest wait in B.complexLate until finishComplex() appends them, with
+// the complex's sign slots, after every other part and slot. The city keeps the light budget it had beside the
+// earlier complex (B.lightsReserved is the earlier complex's light count; the new complex's lights are tagged).
+function placeComplex(B, R, L, world) {
+  const old = earlierStiltsFootprint(B, R, L, world);
+  B.lightsReserved = old.lights;
+  const res = hongyadong(B, L, world);
+  if (!res) return;
+  const head = Math.min(old.parts, res.parts.length);
+  const i0 = B.P.count;
+  for (let i = 0; i < head; i++) B.P.add(res.parts[i]);
+  // (if the complex had fewer parts than the earlier one, empty parts keep the indices of the parts after it)
+  for (let i = head; i < old.parts; i++) B.P.add({ x: 0, y0: -100, z: 0, hw: 0, hd: 0, h: 0, mat: MAT.CONCRETE, flags: FLAG.NOTOP });
+  B.complexLate = { parts: res.parts.slice(head), slots: res.slots, head: [i0, i0 + head] };
+}
+
+// Called at the end of generation: appends the complex's remaining parts and its sign slots.
+export function finishComplex(B, world) {
+  const late = B.complexLate;
+  if (!late) return;
+  const j0 = B.P.count;
+  for (const o of late.parts) B.P.add(o);
+  for (const s of late.slots) world.signSlots.push(s);
+  const ranges = [late.head, [j0, B.P.count]];
+  B.sites.stilts.ranges = ranges;
+  devMaskComplex(B, ranges);
+  B.complexLate = null;
+}
+
 // ------------------------------------------------------------------ added landmarks
 
 // Crystal Lance (Jiangbei): a faceted crystalline supertall. Hexagonal segments, each rotated 30 degrees from the
@@ -653,10 +738,8 @@ function registan(B, R, L, world) {
 }
 
 export function genLandmarks(B, R, world) {
-  let complex = null;
   for (const L of world.landmarks) {
     const g = world.heightAt(L.x, L.z);
-    if (L.id === 'stilts') { const i0 = B.P.count; hongyadong(B, L, world); complex = [i0, B.P.count]; continue; }
     switch (L.id) {
       case 'twist': twist(B, R, L, g); break;
       case 'twin': twin(B, R, L, g); break;
@@ -665,6 +748,7 @@ export function genLandmarks(B, R, world) {
       case 'crown': jinCrown(B, R, L, g); break;
       case 'raffles': raffles(B, R, L, world); break;
       case 'ridge': ridgeTower(B, R, L, world); break;
+      case 'stilts': placeComplex(B, R, L, world); break;
       case 'gerdome': gerdome(B, R, L, world); break;
       case 'registan': registan(B, R, L, world); break;
       case 'crystal': crystal(B, R, L, g); break;
@@ -672,5 +756,4 @@ export function genLandmarks(B, R, world) {
       default: break;
     }
   }
-  if (complex) devMaskComplex(B, complex[0], complex[1]);
 }

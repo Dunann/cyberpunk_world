@@ -8,6 +8,7 @@ import { buildSignAtlas } from './signAtlas.js';
 import { placeSigns, selectLights, SIGN_FLOATS } from './signPlace.js';
 
 const SIGN_LIGHT_BUDGET = 2150;
+const OWN_SIGN_LIGHTS = 64;     // separate allowance for the Hongyadong complex's sign lights
 
 const SIGN_WGSL = /* wgsl */ `
 struct Sign { a: vec4f, b: vec4f, c: vec4f, d: vec4f, e: vec4f, f: vec4f };
@@ -313,8 +314,9 @@ function lanternMesh() {
 // Spatial cells for CPU culling of instanced draws.
 class Cells {
   // sizeOf(row) ranks rows inside a cell (largest first); rows with sizeOf >= big are drawn in the far tier.
-  constructor(rows, size, xi, zi, reach, sizeOf = () => 1, big = 0) {
-    const keyed = rows.map((r) => ({ r, k: Math.floor(r[xi] / size) * 4096 + Math.floor(r[zi] / size), s: sizeOf(r) }));
+  // group(i) > 0 puts row i into separate cells (kept after all others), so its rows never change other cells
+  constructor(rows, size, xi, zi, reach, sizeOf = () => 1, big = 0, group = () => 0) {
+    const keyed = rows.map((r, i) => ({ r, k: Math.floor(r[xi] / size) * 4096 + Math.floor(r[zi] / size) + group(i) * 1e7, s: sizeOf(r) }));
     keyed.sort((a, b) => a.k - b.k || b.s - a.s);
     this.rows = keyed.map((o) => o.r);
     const cells = [];
@@ -398,7 +400,9 @@ export default {
     const q = ctx.quality.level;
     const res = placeSigns(ctx.world, this.atlas, q);
     // rank by area (screens and billboards first); far away only signs of 6 m2 and more are drawn
-    this.cells = new Cells(res.signs, 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6);
+    // the Hongyadong complex's signs (res.ownRows) get their own cells, so the city's sign cells stay as they were
+    const own = res.ownRows;
+    this.cells = new Cells(res.signs, 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6, (i) => (i >= own[0] && i < own[1] ? 1 : 0));
     const arr = new Float32Array(Math.max(1, this.cells.rows.length) * SIGN_FLOATS);
     this.cells.rows.forEach((r, i) => arr.set(r, i * SIGN_FLOATS));
     this.buf = d.createBuffer({ label: 'signs', size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -412,7 +416,8 @@ export default {
     d.queue.writeBuffer(this.lanBuf, 0, la);
     this.lanGroup = d.createBindGroup({ layout: this.lanLayout, entries: [{ binding: 0, resource: { buffer: this.lanBuf } }] });
     const budget = Math.min(SIGN_LIGHT_BUDGET, 8192 - ctx.lights.count - 64);
-    const lights = selectLights(res.lightC, budget);
+    // the complex's sign lights (tagged c[9]) are chosen separately, so the city's selection is unchanged
+    const lights = selectLights(res.lightC.filter((c) => !c[9]), budget).concat(selectLights(res.lightC.filter((c) => c[9]), OWN_SIGN_LIGHTS));
     for (const L of lights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
     this.stats = { signs: res.signs.length, lanterns: res.lanterns.length, lights: lights.length };
     ctx.world.shared.signStats = this.stats;

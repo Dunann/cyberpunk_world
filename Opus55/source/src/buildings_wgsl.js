@@ -330,7 +330,8 @@ fn tangentView(n: vec3f, V: vec3f) -> vec3f {
   return vec3f(dot(d, T), d.y, -dot(d, nh));
 }
 
-// style: 0 residential, 1 office ribbon, 2 stone tall, 3 brick arched, 4 wood lattice, 5 glass office
+// style: 0 residential, 1 office ribbon, 2 stone tall, 3 brick arched, 4 wood lattice, 5 glass office,
+// 6 small timber-house windows (Hongyadong plaster and lacquer walls)
 fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: u32, fw: vec2f,
               vt: vec3f, scale: f32, litFrac: f32, style: u32, inten: f32) -> Grid {
   var G: Grid;
@@ -353,6 +354,7 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   if (style == 3u) { ww = 0.34; wh = 0.5; y0 = 0.25; }
   if (style == 4u) { ww = 0.64; wh = 0.56; y0 = 0.22; }
   if (style == 5u) { ww = 1.0; wh = 0.74; y0 = 0.22; mode = 1u; }
+  if (style == 6u) { ww = 0.36; wh = 0.42; y0 = 0.32; }
   let x0 = 0.5 - ww * 0.5;
   var mask = pulse(x0, x0 + ww, f.x, fwc.x) * pulse(y0, y0 + wh, f.y, fwc.y);
   // office glazing: a mullion splits each bay into two panes
@@ -398,7 +400,7 @@ fn windowGrid(fd: f32, fl: f32, y: f32, floorH: f32, winW: f32, seed: f32, fid: 
   // office floors share the building's light colour; some tenants use the opposite temperature
   let fh = hash21(vec2f(id.y, seed + 3.0));
   let offC = select(offBase, offBase.zyx * vec3f(1.0, 0.97, 0.92), fh > 0.86) * (0.85 + 0.3 * fract(fh * 7.0));
-  let warmOnly = style == 2u || style == 3u || style == 4u;
+  let warmOnly = style == 2u || style == 3u || style == 4u || style == 6u;
   let L = vec4f(select(select(L0.rgb, roomLight(fract(hash21(lid + seed) * 7.0) * 0.72), warmOnly), offC, mode == 1u), L0.a);
   var room = vec3f(0.0);
   if (det > 0.01 && L.a > 0.5 && mask > 0.0 && F.params.w > 0.5) {
@@ -880,8 +882,11 @@ fn carpet(p: vec2f) -> vec3f {
     }
   } else if (mat == 8u || (mat >= 22u && mat <= 24u)) {
     // ---------------- Hongyadong wood with glowing lattices (22 plaster with timber frame, 23 red lacquer,
-    // 24 open shopfront on the lower floor)
-    let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, 0.8, 4u, 2.4);
+    // 24 open shopfront on the lower floor). param = occupancy: ~0 dark (shuttered), 0.5 dim, 1.15 normal,
+    // 1.75 bright; it sets the share of lit windows, their brightness and the glowing beam lines. Plaster and
+    // lacquer walls have small windows, so the wall itself reads.
+    let occ = saturate(prm / 1.8);
+    let G = windowGrid(fd, fl, yRel, floorH, winW, seed, fid, fw, vt, scale, mix(0.02, 0.95, occ), select(4u, 6u, mat == 22u || mat == 23u), 2.4 * mix(0.45, 1.2, occ));
     // lattice bars: 1 in the panes, 0 on the bars (4 x 5 panes per window, bars at least ~1 px wide)
     let barX = 1.0 - pulse(0.1, 0.9, fract(G.f.x * 4.0), max(fw.x * 4.0 / G.cw, 0.05));
     let barY = 1.0 - pulse(0.1, 0.9, fract(G.f.y * 5.0), max(fw.y * 5.0 / floorH, 0.05));
@@ -899,8 +904,8 @@ fn carpet(p: vec2f) -> vec3f {
     let behind = G.e * vec3f(1.0, 0.78, 0.5) * 1.6 + gold * 0.1 * G.g.x;
     S.emis = mix(gold * prm * 0.4 * G.cov, behind * mix(0.12, 1.0, lat) * wv, G.det);
     S.alb = mix(S.alb, wood * 0.6, (1.0 - lat) * G.cov);
-    // beam lines glow
-    S.emis += gold * 0.9 * pulse(0.0, 0.05, G.f.y, fw.y / floorH) * G.det;
+    // beam lines glow on lit units only
+    S.emis += gold * 0.6 * smoothstep(0.25, 0.75, occ) * pulse(0.0, 0.05, G.f.y, fw.y / floorH) * G.det;
     S.rough = select(0.6, 0.32, mat == 23u);
     if (mat == 24u && yRel > 0.0 && yRel < floorH) {
       // open shopfront: the lower floor is open to the gallery between posts, lit shop interiors behind
