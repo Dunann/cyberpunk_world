@@ -1,7 +1,8 @@
 ---
 id: I-019
 title: Linked tower pairs - CBD towers designed as two-tower buildings joined by gates, ladders, decks and atriums
-status: proposed
+status: rejected
+score: 5.0 (review-1 only; below 5.5)
 direction: Break an assumption (user priority 1: buildings too boxy, need character; few great places)
 family: building generation: composite two-tower buildings replacing standalone per-lot towers
 parent: none

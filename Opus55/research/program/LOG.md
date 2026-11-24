@@ -45,3 +45,4 @@
 - 2026-11-24: I-018 to prototype track (5.67). Main risk: night accents (lit crowns, billboards, roof neon) removed on about 1,000 lots -> plainer. Build queued until I-014 and I-016 are decided (merge order, GPU contention). I-019 review started.
 - 2026-11-24: I-014 fix round 1 done (7c8592b): 6 composed phrases on 15 towers (was 11 on 40), SDF glyphs, reading order by rule, edge-on fade. Bench 3 clean pairs within noise (TAA ratio 1.05-1.06). Code review round 2 started; targets to be recomputed by a declared rule before eval capture, since coverage dropped.
 - 2026-11-24: I-014 code review round 2: PASS. Targets by the declared rule (2+ characters of one phrase visible, at least 20 px): B1 only. Evaluation started under the GPU lock.
+- 2026-11-24: I-019 rejected (5.0): coverage counts unchanged towers; the visible change is thin east-west links in 12 m gaps that repeat the twin landmark about 40 times; most across-road pairs exceed its own 60 m cap.
