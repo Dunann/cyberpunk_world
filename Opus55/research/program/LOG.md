@@ -16,3 +16,4 @@
 - 2026-11-24: I-001 (skeleton urban field), I-002 (stepped banks + prow), I-003 (light parks) proposed by the Fable layout generator.
 - 2026-11-24: I-011 rejected (6.0/6.0). Prototype track (user-named priority 2): I-015 Hongyadong stack with both reviews' fixes.
 - 2026-11-24: I-012 (facade relief, A4/B2) and I-013 (crowns and cuts, G1/A6/A3) proposed as the focused split of I-005.
+- 2026-11-24: I-001 rejected (5.83). Combined revision I-016 requested from the Fable generator (urban infill + I-003 parks, lot-coverage mask, same-bank owners, ground-relative caps, isolated RNG streams).

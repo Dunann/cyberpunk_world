@@ -1,7 +1,8 @@
 ---
 id: I-001
 title: Skeleton field: one continuous city grown along the rivers, bridges and rail lines
-status: proposed
+status: rejected
+score: 5.83 (review-1 6.0, review-2 5.67)
 direction: Break an assumption (city layout and continuity; user priority 3)
 family: layout field: urban extent from distance to water and infrastructure, districts as styles
 parent: none
