@@ -11,6 +11,8 @@ export const INFO = { RES: 2048 };                                 // world info
 export const FOG = { W: 160, H: 90, D: 128, NEAR: 1, FAR: 9000 };  // froxel volume
 export const MAX_DISTRICTS = 16;
 export const MAX_LIGHTS = 8192;
+// Land-use plan coverage map (plan.js): bounding box of the plan sites (m) and texel size.
+export const PLAN_BOX = { X0: -720, Z0: -1400, X1: 2040, Z1: 1260, CELL: 3 };
 
 export const WGSL_LIB = /* wgsl */ `
 const PI = 3.14159265;
@@ -130,6 +132,7 @@ struct WorldU {
 @group(0) @binding(4) var infoTex: texture_2d<f32>;     // rgba16float: x signed water distance (m), y district id, z district weight, w natural shore (lake/canal) 0..1
 @group(0) @binding(5) var fogTex: texture_3d<f32>;      // rgb in-scatter, a transmittance (froxels)
 @group(0) @binding(6) var<uniform> W: WorldU;
+@group(0) @binding(7) var coverTex: texture_2d<f32>;    // land-use plan (plan.js): r built, g owner id / 255, b park, a style / 255
 
 const T_SIZE = ${TERRAIN.SIZE}.0;
 const T_RES = ${TERRAIN.RES}.0;
@@ -164,6 +167,31 @@ fn worldInfo(xz: vec2f) -> vec4f {
   return textureSampleLevel(infoTex, sampClamp, uv, 0.0);
 }
 
+// Land-use plan coverage (plan.js). Outside the plan box nothing is read and nothing changes.
+const PLAN_O = vec2f(${PLAN_BOX.X0}.0, ${PLAN_BOX.Z0}.0);
+const PLAN_S = vec2f(${PLAN_BOX.X1 - PLAN_BOX.X0}.0, ${PLAN_BOX.Z1 - PLAN_BOX.Z0}.0);
+const PLAN_RES = vec2f(${Math.ceil((PLAN_BOX.X1 - PLAN_BOX.X0) / PLAN_BOX.CELL)}.0, ${Math.ceil((PLAN_BOX.Z1 - PLAN_BOX.Z0) / PLAN_BOX.CELL)}.0);
+fn inPlan(xz: vec2f) -> bool { return all(xz > PLAN_O) && all(xz < PLAN_O + PLAN_S); }
+// x built coverage 0..1 (linear), y owner district id or -1 (nearest), z park coverage 0..1 (linear), w park style (nearest)
+fn coverAt(xz: vec2f) -> vec4f {
+  if (!inPlan(xz)) { return vec4f(0.0, -1.0, 0.0, 0.0); }
+  let uv = (xz - PLAN_O) / PLAN_S;
+  let s = textureSampleLevel(coverTex, sampClamp, uv, 0.0);
+  let n = textureLoad(coverTex, clamp(vec2i(uv * PLAN_RES), vec2i(0), vec2i(PLAN_RES) - 1), 0);
+  let own = round(n.g * 255.0);
+  return vec4f(s.r, select(own, -1.0, own > 254.5), s.b, round(n.a * 255.0));
+}
+// worldInfo with the plan's built blocks: owner id and 0.8 x built coverage where that exceeds the ellipse weight.
+// Used only by the city ground (groundShade, bakeNear, roadMask); lamp validation keeps worldInfo.
+fn cityInfo(xz: vec2f) -> vec4f {
+  var info = worldInfo(xz);
+  if (!inPlan(xz)) { return info; }
+  let c = coverAt(xz);
+  let w = 0.8 * c.x;
+  if (w > info.z && c.y >= 0.0) { info.y = c.y; info.z = w; }
+  return info;
+}
+
 // Road mask for a district grid: returns (mask 0..1, distance to road center line, lane coord along road, axis 0/1).
 fn districtRoad(p: vec2f, di: i32) -> vec4f {
   let d = W.d[di];
@@ -181,7 +209,7 @@ fn districtRoad(p: vec2f, di: i32) -> vec4f {
 }
 // Combined road mask at a world position (0 outside districts with a street grid).
 fn roadMask(p: vec2f) -> f32 {
-  let info = worldInfo(p);
+  let info = cityInfo(p);
   let di = i32(info.y + 0.5);
   if (di < 0 || di >= i32(W.count.x) || info.z < 0.35) { return 0.0; }
   if (W.d[di].b.y <= 0.0) { return 0.0; }

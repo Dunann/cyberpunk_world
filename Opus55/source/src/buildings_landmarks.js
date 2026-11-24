@@ -4,6 +4,7 @@
 import { FLAG, MAT } from './buildings_wgsl.js';
 import { Builder, PAL, gerHut, minaret } from './buildings_gen.js';
 import { DT } from './world.js';
+import { stiltsSite } from './plan.js';
 
 const TAU = Math.PI * 2;
 const RED = [1, 0.08, 0.05];
@@ -500,18 +501,8 @@ function ridgeTower(B, R, L, world) {
 
 // Hongyadong-style stilt complex stacked down the Jade River bank.
 function stilts(B, R, L, world) {
-  // find the steepest stretch of bank within 900 m of the hint point
-  let best = null;
-  for (let x = L.x - 900; x <= L.x + 900; x += 20) for (let z = L.z - 900; z <= L.z + 900; z += 20) {
-    const d = world.waterDist(x, z);
-    if (d < 7 || d > 13) continue;
-    const e = 3;
-    let gx = world.waterDist(x + e, z) - world.waterDist(x - e, z), gz = world.waterDist(x, z + e) - world.waterDist(x, z - e);
-    const gl = Math.hypot(gx, gz) || 1; gx /= gl; gz /= gl;
-    const rise = world.heightAt(x + gx * 55, z + gz * 55) - world.heightAt(x, z);
-    const score = rise - Math.hypot(x - L.x, z - L.z) * 0.012;
-    if (!best || score > best.score) best = { x, z, gx, gz, score };
-  }
+  // the steepest stretch of bank within 900 m of the hint point (shared with the land-use plan's keep-out)
+  const best = stiltsSite(world);
   if (!best) return;
   B.sites.stilts = { x: best.x, z: best.z, nx: -best.gx, nz: -best.gz };
   // walk along the bank (iso-line of water distance ~10 m) in both directions

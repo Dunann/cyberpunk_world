@@ -3,15 +3,53 @@
 // terrainShade.js). Lamps near the camera get real point lights (nearest first, adaptive range); beyond that
 // range the terrain shader draws matching analytic pools, so the hand-off is seamless.
 
-import { STREET_WGSL } from './terrainShade.js';
+import { STREET_WGSL, INFILL_LAMP_WGSL } from './terrainShade.js';
 import { DISTRICTS } from './world.js';
 
 const CELL = 200;           // culling cell size (m)
 const NEAR_MESH = 650;      // full lamp mesh within this distance, glow sprite beyond
 const FAR_DRAW = 3200;      // max draw distance for lamp sprites
 
-const VALIDATE_WGSL = /* wgsl */ `
+// Candidate lamp slots (district, axis, road line, lamp index) of every district's street grid, inside its ellipse.
+export function districtLampCandidates() {
+  const cand = [];
+  DISTRICTS.forEach((D, di) => {
+    if (!D.block) return;
+    const ext = Math.max(D.rx, D.rz) * 1.05;
+    const nl = Math.ceil(ext / D.block);
+    const n = Math.max(Math.round(D.block / 34), 1), sp = D.block / n;
+    const nj = Math.ceil(ext / sp);
+    for (let axis = 0; axis < 2; axis++) for (let line = -nl; line <= nl; line++) for (let j = -nj; j < nj; j++) {
+      // local position (cheap pre-filter against the district ellipse)
+      const along = (j + 0.5) * sp, off = line * D.block;
+      const lx = axis ? off : along, lz = axis ? along : off;
+      if ((lx / D.rx) ** 2 + (lz / D.rz) ** 2 > 1.05) continue;
+      cand.push(di, axis, line, j);
+    }
+  });
+  return cand;
+}
+
+// Candidate lamp slots on the four streets around every built cell of the land-use plan (plan.js).
+export function infillLampCandidates(world) {
+  const seen = new Set(), cand = [];
+  for (const c of (world.plan && world.plan.cells) || []) {
+    const D = DISTRICTS[c.di];
+    const n = Math.max(Math.round(D.block / 34), 1);
+    const edges = [[1, c.i, c.j], [1, c.i + 1, c.j], [0, c.j, c.i], [0, c.j + 1, c.i]];   // [axis, line, cell index along]
+    for (const [axis, line, along] of edges) for (let j = along * n; j < (along + 1) * n; j++) {
+      const k = `${c.di},${axis},${line},${j}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      cand.push(c.di, axis, line, j);
+    }
+  }
+  return cand;
+}
+
+const VALIDATE_WGSL = (valid) => /* wgsl */ `
 ${STREET_WGSL}
+${INFILL_LAMP_WGSL}
 struct Cand { di: f32, axis: f32, line: f32, j: f32 };
 @group(1) @binding(0) var<storage, read> cands: array<Cand>;
 @group(1) @binding(1) var<storage, read_write> outL: array<vec4f>;
@@ -23,7 +61,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
   let di = i32(c.di);
   let hw = W.d[di].b.z * 0.5;
   let L = lampPos(di, c.axis, c.line, c.j, hw);
-  var ok = lampValid(L.xy, di);
+  var ok = ${valid}(L.xy, di);
   // keep off steep ground and away from water edges
   let h = terrainHeight(L.xy);
   let n = terrainNormal(L.xy, 3.0);
@@ -136,24 +174,11 @@ function lampMesh() {
 }
 
 export class StreetLamps {
-  async init(ctx, terrain) {
+  // opts: candidates = flat [di, axis, line, j, ...] slot list; valid = WGSL validation function name
+  // ('lampValid' for the districts, 'infillLampValid' for the plan's infill streets); maxLights per quality level.
+  async init(ctx, terrain, opts) {
     const d = ctx.device, r = ctx.renderer;
-    // candidate slots: (district, axis, road line, lamp index)
-    const cand = [];
-    DISTRICTS.forEach((D, di) => {
-      if (!D.block) return;
-      const ext = Math.max(D.rx, D.rz) * 1.05;
-      const nl = Math.ceil(ext / D.block);
-      const n = Math.max(Math.round(D.block / 34), 1), sp = D.block / n;
-      const nj = Math.ceil(ext / sp);
-      for (let axis = 0; axis < 2; axis++) for (let line = -nl; line <= nl; line++) for (let j = -nj; j < nj; j++) {
-        // local position (cheap pre-filter against the district ellipse)
-        const along = (j + 0.5) * sp, off = line * D.block;
-        const lx = axis ? off : along, lz = axis ? along : off;
-        if ((lx / D.rx) ** 2 + (lz / D.rz) ** 2 > 1.05) continue;
-        cand.push(di, axis, line, j);
-      }
-    });
+    const cand = opts.candidates.length ? opts.candidates : [0, 0, 0, 0];
     const nC = cand.length / 4;
     const candBuf = d.createBuffer({ size: cand.length * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     d.queue.writeBuffer(candBuf, 0, new Float32Array(cand));
@@ -163,7 +188,7 @@ export class StreetLamps {
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
     ] });
-    const vPipe = r.computePipeline({ label: 'lamp-validate', code: VALIDATE_WGSL, groups: [vLayout] });
+    const vPipe = r.computePipeline({ label: 'lamp-validate', code: VALIDATE_WGSL(opts.valid), groups: [vLayout] });
     const enc = d.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(vPipe);
@@ -181,7 +206,7 @@ export class StreetLamps {
     const lamps = [];
     for (let i = 0; i < nC; i++) {
       const o = i * 8;
-      if (res[o + 3] < 0.5) continue;
+      if (res[o + 3] < 0.5 || !opts.candidates.length) continue;
       lamps.push([res[o], res[o + 1], res[o + 2], res[o + 4], res[o + 5]]);
     }
     const cellOf = (x, z) => Math.floor(x / CELL) * 4096 + Math.floor(z / CELL);
@@ -230,7 +255,7 @@ export class StreetLamps {
 
     // real lights for the nearest lamps
     const q = ctx.quality.level;
-    this.maxLights = q >= 2 ? 520 : q === 1 ? 380 : 240;
+    this.maxLights = opts.maxLights[Math.min(Math.max(q, 0), 2)];
     this.lightBase = ctx.lights.reserve(this.maxLights);
     this.hist = new Uint32Array(128);   // 5 m bins
     this.dist = new Float32Array(this.count);

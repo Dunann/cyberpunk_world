@@ -8,6 +8,7 @@ import { WGSL_LIB, TERRAIN, INFO, MAX_DISTRICTS } from './common.js';
 import { catmullRom, rng, clamp, smoothstep } from './math.js';
 import { shader } from './gpu.js';
 import { LAND_WGSL, CARVE_WGSL } from './terrainLand.js';
+import { buildPlan } from './plan.js';
 
 // ---------------------------------------------------------------- layout data
 
@@ -219,6 +220,7 @@ export class World {
     this.landmarks = LANDMARKS;
     this.poses = POSES;
     this.lots = [];
+    this.infillLots = [];     // land-use plan infill lots (plan.js); generated after everything else
     this.signSlots = [];      // {x,y,z, nx,nz, w,h, vertical, style} facade anchors for neon signs (filled by buildings)
     this.audioSources = [];   // {kind, x,y,z, vx,vy,vz, gain} preallocated by producers, updated each frame
     this.shared = {};         // free-form cross-module data
@@ -523,6 +525,12 @@ export class World {
     this._resolveRoutes();
     this._buildLots();
     this._resolvePoses();
+
+    // land-use plan (I-016): infill lots (kept apart from this.lots) and the coverage map for the ground shaders
+    this.plan = buildPlan(this);
+    this.infillLots = this.plan.infill;
+    this.coverTex = device.createTexture({ size: [this.plan.W, this.plan.H], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST, label: 'planCover' });
+    device.queue.writeTexture({ texture: this.coverTex }, this.plan.tex, { bytesPerRow: this.plan.W * 4 }, [this.plan.W, this.plan.H]);
   }
 }
 

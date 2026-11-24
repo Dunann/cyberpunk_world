@@ -390,6 +390,63 @@ export function buildRuns(world) {
   return runs;
 }
 
+// Roads of the land-use plan (plan.js): the owner grid's street segments around built infill cells that the
+// district pass above does not already cover, and the bridge approach avenues. Appended after all other runs.
+export function buildInfillRuns(world) {
+  const plan = world.plan;
+  const runs = [];
+  if (!plan) return runs;
+  const byDistrict = new Map();
+  for (const c of plan.cells) { if (!byDistrict.has(c.di)) byDistrict.set(c.di, new Set()); byDistrict.get(c.di).add(`${c.i},${c.j}`); }
+  for (const [di, cells] of byDistrict) {
+    const D = DISTRICTS[di];
+    const ca = Math.cos(D.angle), sa = Math.sin(D.angle);
+    const toW = (lx, lz) => [D.cx + lx * ca - lz * sa, D.cz + lx * sa + lz * ca];
+    const built = (i, j) => cells.has(`${i},${j}`);
+    const blockOk = (bi, bj) => { const [x, z] = toW((bi + 0.5) * D.block, (bj + 0.5) * D.block); const dom = world.districtAt(x, z); return dom.index === di && dom.weight >= 0.3; };
+    let i0 = 1e9, i1 = -1e9, j0 = 1e9, j1 = -1e9;
+    for (const c of plan.cells) if (c.di === di) { i0 = Math.min(i0, c.i); i1 = Math.max(i1, c.i); j0 = Math.min(j0, c.j); j1 = Math.max(j1, c.j); }
+    for (let axis = 0; axis < 2; axis++) {
+      const lo = axis === 0 ? i0 : j0, hi = axis === 0 ? i1 + 1 : j1 + 1;      // grid lines
+      const ka = axis === 0 ? j0 : i0, kb = axis === 0 ? j1 : i1;              // segments along a line
+      for (let line = lo; line <= hi; line++) {
+        let start = null, prevEnd = null;
+        const flush = () => {
+          if (start && prevEnd) {
+            const L = Math.hypot(prevEnd[0] - start[0], prevEnd[1] - start[1]);
+            if (L > D.block * 0.9) runs.push({ ax: start[0], az: start[1], dx: (prevEnd[0] - start[0]) / L, dz: (prevEnd[1] - start[1]) / L, len: L, laneW: D.road >= 16 ? D.road * 0.2 : D.road * 0.26, lanes: D.road >= 16 ? 2 : 1, mode: 0, type: D.type, district: di, infill: true });
+          }
+          start = null; prevEnd = null;
+        };
+        for (let k = ka; k <= kb; k++) {
+          const a = axis === 0 ? toW(line * D.block, k * D.block) : toW(k * D.block, line * D.block);
+          const b = axis === 0 ? toW(line * D.block, (k + 1) * D.block) : toW((k + 1) * D.block, line * D.block);
+          const side = axis === 0 ? [[line - 1, k], [line, k]] : [[k, line - 1], [k, line]];
+          let ok = built(...side[0]) || built(...side[1]);
+          // the district pass already runs cars here when one side is its own block and the street is its own
+          const existing = (blockOk(...side[0]) || blockOk(...side[1])) && [0, 0.5, 1].every((t) => world.districtAt(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t).index === di);
+          if (existing) ok = false;
+          let hPrev = null;
+          for (let s = 0; s <= 4 && ok; s++) {
+            const x = a[0] + (b[0] - a[0]) * s / 4, z = a[1] + (b[1] - a[1]) * s / 4;
+            const h = world.heightAt(x, z);
+            if (h < 2.0 || world.waterDist(x, z) < 6 || plan.coverAt(x, z).built < 0.5) ok = false;
+            if (hPrev !== null && Math.abs(h - hPrev) / (D.block / 4) > 0.4) ok = false;
+            hPrev = h;
+          }
+          if (ok) { if (!start) start = a; prevEnd = b; } else flush();
+        }
+        flush();
+      }
+    }
+  }
+  for (const v of plan.avenues) {
+    const L = Math.hypot(v.bx - v.ax, v.bz - v.az);
+    if (L > 30) runs.push({ ax: v.ax, az: v.az, dx: (v.bx - v.ax) / L, dz: (v.bz - v.az) / L, len: L, laneW: 2.8, lanes: 2, mode: 0, type: 6, district: v.di, infill: true });
+  }
+  return runs;
+}
+
 function carMesh() {
   const mb = new MeshBuilder();
   const extrudeX = (prof, x0, x1, mat) => {
@@ -428,7 +485,7 @@ export class Cars {
     const rnd = rng(31337);
     const cars = [];
     const density = [0.45, 0.7, 1.0][q];
-    runs.forEach((r, ri) => {
+    const addCars = (r, ri, rnd) => {
       const busy = r.bridge ? 1.6 : r.type === 1 || r.type === 3 ? 1.3 : r.type === 4 ? 0.6 : 1.0;
       for (const dir of [1, -1]) for (let lane = 0; lane < r.lanes; lane++) {
         const v = (r.bridge ? 15 : 9) + rnd() * 5 + lane * 2.5;
@@ -442,7 +499,14 @@ export class Cars {
           s += gap / (density * busy);
         }
       }
-    });
+    };
+    runs.forEach((r, ri) => addCars(r, ri, rnd));
+    // land-use plan infill roads (I-016): appended after every other run, cars from their own stream
+    const extra = buildInfillRuns(world);
+    const rnd2 = rng(31338);
+    extra.forEach((r, k) => addCars(r, runs.length + k, rnd2));
+    for (const r of extra) runs.push(r);
+    world.shared.infillRoadRuns = extra.length;
     this.count = cars.length / 8;
     const runData = new Float32Array(runs.length * 12);
     runs.forEach((r, i) => runData.set([r.ax, r.az, r.dx, r.dz, r.len, r.laneW, r.lanes, r.mode, r.yA || 0, r.yB || 0, r.deck || 0, r.ramp || 1], i * 12));

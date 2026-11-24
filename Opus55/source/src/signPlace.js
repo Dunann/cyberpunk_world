@@ -19,8 +19,17 @@ const PALETTE_STREET = ['red', 'red', 'yellow', 'pink', 'cyan', 'green', 'orange
 const PALETTE_BUND = ['gold', 'white', 'gold', 'yellow', 'white'];
 const PALETTE_STEPPE = ['blue', 'cyan', 'gold', 'white', 'red', 'green'];
 
-export function placeSigns(world, atlas, quality) {
-  const R = rng(9137);
+// Signs for the land-use plan's infill lots and their sign slots (plan.js): the same rules, run as a second pass
+// with its own stream, so the first pass (rng 9137) is unchanged.
+export function placeInfillSigns(world, atlas, quality) {
+  const lots = world.infillLots || [];
+  if (!lots.length) return { signs: [], lightC: [], lanterns: [] };
+  const view = { lots, signSlots: world.infillSignSlots || [], shared: {}, poses: world.poses, heightAt: (x, z) => world.heightAt(x, z) };
+  return placeSigns(view, atlas, quality, { seed: 9138, dense: world.signSlots.length > 20000 });
+}
+
+export function placeSigns(world, atlas, quality, opts = {}) {
+  const R = rng(opts.seed === undefined ? 9137 : opts.seed);
   const signs = [];     // Float32 rows
   const lightC = [];    // light candidates
   const lanterns = [];  // [x,y,z,seed, scale, hue, sway, 0]
@@ -82,7 +91,7 @@ export function placeSigns(world, atlas, quality) {
   };
 
   const useSlots = world.signSlots && world.signSlots.length > 0;
-  const denseSlots = useSlots && world.signSlots.length > 20000; // buildings provide the street-level signs
+  const denseSlots = opts.dense !== undefined ? opts.dense : useSlots && world.signSlots.length > 20000; // buildings provide the street-level signs
   let screenPts = [];
   for (const lot of world.lots) {
     const t = lot.type;

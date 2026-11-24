@@ -800,8 +800,11 @@ export function distantLights(env) {
 // ---------------------------------------------------------------- hillside life inside the city
 // Chongqing-style hamlets on the forested slopes between the districts: a few houses (or a small temple) on
 // stone terraces along the contour, a lit stairway running down the slope, lamp posts along the steps.
+const noop = () => {};
+const SINK_M = { begin: noop, end: noop, set: noop, box: noop, quad: noop, roof: noop, prism: noop };
+
 export function hillsideLife(env, world) {
-  const { M, H, col, lantern, lights, reserve, R } = env;
+  const { H, R } = env;
   const gi = DISTRICTS.findIndex((D) => D.type === DT.GARDEN);
   // lots in a coarse grid for overlap tests
   const CELL = 100, grid = new Map();
@@ -835,6 +838,11 @@ export function hillsideLife(env, world) {
     if (gi >= 0 && world.districtWeight(gi, x, z) > 0.05) continue;
     if (world._isReserved(x, z, 10) || nearLot(x, z, 9)) continue;
     if (R() > (hot ? 0.75 : 0.075)) continue;
+    // land-use plan (I-016): a hamlet on built or park land of the plan is not emitted, but it consumes exactly
+    // the same random draws, so every later hamlet stays as it was
+    const skip = !!(world.plan && world.plan.blocks(x, z, 40));
+    const M = skip ? SINK_M : env.M, lantern = skip ? noop : env.lantern, col = skip ? noop : env.col;
+    const lights = skip ? [] : env.lights, reserve = skip ? [] : env.reserve;
     const gl = Math.hypot(ddx, ddz), dX = -ddx / gl, dZ = -ddz / gl;   // downhill
     const tX = -dZ, tZ = dX;                                         // along the contour
     const yaw = Math.atan2(dZ, dX);

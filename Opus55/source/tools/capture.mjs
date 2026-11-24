@@ -4,6 +4,7 @@
 //   [--poses-file ../eval/poses-v1.json] [--ids A1,B2] capture a custom pose set instead of the viewpoints
 //   [--stats] also prints smoothed GPU ms per pass at each pose (scene animating for 150 frames)
 //   [--profile name] Chrome profile dir name (use a unique one when several captures run at once)
+//   [--file out/dev.html] which build to load (relative to the source folder)
 import fs from 'node:fs';
 import path from 'node:path';
 import { launch, root } from './launch.mjs';
@@ -17,11 +18,14 @@ const extra = opt('query', '');
 const profileName = opt('profile', 'opus55-chrome-profile');
 fs.mkdirSync(out, { recursive: true });
 
-const { page, info, close } = await launch({ profileName, query: `w=${W}&h=${H}&noadapt&nooverlay&freeze&quality=high${extra ? '&' + extra : ''}` });
+const { page, info, close } = await launch({ file: opt('file', 'out/dev.html'), profileName, query: `w=${W}&h=${H}&noadapt&nooverlay&freeze&quality=high${extra ? '&' + extra : ''}` });
 if (!/nvidia/i.test(info.vendor + info.adapter) && !args.includes('--any-gpu')) {
   console.error('ERROR: not running on the NVIDIA GPU:', info.adapter);
   await close(); process.exit(2);
 }
+// --align: capture at the same frame phase (TAA jitter and dither patterns repeat every 64 frames), so two
+// captures of the same build match and a pixel diff shows only real changes
+const align = () => page.evaluate(async () => { const r = window.__ctx.renderer; let n = 0; while ((r.frameIndex % 64) !== 63 && n++ < 80) await window.__frames(1); });
 const ext = jpg ? 'jpg' : 'png';
 const type = jpg ? 'image/jpeg' : 'image/png';
 const cam = opt('cam', '');
@@ -39,6 +43,7 @@ if (cam) {
   const only = (opt('ids', '') || '').split(',').filter(Boolean);
   for (const p of set) {
     if (only.length && !only.includes(p.id)) continue;
+    if (args.includes('--align')) await align();
     await page.evaluate((q) => {
       const w = window.__ctx.world;
       const y = q.rel ? w.heightAt(q.pos[0], q.pos[2]) + q.pos[1] : q.pos[1];

@@ -4,7 +4,7 @@
 import { launch } from './launch.mjs';
 
 const args = process.argv.slice(2);
-const { page, close } = await launch({ query: 'w=320&h=180&noadapt&nooverlay&freeze', profileName: 'opus55-probe' });
+const { page, close } = await launch({ file: process.env.PROBE_FILE || 'out/dev.html', query: 'w=320&h=180&noadapt&nooverlay&freeze', profileName: 'opus55-probe' });
 if (args[0] === '--grid') {
   const [x0, z0, x1, z1, st] = args[1].split(',').map(Number);
   const rows = await page.evaluate((a) => {
@@ -30,3 +30,4 @@ if (args[0] === '--grid') {
   console.log(res.join('\n'));
 }
 await close();
+

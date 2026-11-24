@@ -152,20 +152,30 @@ fn bakeNear(@builtin(global_invocation_id) id: vec3u) {
   let info = worldInfo(p);
   let terr = terrW(p, h, length(ns.xz) / max(ns.y, 0.05));
   var m = natMaterial(p, h, ns, cav, info.x, info.w, terr);
-  // city ground base (roads are drawn live): grey paving, no forest
-  let di = i32(info.y + 0.5);
+  // city ground base (roads are drawn live): grey paving, no forest. The land-use plan's built blocks count as
+  // city (cityInfo); its parks get a lawn base and no forest.
+  let ci = cityInfo(p);
+  let di = i32(ci.y + 0.5);
   var urban = 0.0;
-  if (di >= 0 && di < i32(W.count.x) && W.d[di].b.y > 0.0) { urban = smoothstep(0.35, 0.6, info.z) * smoothstep(6.0, 14.0, info.x); }
+  if (di >= 0 && di < i32(W.count.x) && W.d[di].b.y > 0.0) { urban = smoothstep(0.35, 0.6, ci.z) * smoothstep(6.0, 14.0, ci.x); }
   let pave = vec3f(0.07, 0.068, 0.068) * (0.9 + 0.2 * gnoise2(p * 0.05));
   // no forest in the downtown districts (street trees are placed separately); hillside districts keep some
   var city = 0.0;
   if (di >= 0 && di < i32(W.count.x)) {
     let t = W.d[di].b.w;
-    if (t == 2.0) { city = 0.6 * smoothstep(0.3, 0.6, info.z); }
-    else if (t != 5.0) { city = smoothstep(0.08, 0.35, info.z); }
+    if (t == 2.0) { city = 0.6 * smoothstep(0.3, 0.6, ci.z); }
+    else if (t != 5.0) { city = smoothstep(0.08, 0.35, ci.z); }
+  }
+  var tr = terr;
+  let park = coverAt(p).z;
+  if (park > 0.0) {
+    urban *= 1.0 - park;
+    city *= 1.0 - park;
+    m = vec4f(mix(m.rgb, vec3f(0.036, 0.054, 0.025) * (0.9 + 0.2 * gnoise2(p * 0.07)), park), m.a * (1.0 - park));
+    tr *= 1.0 - park;
   }
   m = vec4f(mix(m.rgb, pave, urban), m.a * (1.0 - smoothstep(0.0, 0.5, urban)) * (1.0 - city));
-  writeOut(id.xy, m.rgb, n, cav, m.a, terr * (1.0 - urban));
+  writeOut(id.xy, m.rgb, n, cav, m.a, tr * (1.0 - urban));
 }
 
 @compute @workgroup_size(8, 8)
