@@ -34,3 +34,4 @@
 - 2026-11-24: I-009 implemented (idea/I-009 @ 6fa0b38): 3 airships, spaceport and launch every 150 s. Quiet bench 9.60 / 11.55 / 13.00 (module 0.04 ms); functional 18/18. Targets by the fix-2 rule: B1, B3, B4, G1, G3, G4 (all via the launch trail). Code review started.
 - 2026-11-24: I-009 code review round 1: FAIL (water pass overwrites beams and nav sprites; deck fade per puff not per pixel; unbounded in-trail cost). Fix round 1 started in the same worktree.
 - 2026-11-24: I-018 planned compounds (A6 48.9%, G1 15.1%, G3 14.8% measured with occlusion) and I-019 linked tower pairs (B4 46.5%, B2 14.0%) proposed. I-018 review started; I-019 queued for the next free slot.
+- 2026-11-24: I-015 implemented (idea/I-015 @ c61e67d, bb2de29): continuous 480 m stack, 9,363 pieces with 0 overlaps and 0 unsupported. Functional 18/18. Bench open: in the one clean pair p99 22.2 ms (lighting p99 4.3 -> 10.9); to be rechecked on a quiet GPU. Code review started.
