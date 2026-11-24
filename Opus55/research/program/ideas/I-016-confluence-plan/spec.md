@@ -1,7 +1,7 @@
 ---
 id: I-016
 title: Confluence plan: build first, then paint. One infill quarter and riverside parks in the core gaps
-status: implementing
+status: code-review
 score: 5.67 (review-1 only; prototype track, user priority 3; build with review-1 fixes 1-12)
 direction: Break an assumption (city layout and continuity; user priority 3). Combined revision of I-001 and I-003 after two reviews of I-001
 family: land-use plan: blocks, parks or untouched, with ground paint driven by a lot-coverage map
