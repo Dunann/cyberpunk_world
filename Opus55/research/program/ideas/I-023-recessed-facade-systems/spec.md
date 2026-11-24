@@ -1,7 +1,7 @@
 ---
 id: I-023
 title: Recessed facade systems - each window bay is a small recess solved per pixel (no added triangles), with an exact distant average and glass that reflects the city's real light
-status: proposed
+status: in-review
 direction: Wild card / break an assumption (the facade shading model)
 family: shading representation: per-pixel analytic facade relief (the room parallax extended to the wall), with closed-form filtering
 parent: none (uses the review lessons of I-005, I-006 and I-012, and the I-018 window test)
@@ -20,7 +20,7 @@ This idea replaces the picture with a small 3D model of each window bay, solved 
    - the glass, with the lit room behind it, seen at the shifted position;
    - the back wall around the glass;
    - a side of the recess: the reveal (the side of a window opening), the sill, the underside, or the floor, side walls and ceiling of a loggia (a balcony set back into the building).
-2. **Facade systems.** A system is a set of numbers for that model: recess depth, openings per bay, opening shape, glass shape, and which parts stay flush with the wall face. A hash of the tower's existing seed picks one of 10 systems by material (table below). The continuous numbers also vary per tower.
+2. **Facade systems.** A system is a set of numbers for that model: recess depth, openings per bay, opening shape, glass shape, and which parts stay flush with the wall face. A hash of the tower's existing seed picks one of 11 systems by material (table below). The continuous numbers also vary per tower.
 3. **An exact distant average.** The model is closed-form, so its average over a cell is closed-form too: for a given view direction, the visible share of glass is a product of two overlap lengths. Far facades use this average. They change brightness with the view angle exactly as the near model does, and there is nothing left to alias. Two faces of one tower stop looking identical.
 4. **Own-window light.** The sides of a recess are lit by that cell's own window: bright next to the glass, fading toward the wall face. This makes the relief readable at night in a renderer that has no shadows.
 5. **Glass reflects real light.** `cityRefl()` draws an imaginary skyline of dots (2,520 columns around) and neon strips (150 around). It is the traced cause of the "pixel-noise curtain wall" in B2 and the "stripe/moiré" cylinder in B4. It is removed. Glass gets a slight tilt per pane (each pane reflects a slightly different part of the sky, as real curtain walls do) and a smooth city-light term read from the fog module's existing light map.
@@ -64,7 +64,7 @@ This idea replaces the picture with a small 3D model of each window bay, solved 
 ### Target poses (declared rule)
 - **Eligible pixel:** a pixel shaded by the new cell function with a recess depth above zero and a cell of at least 4 px in both directions, or a glass pixel (materials 3, 16, 18) with a cell of at least 4 px.
 - **Rule:** a pose is a target when eligible pixels cover at least 30% of the frame. If more than five poses qualify, the five with the largest share are the targets.
-- **How it is measured:** a dev-only debug output paints eligible pixels (it needs only material and cell size, so it runs before any recess code exists). The implementer runs it on all 14 poses in quick-test step 1 and writes the frozen list to `DEVIATIONS.md` before the first comparison capture.
+- **How it is measured:** a dev-only debug output paints eligible pixels (it needs only material, flags, plan kind and cell size, so it runs before any recess code exists). The implementer runs it on all 14 poses in quick-test step 1 and writes the frozen list to `DEVIATIONS.md` before the first comparison capture.
 - **My prediction from the current images:** A6, B4 and B2 qualify; A5 qualifies once step F ships; A3, B3 and G4 are near the threshold. The measured list decides, not this prediction.
 - **Every other pose** must show no clear loss. The design keeps the largest risks out: LED and tower-text facades stay flat, and shop podiums, Bund stone, brick and the whole Hongyadong complex are untouched.
 
@@ -81,7 +81,7 @@ About 1.5 days. Run all GPU jobs under the shared lock.
      - **H4:** 300 m above a point 500 m south of the West Hills centre, looking at the centre, pitch -35°.
      - If a camera is inside a collider or below the terrain, mirror the angle; if still blocked, take the next part in the sorted list.
 2. **Build two pieces behind dev switches (1 day).**
-   - **Recess:** `cellRecess` with two systems only (punched windows 0.3 m deep; loggia columns on `BALC` parts), own-window light, and the distant average.
+   - **Recess:** `cellRecess` with three systems only (residential punched windows 0.3 m deep; loggia columns on `BALC` parts; office fins), own-window light, and the distant average.
    - **Glass, three arms:**
      - main as it is;
      - a cheap control: `cityRefl()` with its dot layer faded once its period is under 6 px and its strips limited to a 0.1 rad band of elevation;
@@ -131,17 +131,19 @@ fn cellRecess(f: vec2f, fw: vec2f, cellM: vec2f, d: vec3f, S: Sys) -> Cell
 
 ### B. The distant average
 For the same `s`, the cell means are closed-form. Per axis, `v = max(1 - abs(s) / (o1 - o0), 0)`:
-- glass share = opening area × glass overlap share (the same interval formula as above, without the pixel filter);
+- back-wall share = opening area × v.x · v.y;
+- glass share = the product over the two axes of the length of `[max(o0, b0 - s), min(o1, b1 - s)]` (zero if empty);
 - side share = opening area × (1 - v.x · v.y).
 
-Blend from the per-pixel result to these means with the existing `det` (1 at cells of 5.5 px, 0 at 2 px). The existing distant emission `farE` is multiplied by glass share ÷ flat window share, and the side share adds the own-window light of step D. At a square-on view the result equals today's value.
+Blend from the per-pixel result to these means with the existing `det` (1 at cells of 5.5 px, 0 at 2 px). The existing distant emission `farE` is multiplied by glass share ÷ flat window share, and the side share adds the own-window light of step D. For systems that keep today's window size, the result at a square-on view equals today's value.
 
 ### C. Systems
 `fn sysOf(mat: u32, flags: u32, kind: u32, prm: f32, seed: f32) -> Sys`, chosen by `hash11u(u32(seed * 29.0) + 211u)`. The seed is shared by all segments of a tower (`tower()` passes `o.seed` to each), so a tower has one system.
 
 | Material | System | Depth | What it looks like |
 |---|---|---|---|
-| Residential | Punched windows | 0.2-0.45 m | Today's window in a reveal, with a sill |
+| Residential, box plan, no `BALC` (half) | Punched windows | 0.2-0.45 m | Today's window in a reveal, with a sill |
+| Residential, box plan, no `BALC` (half) | Frame grid | 0.5-0.7 m | Flush piers and floor bands; the window wall is set back in every bay, above the flush sill band |
 | Residential, `BALC` | Loggia columns | 1.2-1.5 m | On the columns that have painted balconies today: a deep balcony behind the flush parapet, lit ceiling and side walls, a door-window on the back wall |
 | Residential, `BALC`, 30% | Balcony bands | 1.2 m | Loggias in every bay: continuous parapet bands |
 | Residential, not box plan | Narrow pairs | 0.35 m | Two tall narrow windows per bay |
@@ -188,8 +190,8 @@ Rules that keep things attached and unchanged where they must be:
 - **Effort:** one implementer, 4 to 5 days including the quick test.
 - **GPU, per frame:**
   - **Added:** about 60-70 arithmetic operations per facade pixel in the near and mid band (three filtered interval tests, one exit comparison, the side shading), and about 12 in the distant band. No new texture reads for residential and office facades.
-  - **Removed:** `cityRefl()` on every glass pixel (five hashes, an `atan2`, about 70 operations), replaced by two reads of a 256² texture.
-  - **Estimate:** +0.10 to +0.25 ms on the bench average, less on glass-heavy views. This is an estimate from operation counts, not a measurement; quick-test steps 1 and 4 measure it. The scripted path is mostly at 45-330 m, where most facade pixels are in the cheap distant band.
+  - **Removed (if the light-map arm ships):** `cityRefl()` on every glass pixel (three hash calls, an `atan2` and an `hsv`), replaced by two reads of a 256² texture.
+  - **Estimate:** +0.10 to +0.25 ms on the bench average, less on glass-heavy views. This is an estimate from operation counts, not a measurement; quick-test steps 1 and 4 measure it. The scripted path is mostly at 45-330 m (per the I-005 review), where many facade pixels are in the cheap distant band.
   - **Where the time comes from:** the existing headroom. The current best averages about 9.8 ms against the 11 ms gate, and p99 (about 11.7) and the worst frame (about 15) are far from their limits. This idea is capped at +0.30 ms by its own stop rule. If other adopted ideas need the headroom, I-024's optional light pre-cull step returns budget in the lighting pass without changing the image.
 - **Memory and load time:** none.
 
