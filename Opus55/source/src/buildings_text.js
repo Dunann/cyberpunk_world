@@ -1,41 +1,53 @@
 // Tower phrase show (idea I-014): large Chinese characters on the water-facing faces of river-front towers.
 //
-// Each run of front-row towers along a river bank spells one short phrase (2-4 characters), one character per
-// tower, in reading order as seen from the water. Participants are chosen by a fixed rule (no camera positions):
+// Each phrase (2-4 characters) is one composed sign spread over neighbouring front-row towers, one character per
+// tower. Participants are chosen by a fixed rule (no camera positions):
 //   - a tower (stack of shaft parts) at least 100 m tall, in a hillside, urban, Bund or CBD district;
-//   - front row: one of its faces has water in front of it within 700 m, and no ground-standing building at
-//     least 40 m tall stands between that face and the water; the face nearest the water carries the character;
-//   - at most 40 towers city-wide: when more qualify, whole phrases are kept nearest-the-water first;
-//   - a fixed seed breaks ties and picks each phrase's text and colour.
-// Landmark towers follow the same rule, so they only carry text as part of a front-row phrase. Towers behind the
-// front row show nothing.
+//   - front row: one of its flat faces has water in front of it within 700 m, and no ground-standing building at
+//     least 40 m tall stands between that face and the water;
+//   - a phrase uses neighbouring front-row towers of one bank (consecutive along the bank), with face normals
+//     within 25 degrees of each other, evenly spaced along the bank tangent and nearly in one plane;
+//   - every character of a phrase has the same size and the same height (one band), sized to fit the smallest
+//     face with a clear margin on both sides;
+//   - the largest phrases are kept first; at most 2 phrases per district, no character repeated in a district.
+// Characters are ordered left to right for a viewer on the water facing the phrase.
 //
 // The characters are drawn by a separate overlay pass over the chosen tower parts (see TEXT_WGSL): it writes only
-// the emissive G-buffer target, dims the lit windows under each character panel, then adds the character.
+// the emissive G-buffer target, dims the lit windows under each character panel, then adds the character. The
+// glyphs are signed distance fields, so large characters keep smooth strokes.
 
-import { FLAG, MAT, PART_FLOATS } from './buildings_wgsl.js';
+import { FLAG, MAT, PART_FLOATS, TEXT_MAX } from './buildings_wgsl.js';
 import { DT, DISTRICTS } from './world.js';
 
-export const TEXT_MAX = 64;         // capacity of each overlay draw list (TEXT_STRIDE in CULL_WGSL)
+export { TEXT_MAX };   // capacity of each overlay draw list (TEXT_STRIDE in CULL_WGSL)
 
-// All rule constants, fixed before any eval capture.
+// All rule constants.
 export const RULE = {
   minHeight: 100,     // tower top above the ground (m)
   reach: 700,         // water must be within this distance of the tower centre (m)
   dirs: 16,           // directions marched to find water
   cone: 0.866,        // water counts as in front of a face within 30 degrees of its normal
   blockH: 40,         // a ground-standing building at least this tall between a face and the water hides it
-  minGlyph: 16,       // smallest character slot (m)
+  minGlyph: 15,       // smallest character slot (m)
   maxGlyph: 60,       // largest character slot (m)
-  flatFill: 0.94,     // slot side / face width on flat faces (the character's ink is ~87% of the slot)
-  roundFill: 0.75,    // slot side / diameter on round plans (ink ~1.3 x radius)
-  minBase: 25,        // keep the slot this far above the ground (m)
-  runGap: 250,        // a gap along the bank larger than this splits a run of front-row towers (m)
+  sideMargin: 0.1,    // clear face width beside the slot on each side, as a fraction of the slot (ink is ~0.87)
+  vMargin: 0.1,       // clear part height above and below the slot, as a fraction of the slot
+  minBase: 55,        // keep the slot this far above the ground (clear of trees and low buildings, m)
+  maxAngle: 25,       // largest angle between the face normals of one phrase (degrees)
+  stepMin: 1.3,       // spacing of neighbouring characters along the tangent, in slot sizes: at least ...
+  stepMax: 6.0,       // ... and at most
+  evenness: 1.8,      // largest spacing / smallest spacing within a phrase
+  depthRatio: 0.45,   // depth offset between neighbouring faces / their spacing (keeps the order to ~65 degrees)
+  holeDepth: 25,     // a tower between two characters leaves a hole unless it stands this far behind the row (m)
+  phraseGap: 500,     // two phrases on one bank are at least this far apart along the bank (m)
+  perDistrict: 2,     // phrases per district
+  maxPhrases: 8,
   maxTowers: 40,
   seed: 1408,
 };
+const COS_MAX = Math.cos(RULE.maxAngle * Math.PI / 180);
 
-// Low-stroke phrases (every character at most 9 strokes).
+// Low-stroke phrases (every character at most 9 strokes, no character repeated within a phrase).
 export const PHRASES = {
   2: ['山城', '江城', '两江', '天光', '大江', '月光'],
   3: ['不夜城', '山水城', '江上月', '光之城', '云中城'],
@@ -72,73 +84,131 @@ export function readPart(P, i) {
 const rot = (a, x, z) => { const c = Math.cos(a), s = Math.sin(a); return [c * x - s * z, s * x + c * z]; };
 const norm = (x, z) => { const l = Math.hypot(x, z) || 1; return [x / l, z / l]; };
 
-// Candidate faces of one part that can carry a character: [{ D: face direction (world xz, unit), uC: slot centre
-// along the tangent, W: face width at the part base, fill }]. Flat faces centre the character on the face; round
-// plans (cylinders, ellipses, lobed plans) offer the marched directions `dirs` instead.
-// The overlay maps the character by projecting onto the tangent T = (D.z, -D.x), so taper and lean are handled.
-export function partFaces(p, dirs) {
-  if (p.twist !== 0 || p.prof !== 0) return [];   // twisted or profiled (domes, flares) parts are skipped
-  const flat = (faces, fill = RULE.flatFill) => faces.map((f) => {
-    const [nx, nz] = rot(p.a, f.n[0], f.n[1]);
-    const [mx, mz] = rot(p.a, f.m[0], f.m[1]);
-    return { D: [nx, nz], uC: mx * nz - mz * nx, W: f.w, fill };
-  });
+// Plan scale of a tapered part at height y (linear taper profile).
+export const taperAt = (p, y) => 1 + (p.taper - 1) * Math.min(1, Math.max(0, (y - p.y0) / p.h));
+
+// Flat faces of one part that can carry a character: [{ D: outward normal (world xz, unit), m: face midpoint
+// relative to the part axis (world xz, at taper scale 1), uC: midpoint along the tangent T = (D.z, -D.x),
+// W: usable face width at taper scale 1 }]. Round plans (cylinders, ellipses, lobed plans, polygons with 12 or more
+// sides), twisted and profiled parts have no flat faces and carry nothing.
+export function partFaces(p) {
+  if (p.twist !== 0 || p.prof !== 0) return [];
+  const faces = [];
+  const add = (n, m, w) => {
+    const [nx, nz] = rot(p.a, n[0], n[1]);
+    const [mx, mz] = rot(p.a, m[0], m[1]);
+    faces.push({ D: [nx, nz], m: [mx, mz], uC: mx * nz - mz * nx, W: w });
+  };
   const { hw, hd, kind, prm } = p;
-  if (kind <= 1 || (kind === 2 && Math.round(prm) === 4)) {
-    // rectangle, rounded or chamfered rectangle, square polygon: projected width across the face normal
-    return flat([
-      { n: [0, 1], m: [0, hd], w: 2 * hw }, { n: [-1, 0], m: [-hw, 0], w: 2 * hd },
-      { n: [0, -1], m: [0, -hd], w: 2 * hw }, { n: [1, 0], m: [hw, 0], w: 2 * hd },
-    ]);
-  }
-  if (kind === 4) {
+  if (kind <= 1) {
+    // rectangle with rounded (0) or chamfered (1) corners of radius r: the straight part plus half of each corner
+    const r = Math.min(1, Math.max(0, prm)) * Math.min(hw, hd);
+    add([0, 1], [0, hd], 2 * hw - r); add([-1, 0], [-hw, 0], 2 * hd - r);
+    add([0, -1], [0, -hd], 2 * hw - r); add([1, 0], [hw, 0], 2 * hd - r);
+  } else if (kind === 4) {
     // triangle (matches ringEval kind 4)
     const v = [[hw, -hd], [hw, hd], [-hw, 0]];
-    const faces = [];
     for (let k = 0; k < 3; k++) {
       const a = v[k], b = v[(k + 1) % 3];
       const ex = b[0] - a[0], ez = b[1] - a[1];
-      faces.push({ n: norm(ez, -ex), m: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], w: Math.hypot(ex, ez) });
+      add(norm(ez, -ex), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], Math.hypot(ex, ez));
     }
-    return flat(faces);
-  }
-  if (kind === 2 && prm < 12) {
+  } else if (kind === 2 && prm < 12) {
+    // polygon with N sides (matches ringEval kind 2, N < 12): vertices on the ellipse (hw, hd) / cos(pi / N)
     const N = Math.max(3, Math.round(prm));
-    const faces = [];
-    const off = Math.PI / N;
+    const off = Math.PI / N, sc = 1 / Math.cos(off);
+    const vert = (k) => [Math.cos(k / N * Math.PI * 2 + off) * hw * sc, Math.sin(k / N * Math.PI * 2 + off) * hd * sc];
     for (let k = 0; k < N; k++) {
+      const a = vert(k), b = vert(k + 1);
       const na = (k + 0.5) / N * Math.PI * 2 + off;
-      const n = norm(Math.cos(na) / hw, Math.sin(na) / hd);
-      // odd polygons have one face per side; others are treated like a cylinder centred on a face
-      const w = N % 2 === 1 ? 2 * Math.min(hw, hd) / Math.cos(off) * Math.sin(off) : 2 * Math.min(hw, hd);
-      faces.push({ n, m: [n[0] * Math.min(hw, hd), n[1] * Math.min(hw, hd)], w });
+      add(norm(Math.cos(na) / hw, Math.sin(na) / hd), [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], Math.hypot(b[0] - a[0], b[1] - a[1]));
     }
-    const out = flat(faces);
-    if (N % 2 === 0) for (const f of out) { f.fill = RULE.roundFill; f.uC = 0; }
-    return out;
   }
-  if (kind === 2 || kind === 3) {
-    // ellipse / cylinder, lobed plan: centred on a marched direction
-    const r = Math.min(hw, hd) * (kind === 3 ? 1 - (prm % 1) : 1);
-    return dirs.map((d) => ({ D: [d[0], d[1]], uC: 0, W: 2 * r, fill: RULE.roundFill }));
-  }
-  return [];
+  return faces;
 }
 
-// Fits a character slot on part p with face f. Returns { g, yC } or null.
-export function fitSlot(p, f, ground) {
-  const top = p.y0 + p.h;
-  const lo = Math.max(p.y0, ground + RULE.minBase);
-  let g = Math.min(RULE.maxGlyph, f.fill * f.W);
-  for (let it = 0; it < 3; it++) {
-    // taper (linear profile): the face is narrower higher up, so size the slot at its top edge
-    const t = Math.min(1, Math.max(0, (top - 0.1 * g - p.y0) / p.h));
-    const scale = 1 + (p.taper - 1) * t;
-    g = Math.min(RULE.maxGlyph, f.fill * f.W * scale);
+// Common band for a set of faces: the largest slot g (same for all) and its centre height yC, placed as high as the
+// lowest part top allows, with clear margins above, below and on both sides of every face. Each entry is
+// { p, f, lo } (lo = lowest allowed slot bottom). Returns { g, yC } or null when g < RULE.minGlyph.
+export function fitBand(list) {
+  const hi = Math.min(...list.map((o) => o.p.y0 + o.p.h));
+  const lo = Math.max(...list.map((o) => o.lo));
+  const side = 1 + 2 * RULE.sideMargin, vert = 1 + 2 * RULE.vMargin;
+  const fits = (g) => {
+    const yt = hi - RULE.vMargin * g, yb = yt - g;
+    if (yb - RULE.vMargin * g < lo) return false;
+    for (const o of list) {
+      const w = o.f.W * Math.min(taperAt(o.p, yt), taperAt(o.p, yb));
+      if (w < side * g) return false;
+    }
+    return true;
+  };
+  let g = Math.min(RULE.maxGlyph, (hi - lo) / vert);
+  for (let it = 0; it < 6; it++) {
+    const yt = hi - RULE.vMargin * g, yb = yt - g;
+    for (const o of list) g = Math.min(g, o.f.W * Math.min(taperAt(o.p, yt), taperAt(o.p, yb)) / side);
   }
-  if (top - 0.1 * g - g < lo) g = Math.min(g, (top - lo) / 1.1);
+  while (g >= RULE.minGlyph && !fits(g)) g *= 0.97;
   if (g < RULE.minGlyph) return null;
-  return { g, yC: top - 0.1 * g - 0.5 * g };
+  return { g, yC: hi - RULE.vMargin * g - 0.5 * g };
+}
+
+// World xz position of a face midpoint at height y (lean moves the axis, taper scales the plan).
+export function faceCentre(p, f, y) {
+  const hf = Math.min(1, Math.max(0, (y - p.y0) / p.h));
+  const s = taperAt(p, y);
+  return [p.x + p.lx * hf + f.m[0] * s, p.z + p.lz * hf + f.m[1] * s];
+}
+
+// Checks one candidate phrase (options of neighbouring towers) against the composition rules. Returns
+// { list (in reading order), g, yC, Dm } or null.
+//  - face normals within RULE.maxAngle of each other;
+//  - one band (same size and height) that fits every face with margins;
+//  - ordered along the tangent of the mean normal, spaced 1.3-4 slot sizes apart, evenly, nearly in one plane.
+// Counts of rejected candidate phrases by reason (reported in the stats).
+export const REJECT = {};
+const rj = (k) => { REJECT[k] = (REJECT[k] || 0) + 1; return null; };
+export function fitPhrase(opts, others = []) {
+  for (let a = 0; a < opts.length; a++) {
+    for (let b = a + 1; b < opts.length; b++) {
+      if (opts[a].f.D[0] * opts[b].f.D[0] + opts[a].f.D[1] * opts[b].f.D[1] < COS_MAX) return rj('angle');
+    }
+  }
+  const band = fitBand(opts);
+  if (!band) return rj('band');
+  const { g, yC } = band;
+  let sx = 0, sz = 0;
+  for (const o of opts) { sx += o.f.D[0]; sz += o.f.D[1]; }
+  const Dm = norm(sx, sz);
+  const T = [Dm[1], -Dm[0]];   // right-hand direction for a viewer looking along -Dm (camera yaw 0 looks along -z)
+  const pos = opts.map((o) => {
+    const c = faceCentre(o.p, o.f, yC);
+    return { o, c, u: c[0] * T[0] + c[1] * T[1], d: c[0] * Dm[0] + c[1] * Dm[1] };
+  }).sort((a, b) => a.u - b.u);
+  const steps = [];
+  for (let k = 1; k < pos.length; k++) {
+    const du = pos[k].u - pos[k - 1].u;
+    if (du < RULE.stepMin * g) return rj('stepMin');
+    if (du > RULE.stepMax * g) return rj('stepMax');
+    if (Math.abs(pos[k].d - pos[k - 1].d) > RULE.depthRatio * du) return rj('depth');
+    steps.push(du);
+  }
+  if (steps.length > 1 && Math.max(...steps) > RULE.evenness * Math.min(...steps)) return rj('even');
+  // no hole: no other front-row tower reaching the band stands between two neighbours in the same row (or in
+  // front of it); towers clearly behind the row are fine
+  const members = new Set(opts.map((o) => o.t));
+  const tc = (t) => ({ u: t.x * T[0] + t.z * T[1], d: t.x * Dm[0] + t.z * Dm[1] });
+  for (let k = 1; k < pos.length; k++) {
+    const a = tc(pos[k - 1].o.t), b = tc(pos[k].o.t);
+    for (const ob of others) {
+      if (members.has(ob.t) || ob.t.top < yC - 0.5 * g) continue;
+      const q = tc(ob.t);
+      if (q.u <= Math.min(a.u, b.u) + 0.5 * g || q.u >= Math.max(a.u, b.u) - 0.5 * g) continue;
+      const dLine = a.d + (b.d - a.d) * (q.u - a.u) / (b.u - a.u || 1);
+      if (q.d > dLine - RULE.holeDepth) return rj('hole');
+    }
+  }
+  return { list: pos.map((q) => ({ ...q.o, c: q.c })), g, yC, Dm };
 }
 
 // Groups parts into towers by their plan centre (tower() and the landmarks stack segments on one axis).
@@ -201,7 +271,7 @@ export function blocked(blockers, t, f, wdist) {
   return false;
 }
 
-// River id, side and position along the river (arc length) of the bank point nearest to (x, z).
+// River id, side and position along the river (arc length) of the bank point nearest to (hx, hz).
 export function bankOf(world, x, z, hx, hz) {
   if (!world._textSegs) {
     // tag each river segment with a river id and its cumulative arc length
@@ -232,23 +302,114 @@ export function bankOf(world, x, z, hx, hz) {
   return { key: e.river + ':' + side, along: e.s + h * Math.hypot(bx, bz) };
 }
 
-// Splits a run of n towers into phrases of 2-4 characters (a lone tower gets none).
-export function chunkSizes(n) {
-  if (n < 2) return [];
-  const k = Math.ceil(n / 4);
-  const base = Math.floor(n / k), extra = n % k;
+// Every candidate phrase on one bank: 2-4 front-row towers taken in order along the bank, one face each, checked
+// by fitPhrase. `bankTowers` is [{ t, along, opts }] sorted by `along`. Towers may be skipped only when they do not
+// leave a hole in the sign (see fitPhrase).
+export function bankPhrases(bankTowers) {
   const out = [];
-  for (let i = 0; i < k; i++) out.push(base + (i < extra ? 1 : 0));
+  const side = 1 + 2 * RULE.sideMargin;
+  const pick = [], idx = [];
+  const walk = (last, gUp) => {
+    if (pick.length >= 2) {
+      const ph = fitPhrase(pick, bankTowers);
+      if (ph) out.push(ph);
+    }
+    if (pick.length === 4) return;
+    for (let j = last + 1; j < bankTowers.length; j++) {
+      const b = bankTowers[j];
+      // neighbours are at most stepMax slot sizes apart (with slack: the bank and the tangent differ a little)
+      if (b.along - bankTowers[last].along > 1.25 * RULE.stepMax * gUp) break;
+      for (const o of b.opts) {
+        // prune early: normals must agree with every earlier pick, and a common band must stay possible
+        let ok = true;
+        for (let k = 0; k < pick.length && ok; k++) {
+          const q = pick[k];
+          if (q.f.D[0] * o.f.D[0] + q.f.D[1] * o.f.D[1] < COS_MAX) { ok = false; rj('pAngle'); }
+          else if (Math.min(q.p.y0 + q.p.h, o.p.y0 + o.p.h) - Math.max(q.lo, o.lo) < (1 + 2 * RULE.vMargin) * RULE.minGlyph) { ok = false; rj('pBand'); }
+        }
+        if (!ok) continue;
+        const g = Math.min(gUp, o.f.W * Math.max(o.p.taper, 1) / side);
+        if (g < RULE.minGlyph) continue;
+        pick.push(o); idx.push(j);
+        walk(j, g);
+        pick.pop(); idx.pop();
+      }
+    }
+  };
+  for (let s = 0; s < bankTowers.length; s++) {
+    for (const o of bankTowers[s].opts) {
+      const g = Math.min(RULE.maxGlyph, o.f.W * Math.max(o.p.taper, 1) / side);
+      if (g < RULE.minGlyph) continue;
+      pick.push(o); idx.push(s);
+      walk(s, g);
+      pick.pop(); idx.pop();
+    }
+  }
   return out;
 }
 
-// Full participation rule. Returns { glyphs: [...], chars: [unique characters], stats }.
-export function selectTowerText(world, P) {
-  const towers = groupTowers(P, world);
-  // front-row blockers: towers standing on the ground (not skybridges or vaults) at least blockH tall
-  const blockers = towers.filter((o) => o.y0 - o.ground < 15 && o.top - o.ground >= RULE.blockH);
-  const stats = { towers: towers.length, tall: 0, sight: 0, front: 0, inRuns: 0, chosen: 0, byDistrict: {} };
+// Picks the phrase text: K characters, none already used in the given districts; texts not used anywhere else are
+// preferred. Returns the text or null.
+export function pickText(K, districts, usedChars, usedTexts, h) {
+  const free = PHRASES[K].filter((p) => [...p].every((ch) => districts.every((d) => !(usedChars.get(d) || new Set()).has(ch))));
+  if (!free.length) return null;
+  const fresh = free.filter((p) => !usedTexts.has(p));
+  const list = fresh.length ? fresh : free;
+  return list[Math.floor(h * list.length) % list.length];
+}
+
+// Chooses the phrases from the front-row towers of every bank (Map: bank key -> [{ t, along, opts }]): all
+// candidate phrases, largest first, without sharing towers, with gaps along each bank, few per district, and a
+// text whose characters are not used elsewhere in the same districts. Returns { kept, candidates }.
+export function choosePhrases(banks) {
+  // candidate phrases on every bank
   const cands = [];
+  for (const [key, list] of [...banks.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+    list.sort((a, b) => a.along - b.along);
+    for (const ph of bankPhrases(list)) {
+      ph.bank = key;
+      ph.span = [Math.min(...ph.list.map((o) => o.along)), Math.max(...ph.list.map((o) => o.along))];
+      ph.score = ph.list.length * ph.g * ph.g;   // character area: larger and complete phrases first
+      ph.h = hash01(RULE.seed, ph.list[0].t.x, ph.list[0].t.z, ph.list.length);
+      cands.push(ph);
+    }
+  }
+  // keep the largest phrases first, without sharing towers, with gaps along each bank, few per district
+  cands.sort((a, b) => b.score - a.score || a.h - b.h);
+  const usedTowers = new Set(), usedChars = new Map(), usedTexts = new Set(), perDistrict = new Map();
+  const kept = [];
+  let total = 0;
+  for (const ph of cands) {
+    if (kept.length >= RULE.maxPhrases || total + ph.list.length > RULE.maxTowers) continue;
+    if (ph.list.some((o) => usedTowers.has(o.t))) continue;
+    if (kept.some((k) => k.bank === ph.bank && ph.span[0] - k.span[1] < RULE.phraseGap && k.span[0] - ph.span[1] < RULE.phraseGap)) continue;
+    const districts = [...new Set(ph.list.map((o) => o.district))];
+    if (districts.some((d) => (perDistrict.get(d) || 0) >= RULE.perDistrict)) continue;
+    const text = pickText(ph.list.length, districts, usedChars, usedTexts, ph.h);
+    if (!text) continue;
+    ph.text = text;
+    kept.push(ph);
+    total += ph.list.length;
+    usedTexts.add(text);
+    for (const o of ph.list) usedTowers.add(o.t);
+    for (const d of districts) {
+      perDistrict.set(d, (perDistrict.get(d) || 0) + 1);
+      if (!usedChars.has(d)) usedChars.set(d, new Set());
+      for (const ch of text) usedChars.get(d).add(ch);
+    }
+  }
+  return { kept, candidates: cands.length };
+}
+
+// Full participation rule. Returns { glyphs: [...], chars: [unique characters], phrases: [...], stats }.
+export function selectTowerText(world, P) {
+  for (const k of Object.keys(REJECT)) delete REJECT[k];
+  const towers = groupTowers(P, world);
+  // front-row blockers: towers reaching blockH above the ground, either standing on the ground or with at least
+  // blockH of their own height (towers on podiums count; skybridges and the vault garden do not)
+  const blockers = towers.filter((o) => o.top - o.ground >= RULE.blockH && (o.y0 - o.ground < 15 || o.top - o.y0 >= RULE.blockH));
+  const stats = { towers: towers.length, tall: 0, sight: 0, front: 0, candidates: 0, chosen: 0, byDistrict: {} };
+  const banks = new Map();
   for (const t of towers) {
     if (!t.shaft || t.top - t.ground < RULE.minHeight) continue;
     const di = world.districtAt(t.x, t.z).index;
@@ -257,93 +418,53 @@ export function selectTowerText(world, P) {
     const hits = waterHits(world, t.x, t.z);
     if (!hits) continue;
     stats.sight++;
-    const dirs = hits.filter((h) => h.s < Infinity).map((h) => h.d);
-    // front row: a face with water in front of it and no tower in between. Among those, the face nearest the
-    // water carries the character (ties within 25 m go to the larger, then the higher character).
-    let best = null;
+    // every flat face of a shaft part with water in front of it and no tower in between, grouped by bank
+    const mine = new Map();
     for (const p of t.parts) {
       if (!SHAFT_MATS.has(p.mat)) continue;
-      for (const f of partFaces(p, dirs)) {
+      for (const f of partFaces(p)) {
         const wdist = faceWater(hits, f.D);
-        if (wdist === Infinity) continue;
-        const s = fitSlot(p, f, t.ground);
-        if (!s || blocked(blockers, t, f, wdist)) continue;
-        const key = [Math.round(wdist / 25), -s.g, -s.yC];
-        if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && (key[1] < best.key[1] || (key[1] === best.key[1] && key[2] < best.key[2])))) {
-          best = { p, f, s, wdist, key };
-        }
+        if (wdist === Infinity || blocked(blockers, t, f, wdist)) continue;
+        const b = bankOf(world, t.x, t.z, t.x + f.D[0] * wdist, t.z + f.D[1] * wdist);
+        const o = { t, p, f, wdist, lo: Math.max(p.y0, t.ground + RULE.minBase), along: b.along, district: DISTRICTS[di].name };
+        if (!mine.has(b.key)) mine.set(b.key, []);
+        mine.get(b.key).push(o);
       }
     }
-    if (!best) continue;
+    if (!mine.size) continue;
     stats.front++;
-    cands.push({ t, ...best, district: DISTRICTS[di].name });
-  }
-  // banks: group by (river, side), order along the river, split into runs, then into phrases
-  const banks = new Map();
-  for (const c of cands) {
-    const hx = c.t.x + c.f.D[0] * c.wdist, hz = c.t.z + c.f.D[1] * c.wdist;
-    const b = bankOf(world, c.t.x, c.t.z, hx, hz);
-    c.along = b.along;
-    if (!banks.has(b.key)) banks.set(b.key, []);
-    banks.get(b.key).push(c);
-  }
-  const chunks = [];
-  for (const [key, list] of [...banks.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    list.sort((a, b) => a.along - b.along);
-    const runs = [];
-    let run = [];
-    for (const c of list) {
-      if (run.length && c.along - run[run.length - 1].along > RULE.runGap) { runs.push(run); run = []; }
-      run.push(c);
+    for (const [key, opts] of mine) {
+      if (!banks.has(key)) banks.set(key, []);
+      banks.get(key).push({ t, along: opts.reduce((s, o) => s + o.along, 0) / opts.length, opts });
     }
-    if (run.length) runs.push(run);
-    runs.forEach((r, ri) => {
-      let at = 0;
-      chunkSizes(r.length).forEach((n, ci) => {
-        const tw = r.slice(at, at + n);
-        chunks.push({ key: `${key}/${ri}/${ci}`, towers: tw, wdist: tw.reduce((s, c) => s + c.wdist, 0) / n, h: hash01(RULE.seed, chunks.length) });
-        at += n;
-      });
-    });
   }
-  stats.inRuns = chunks.reduce((s, c) => s + c.towers.length, 0);
-  // cap: keep the phrases nearest the water (ties broken by the fixed seed)
-  const order = [...chunks].sort((a, b) => a.wdist - b.wdist || a.h - b.h);
-  const kept = [];
-  let total = 0;
-  for (const c of order) {
-    if (total + c.towers.length > RULE.maxTowers) continue;
-    kept.push(c); total += c.towers.length;
-  }
-  // phrase text, reading order (left to right for a viewer on the water facing the bank), colour
-  const glyphs = [];
-  const chars = [];
-  kept.forEach((c, ci) => {
-    const n = c.towers.length;
-    const list = PHRASES[n];
-    const phrase = [...list[Math.floor(hash01(RULE.seed, ci, 7) * list.length) % list.length]];
-    let mx = 0, mz = 0;
-    for (const t of c.towers) { mx += t.f.D[0]; mz += t.f.D[1]; }
-    const [dx, dz] = norm(mx, mz);
-    const right = [dz, -dx];
-    const ordered = [...c.towers].sort((a, b) => (a.t.x * right[0] + a.t.z * right[1]) - (b.t.x * right[0] + b.t.z * right[1]));
-    const col = PALETTE[Math.floor(hash01(RULE.seed, ci, 13) * PALETTE.length) % PALETTE.length];
-    ordered.forEach((t, k) => {
-      const ch = phrase[k];
+  const { kept, candidates } = choosePhrases(banks);
+  stats.candidates = candidates;
+  stats.reject = { ...REJECT };
+  // glyph records: one size, one band, one colour per phrase; index = reading order
+  const glyphs = [], chars = [], phrases = [];
+  kept.forEach((ph, pi) => {
+    const col = PALETTE[Math.floor(hash01(RULE.seed, pi, 13) * PALETTE.length) % PALETTE.length];
+    const text = [...ph.text];
+    ph.list.forEach((o, k) => {
+      const ch = text[k];
       let layer = chars.indexOf(ch);
       if (layer < 0) { layer = chars.length; chars.push(ch); }
-      glyphs.push({ part: t.p.i, D: t.f.D, uC: t.f.uC, yC: t.s.yC, g: t.s.g, layer, index: k, col, char: ch,
-        phrase: phrase.join(''), x: t.t.x, z: t.t.z, district: t.district });
-      stats.byDistrict[t.district] = (stats.byDistrict[t.district] || 0) + 1;
+      glyphs.push({ part: o.p.i, D: o.f.D, uC: o.f.uC * taperAt(o.p, ph.yC), yC: ph.yC, g: ph.g, layer, index: k, col, char: ch,
+        phrase: ph.text, x: o.c[0], z: o.c[1], district: o.district });
+      stats.byDistrict[o.district] = (stats.byDistrict[o.district] || 0) + 1;
     });
+    const cx = ph.list.reduce((s, o) => s + o.c[0], 0) / ph.list.length;
+    const cz = ph.list.reduce((s, o) => s + o.c[1], 0) / ph.list.length;
+    phrases.push({ text: ph.text, x: cx, y: ph.yC, z: cz, D: ph.Dm, g: ph.g, wdist: Math.min(...ph.list.map((o) => o.wdist)), district: ph.list[0].district });
   });
   stats.chosen = glyphs.length;
-  stats.phrases = kept.map((c) => glyphs.filter((g) => c.towers.some((t) => t.p.i === g.part)).map((g) => g.char).join(''));
-  return { glyphs, chars, stats };
+  stats.phrases = phrases.map((p) => p.text);
+  return { glyphs, chars, phrases, stats };
 }
 
 // GPU slot records: 4 x vec4f per character.
-//  a: lit direction x, z, slot centre along the tangent, slot centre y
+//  a: face direction x, z, slot centre along the tangent, slot centre y
 //  b: slot side g, atlas layer, index in the phrase, 0
 //  c: colour rgb, standby brightness
 //  d: unused
@@ -358,39 +479,117 @@ export function packSlots(glyphs) {
   return out;
 }
 
-// One 256x256 layer per character (rg8unorm: R crisp mask, G blurred halo), with full mip chains.
-// Separate layers mean far mip levels can never bleed in neighbouring characters.
+// ---------------------------------------------------------------- glyph layers
+// One 256x256 rgba8 layer per character, full mip chain:
+//   R: signed distance to the stroke edge (0.5 = edge, higher inside), +-SDF_RANGE texels over 0..1
+//   G: blurred halo (dims the windows around the strokes)
+//   B: coverage (used once a pixel covers several texels)
+// The distance field comes from a 512 px rendering, so magnified characters keep smooth strokes.
 export const GLYPH_RES = 256;
+export const SDF_RANGE = 12;   // texels (at 256) mapped onto the 0..1 range
+
+// Squared Euclidean distance transform of a 1D sampled function (Felzenszwalb and Huttenlocher).
+function edt1d(f, n, d, v, z) {
+  let k = 0;
+  v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+  for (let q = 1; q < n; q++) {
+    let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) { k--; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+    k++; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+  }
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
+  }
+}
+
+// Squared distance from every pixel to the nearest pixel where `inside(i)` is true (n x n grid).
+export function edt2d(n, inside) {
+  const BIG = 1e20;
+  const g = new Float64Array(n * n);
+  for (let i = 0; i < n * n; i++) g[i] = inside(i) ? 0 : BIG;
+  const f = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  for (let x = 0; x < n; x++) {
+    for (let y = 0; y < n; y++) f[y] = g[y * n + x];
+    edt1d(f, n, d, v, z);
+    for (let y = 0; y < n; y++) g[y * n + x] = d[y];
+  }
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) f[x] = g[y * n + x];
+    edt1d(f, n, d, v, z);
+    for (let x = 0; x < n; x++) g[y * n + x] = d[x];
+  }
+  return g;
+}
+
+// Signed distance field (in output texels, positive inside) at n/2 resolution from an n x n coverage mask.
+export function signedField(cov, n) {
+  const ins = (i) => cov[i] >= 0.5;
+  const dOut = edt2d(n, ins);                    // outside pixels: distance to the nearest inside pixel
+  const dIn = edt2d(n, (i) => !ins(i));          // inside pixels: distance to the nearest outside pixel
+  const sd = new Float32Array(n * n);
+  for (let i = 0; i < n * n; i++) sd[i] = ins(i) ? Math.sqrt(dIn[i]) - 0.5 : 0.5 - Math.sqrt(dOut[i]);
+  const m = n / 2, out = new Float32Array(m * m);
+  for (let y = 0; y < m; y++) {
+    for (let x = 0; x < m; x++) {
+      const i = 2 * y * n + 2 * x;
+      out[y * m + x] = (sd[i] + sd[i + 1] + sd[i + n] + sd[i + n + 1]) / 8;   // mean, halved to output texels
+    }
+  }
+  return out;
+}
+
 export function buildGlyphArray(device, chars) {
-  const N = GLYPH_RES, layers = Math.max(1, chars.length);
+  const N = GLYPH_RES, HI = 2 * N, layers = Math.max(1, chars.length);
   const levels = Math.log2(N) + 1;
-  const tex = device.createTexture({ label: 'tower-glyphs', size: [N, N, layers], dimension: '2d', format: 'rg8unorm', mipLevelCount: levels, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+  const tex = device.createTexture({ label: 'tower-glyphs', size: [N, N, layers], dimension: '2d', format: 'rgba8unorm', mipLevelCount: levels, usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
   chars.forEach((ch, layer) => {
+    const hi = new OffscreenCanvas(HI, HI);
+    const gh = hi.getContext('2d');
+    gh.fillStyle = '#000'; gh.fillRect(0, 0, HI, HI);
+    gh.fillStyle = '#fff'; gh.textAlign = 'center'; gh.textBaseline = 'middle';
+    gh.font = `bold ${Math.round(HI * 0.84)}px "Microsoft YaHei", "SimHei", sans-serif`;
+    gh.fillText(ch, HI / 2, HI / 2 + HI * 0.03);
+    const hd = gh.getImageData(0, 0, HI, HI).data;
+    const cov = new Float32Array(HI * HI);
+    for (let i = 0; i < HI * HI; i++) cov[i] = hd[i * 4] / 255;
+    const sd = signedField(cov, HI);
+    // coverage and halo at 256
     const a = new OffscreenCanvas(N, N);
     const ga = a.getContext('2d');
-    ga.fillStyle = '#000'; ga.fillRect(0, 0, N, N);
-    ga.fillStyle = '#fff'; ga.textAlign = 'center'; ga.textBaseline = 'middle';
-    ga.font = `bold ${Math.round(N * 0.84)}px "Microsoft YaHei", "SimHei", sans-serif`;
-    ga.fillText(ch, N / 2, N / 2 + N * 0.03);
+    ga.imageSmoothingQuality = 'high';
+    ga.drawImage(hi, 0, 0, N, N);
     const b = new OffscreenCanvas(N, N);
     const gb = b.getContext('2d');
     gb.filter = 'blur(7px)'; gb.drawImage(a, 0, 0);
     gb.globalCompositeOperation = 'lighter'; gb.drawImage(b, 0, 0);
-    let srcA = a, srcB = b, w = N;
+    const da = ga.getImageData(0, 0, N, N).data, db = gb.getImageData(0, 0, N, N).data;
+    // level 0 as floats, then box-filtered mips
+    let w = N;
+    let lev = new Float32Array(N * N * 4);
+    for (let i = 0; i < N * N; i++) {
+      lev[i * 4] = Math.min(1, Math.max(0, 0.5 + sd[i] / (2 * SDF_RANGE)));
+      lev[i * 4 + 1] = db[i * 4] / 255;
+      lev[i * 4 + 2] = da[i * 4] / 255;
+      lev[i * 4 + 3] = 1;
+    }
     for (let l = 0; l < levels; l++) {
       if (l > 0) {
-        const nw = Math.max(1, w >> 1);
-        const na = new OffscreenCanvas(nw, nw), nb = new OffscreenCanvas(nw, nw);
-        const ca = na.getContext('2d'), cb = nb.getContext('2d');
-        ca.imageSmoothingQuality = 'high'; cb.imageSmoothingQuality = 'high';
-        ca.drawImage(srcA, 0, 0, nw, nw); cb.drawImage(srcB, 0, 0, nw, nw);
-        srcA = na; srcB = nb; w = nw;
+        const nw = Math.max(1, w >> 1), nx = new Float32Array(nw * nw * 4);
+        for (let y = 0; y < nw; y++) {
+          for (let x = 0; x < nw; x++) {
+            for (let c = 0; c < 4; c++) {
+              const at = (yy, xx) => lev[(yy * w + xx) * 4 + c];
+              nx[(y * nw + x) * 4 + c] = (at(2 * y, 2 * x) + at(2 * y, 2 * x + 1) + at(2 * y + 1, 2 * x) + at(2 * y + 1, 2 * x + 1)) / 4;
+            }
+          }
+        }
+        lev = nx; w = nw;
       }
-      const da = srcA.getContext('2d').getImageData(0, 0, w, w).data;
-      const db = srcB.getContext('2d').getImageData(0, 0, w, w).data;
-      const out = new Uint8Array(w * w * 2);
-      for (let i = 0; i < w * w; i++) { out[i * 2] = da[i * 4]; out[i * 2 + 1] = db[i * 4]; }
-      device.queue.writeTexture({ texture: tex, mipLevel: l, origin: [0, 0, layer] }, out, { bytesPerRow: w * 2 }, [w, w, 1]);
+      const out = new Uint8Array(w * w * 4);
+      for (let i = 0; i < out.length; i++) out[i] = Math.round(lev[i] * 255);
+      device.queue.writeTexture({ texture: tex, mipLevel: l, origin: [0, 0, layer] }, out, { bytesPerRow: w * 4 }, [w, w, 1]);
     }
   });
   return tex;
@@ -403,12 +602,11 @@ struct TextSlot { a: vec4f, b: vec4f, c: vec4f, d: vec4f };
 @group(2) @binding(1) var<storage, read> textSlots: array<TextSlot>;
 @group(2) @binding(2) var glyphTex: texture_2d_array<f32>;
 
-const LED_CELLS = 28.0;   // LED cells across one character slot (the ink spans ~24)
+const LED_CELLS = 48.0;   // LED cells across one character slot (a fine surface pattern only)
 const GLYPH_RES = ${GLYPH_RES}.0;
+const SDF_RANGE = ${SDF_RANGE}.0;
 
 @fragment fn fsText(i: VOut) -> GOut {
-  // derivatives first, in uniform control flow
-  let fwp = max(length(fwidth(i.wp)), 1e-4);   // metres per pixel
   let P = parts[i.info.x];
   let S = textSlots[max(textMap[i.info.x], 1u) - 1u];
   let D = S.a.xy;
@@ -419,27 +617,31 @@ const GLYPH_RES = ${GLYPH_RES}.0;
   let axis = vec2f(P.a.x, P.a.z) + P.d.xy * hf;
   let rel = i.wp.xz - axis;
   let uv = vec2f((dot(rel, T) - S.a.z) / g + 0.5, 0.5 - (i.wp.y - S.a.w) / g);
+  // derivatives in uniform control flow (before any discard)
+  let fuv = max(fwidth(uv), vec2f(1e-6));
   let layer = i32(S.b.y + 0.5);
 
-  // LED cells: quantised up close, a continuous filtered glyph once cells get small (no stair-step crawl)
-  let cp = fwp * LED_CELLS / g;                     // fraction of an LED cell covered by one pixel
-  let q = (floor(uv * LED_CELLS) + 0.5) / LED_CELLS;
-  let nearS = textureSampleLevel(glyphTex, sampClamp, q, layer, 0.0).r;
-  let lod = log2(max(GLYPH_RES * fwp / g, 1e-3));
-  let farS = textureSampleLevel(glyphTex, sampClamp, uv, layer, lod);
-  let kq = 1.0 - smoothstep(0.2, 0.45, cp);        // LED quantisation while a cell is wider than ~5 px
-  let glyph = mix(farS.r, smoothstep(0.3, 0.6, nearS), kq);
-  let cf = fract(uv * LED_CELLS) - vec2f(0.5);
-  let dotM = 1.0 - smoothstep(0.36 - cp, 0.36 + cp, length(cf));
-  let kd = 1.0 - smoothstep(0.1, 0.25, cp);        // round LED dots only while a cell is wider than ~10 px
-  let led = mix(1.0, dotM * 1.8, kd);
+  // glyph: distance field with a one-pixel edge while magnified, filtered coverage once a pixel spans texels
+  let tx = fuv * GLYPH_RES;                          // texels per pixel along u and v
+  let tpp = max(tx.x, tx.y);
+  let sd = textureSampleLevel(glyphTex, sampClamp, uv, layer, 0.0).r;
+  let dist = (sd - 0.5) * 2.0 * SDF_RANGE;           // texels, positive inside the strokes
+  let sharp = saturate(dist / max(0.5 * (tx.x + tx.y), 1e-3) + 0.5);
+  let far = textureSampleLevel(glyphTex, sampClamp, uv, layer, log2(max(tpp, 1e-3)));
+  let glyph = mix(sharp, far.b, smoothstep(1.5, 3.0, tpp));
+  // LED dots: a mild surface pattern only while a cell is wider than ~8 px, gone by 4 px (never aliases)
+  let cellPx = 1.0 / (LED_CELLS * max(fuv.x, fuv.y));
+  let dotM = 1.0 - smoothstep(0.28, 0.5, length(fract(uv * LED_CELLS) - vec2f(0.5)));
+  let led = mix(1.0, 0.72 + 0.45 * dotM, smoothstep(4.0, 8.0, cellPx));
 
-  // panel: the slot on the lit face only (not on caps or the side and back faces)
+  // panel: the slot on the lit face only (not on caps or side faces), faded out at grazing views
   let n = normalize(i.n);
   let facing = dot(normalize(n.xz + vec2f(1e-5, 0.0)), D);
-  let fu = fwp / g;
-  let panel = saturate(min(min(uv.x, 1.0 - uv.x), min(uv.y, 1.0 - uv.y)) / max(fu, 1e-4) + 0.5)
-            * smoothstep(0.25, 0.4, facing) * select(1.0, 0.0, (i.info.y & 256u) != 0u);
+  let edge = min(min(uv.x, 1.0 - uv.x) / fuv.x, min(uv.y, 1.0 - uv.y) / fuv.y);
+  let view = normalize(F.camPos.xyz - i.wp);
+  let graze = smoothstep(0.34, 0.5, dot(view, vec3f(D.x, 0.0, D.y)));   // 20-30 degrees from the face plane
+  let panel = saturate(edge + 0.5) * smoothstep(0.25, 0.4, facing) * graze
+            * select(1.0, 0.0, (i.info.y & 256u) != 0u);
   if (panel <= 0.001) { discard; }
 
   // always on; during the river show the characters pulse with the beat, rippling along the phrase
@@ -451,7 +653,7 @@ const GLYPH_RES = ${GLYPH_RES}.0;
   let eL = dot(e, vec3f(0.3, 0.5, 0.2));
   e = mix(e, mix(e, vec3f(eL), 0.25) / (1.0 + eL * 0.6), farK * 0.7);
   // dim the lit windows under the panel, most strongly around the strokes, then add the character
-  let dim = panel * saturate(0.35 + 0.6 * farS.g);
+  let dim = panel * saturate(0.35 + 0.6 * far.g);
   var o: GOut;
   o.emissive = vec4f(e * panel, dim);
   return o;

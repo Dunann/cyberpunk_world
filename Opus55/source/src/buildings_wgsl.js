@@ -19,6 +19,8 @@ export const FLAG = {
   TEXT: 262144,     // carries a tower character: also appended to the overlay lists (buildings_text.js)
 };
 
+export const TEXT_MAX = 64;   // capacity of each tower-character overlay draw list (multiple of 64: bind offsets)
+
 export const MAT = {
   CONCRETE: 0, RES: 1, OFFICE: 2, GLASS: 3, STONE: 4, SHOP: 5, BRICK: 6, TILE: 7, WOOD: 8, FELT: 9,
   METAL: 10, EMIT: 11, ROOFTILE: 12, TV: 13, CROWN: 14, HELI: 15, TRUSS: 16, CLOCK: 17, CRYSTAL: 18, CARPET: 19, AC: 20,
@@ -36,7 +38,7 @@ export const CULL_WGSL = /* wgsl */ `
 @group(1) @binding(3) var<uniform> cullU: vec4f; // x part count, y list stride (entries), z lod bias, w min pixel size
 @group(1) @binding(4) var<storage, read_write> textVis: array<u32>;            // overlay lists (tower characters)
 @group(1) @binding(5) var<storage, read_write> textArgs: array<atomic<u32>>;
-const TEXT_STRIDE = 64u;
+const TEXT_STRIDE = ${TEXT_MAX}u;
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3u) {

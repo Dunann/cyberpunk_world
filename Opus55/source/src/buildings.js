@@ -124,7 +124,8 @@ export default {
       P.set(g.part, 15, P.get(g.part, 15) + FLAG.TEXT);
       textMap[g.part] = k + 1;
     });
-    world.shared.towerText = { stats: text.stats, glyphs: text.glyphs.map((g) => ({ char: g.char, phrase: g.phrase, x: Math.round(g.x), z: Math.round(g.z), y: Math.round(g.yC), g: +g.g.toFixed(1), district: g.district })) };
+    world.shared.towerText = { stats: text.stats, phrases: text.phrases,
+      glyphs: text.glyphs.map((g) => ({ char: g.char, phrase: g.phrase, index: g.index, x: Math.round(g.x), z: Math.round(g.z), y: Math.round(g.yC), g: +g.g.toFixed(1), district: g.district })) };
 
     // ---------------- GPU resources
     const verts = [], idx = [];
