@@ -20,6 +20,8 @@ Neon Confluence (`Opus55/`) is a real-time WebGPU cyberpunk river city that runs
 ## What "reached the goal" means
 Every zone reaches a mean of 8 or more on the strict rubric (`eval/critic-rubric-v1.md`), averaged over two critics and all four score axes, with no defect above minor.
 
+**Raised by the user on 2026-11-24:** the target is now screenshot critic scores of **at least 9 across the board** (every zone, both critics, all four axes). Keep running the full loop with multiple agents and make as much progress as possible until that target or the budget is reached.
+
 ## Constraints
 - **GPU budget (hard gate, RTX 4050 Laptop, 2560x1440, scripted 60-second fly-through):** average ≤ 11 ms, 99th percentile ≤ 16.7 ms, worst frame ≤ 25 ms. The baseline averages 9.64 ms. Every idea's spec must say where any extra GPU time comes from.
 - **Functional checks:** all 18 must pass, with no WebGPU errors.
@@ -29,7 +31,7 @@ Every zone reaches a mean of 8 or more on the strict rubric (`eval/critic-rubric
 
 ## Budget
 - Stop when the 7-day usage reaches 25%, enforced by the usage-budget hook. The weekly window resets on 2026-11-24 at 13:00 UTC; after the reset, the 25% stop is re-applied to the new week.
-- At most 5 agents run at once. Evaluations run one at a time on a quiet GPU.
+- At most 5 agents run at once (raised to 6 on 2026-11-24 for more progress). Evaluations run one at a time on a quiet GPU.
 
 ## Models
 | Role | Model |
