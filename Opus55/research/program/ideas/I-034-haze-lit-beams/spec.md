@@ -1,7 +1,8 @@
 ---
 id: I-034
 title: Haze-lit beams - searchlights that scatter in the same rainy haze as the fog, fewer and aimed, with rain glints and oriented fixtures
-status: in-review
+status: rejected
+score: 5.00 (review-1 only; review 2 would need >= 9.0 to reach 7, so skipped to save the queue)
 direction: Combine / build on the best - the brief axis (critic 2 change 9: light effects that read as designed)
 family: lighting: physically based single-scattering beams (phase function, shared medium, rain glints) plus a lighting-design count rule
 parent: none (rebuilds the beam model of lightshow.js / showBeams.js, which every show pose uses)
