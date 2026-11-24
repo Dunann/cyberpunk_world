@@ -1,7 +1,8 @@
 ---
 id: I-025
 title: Picture cars and extras - a hero tier of vehicles and people near the camera, built from swappable components
-status: proposed
+status: rejected
+score: 5.67 (review-1 5.67, review-2 5.67; mean; below 7)
 direction: Borrow from another field (film picture cars and background casting; AAA open-world pedestrian and vehicle component systems)
 family: near-camera population: component-swap vehicles and pedestrians with a hero level of detail
 parent: none
