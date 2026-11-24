@@ -1,6 +1,7 @@
 // Captures verification viewpoints at full internal resolution.
 //   node tools/capture.mjs [--poses 1,2,3] [--out out/shots] [--w 2560 --h 1440] [--jpg] [--burst] [--query k=v&k2=v2]
 //   [--cam x,y,z,yaw,pitch[,t]] [--name file] captures one custom camera instead of the poses
+//   [--poses-file ../eval/poses-v1.json] [--ids A1,B2] capture a custom pose set instead of the viewpoints
 //   [--stats] also prints smoothed GPU ms per pass at each pose (scene animating for 150 frames)
 //   [--profile name] Chrome profile dir name (use a unique one when several captures run at once)
 import fs from 'node:fs';
@@ -32,6 +33,32 @@ if (cam) {
   const file = path.join(out, `${opt('name', 'custom')}.${ext}`);
   fs.writeFileSync(file, Buffer.from(b64, 'base64'));
   console.log('  saved', file);
+} else if (opt('poses-file', '')) {
+  // custom pose set (eval harness): [{id, name, pos:[x,y,z], rel, target:[x,y,z], t}]
+  const set = JSON.parse(fs.readFileSync(path.resolve(root, opt('poses-file', '')), 'utf8'));
+  const only = (opt('ids', '') || '').split(',').filter(Boolean);
+  for (const p of set) {
+    if (only.length && !only.includes(p.id)) continue;
+    await page.evaluate((q) => {
+      const w = window.__ctx.world;
+      const y = q.rel ? w.heightAt(q.pos[0], q.pos[2]) + q.pos[1] : q.pos[1];
+      const dx = q.target[0] - q.pos[0], dy = q.target[1] - y, dz = q.target[2] - q.pos[2];
+      window.__ctx.time = q.t;
+      window.__setCam(q.pos[0], y, q.pos[2], Math.atan2(-dx, -dz), Math.atan2(dy, Math.hypot(dx, dz)));
+    }, p);
+    await page.evaluate(() => window.__frames(48));
+    if (args.includes('--stats')) {
+      await page.evaluate(() => { window.__gpuStats(); window.__ctx.frozen = false; });
+      await page.evaluate(() => window.__frames(150));
+      console.log(`  ${p.id} GPU ms:`, JSON.stringify(await page.evaluate(() => window.__gpuStats())));
+      await page.evaluate((t) => { window.__ctx.frozen = true; window.__ctx.time = t; }, p.t);
+      await page.evaluate(() => window.__frames(8));
+    }
+    const b64 = await page.evaluate((ty) => window.__capture(ty), type);
+    const file = path.join(out, `${p.id}-${p.name}.${ext}`);
+    fs.writeFileSync(file, Buffer.from(b64, 'base64'));
+    console.log('  saved', file);
+  }
 } else {
   const poses = await page.evaluate(() => window.__poses);
   const list = (opt('poses', '') || poses.map((_, i) => i + 1).join(',')).split(',').map((s) => +s);

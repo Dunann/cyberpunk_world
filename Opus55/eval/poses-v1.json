@@ -1,0 +1,16 @@
+[
+  { "id": "A1", "zone": "A", "name": "hongyadong-from-river",   "pos": [470, 12, -230],      "rel": false, "target": [240, 35, -140],     "t": 100 },
+  { "id": "A2", "zone": "A", "name": "hongyadong-close",        "pos": [330, 25, -170],      "rel": false, "target": [240, 40, -140],     "t": 100 },
+  { "id": "A3", "zone": "A", "name": "peninsula-tip-confluence","pos": [650, 20, 150],       "rel": false, "target": [220, 150, -60],     "t": 100 },
+  { "id": "A4", "zone": "A", "name": "hillside-street",         "pos": [-1162, 1.7, -255],   "rel": true,  "target": [-1058, 98, -568],   "t": 100 },
+  { "id": "A5", "zone": "A", "name": "monorail-liziba",         "pos": [-991.7, 141, -752],  "rel": false, "target": [-1027.9, 142, -766.6], "t": 15 },
+  { "id": "A6", "zone": "A", "name": "peninsula-midair",        "pos": [-200, 330, 520],     "rel": false, "target": [-520, 60, -260],    "t": 100 },
+  { "id": "B1", "zone": "B", "name": "bund-show",               "pos": [2080, 8, -880],      "rel": false, "target": [3051, 187, -725],   "t": 45 },
+  { "id": "B2", "zone": "B", "name": "cbd-street",              "pos": [3050, 1.7, -1000],   "rel": true,  "target": [3050, 60, -1600],   "t": 100 },
+  { "id": "B3", "zone": "B", "name": "bund-aerial",             "pos": [1450, 230, 60],      "rel": false, "target": [2250, 30, -1050],   "t": 100 },
+  { "id": "B4", "zone": "B", "name": "among-supertalls",        "pos": [2950, 280, -820],    "rel": false, "target": [3450, 220, -1550],  "t": 50 },
+  { "id": "G1", "zone": "G", "name": "nanshan-overlook",        "pos": [200, 325, 2400],     "rel": false, "target": [568, 205, 1478],    "t": 40 },
+  { "id": "G2", "zone": "G", "name": "city-water-transition",   "pos": [1000, 90, 700],      "rel": false, "target": [600, 10, 200],      "t": 100 },
+  { "id": "G3", "zone": "G", "name": "aerial-city",             "pos": [0, 600, 1500],       "rel": false, "target": [500, 0, -500],      "t": 100 },
+  { "id": "G4", "zone": "G", "name": "cableway-river",          "pos": [-1177.5, 52.8, 889.5], "rel": false, "target": [-903, 78, 473],   "t": 70 }
+]
