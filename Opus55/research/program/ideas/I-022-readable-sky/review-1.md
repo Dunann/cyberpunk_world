@@ -1,0 +1,47 @@
+## Reviewer 1 (2026-11-24)
+
+| | Score (1–10) | Reason |
+|---|---|---|
+| Creativity | 5 | A sensible package: a hierarchy for the sky, a designed taxi, rooftop vertiports and I-020's airships with a placement rule. Vertiports on existing helipad crowns are a nice reuse, but each part is a standard move, and part 5 is I-020 again with three fixes. |
+| Feasibility and credibility | 5 | Buildable in the stated time, the `rng(555)` claim holds (checked), and the GPU estimate is plausible. But several claims about the code and about earlier results are wrong, the nav-light fade formula does the opposite of what it intends between 900 and 1500 m, and the airship rule protects the wrong viewers (details below). |
+| Expected impact | 4 | By the spec's own estimate the gain is +0.05 to +0.15 per zone. That is far below the 0.5-point noise floor in EVAL.md and the 3.3–4.1 points still needed for 9+. Both critics put the sky last or near last (critic 1 change 10 of 10, critic 2 change 9 of 10, where it is bundled with volumetric beams and emitters). It does serve user priority 5. Because five parts are judged together, a failure would teach little. |
+| **Overall (average)** | 4.67 | |
+
+### Strongest reason it will fail
+Part 5 does not fix the airship failure it claims to fix, and the checks are too weak to catch that. I-020 lost S01, S04 and S07. Those cameras were placed 150 m below to 50 m above the ship (ships fly at 290–530 m), so they were aerial cameras looking almost level at a ship in front of a landmark. The judge also named a second cause that the spec leaves out: the ship "dominating the frame". The new sightline rule (step 9) tests only viewers on the river centrelines at y = 10 m. From the water, the line to the upper half of a tower stays below the ship's altitude for every tower lower than the ship, which is almost every tower. So the rule will rarely fire, and the ships will likely come back on the same tracks, still blocking landmarks from exactly the aerial views where they lost. Several eval poses are aerial views at ship altitude: B3 (230 m), B4 (280 m), G1 (325 m), A6 (330 m) and G3 (600 m). Meanwhile the secondary check is weaker than the rule that rejected I-020. "No clear loss" on S01–S08 would have passed I-020 itself, since all its losses were slight. And if the rule moves a track, the stored `fresh-cameras.json` poses point at where the ship used to be, so the check tests nothing. The airships ride inside a bundle judged by "2/3 of targets", so a known weak result can be adopted on the strength of the other parts. That is the opposite of the strict bar the user asked for.
+
+### Other concerns
+- **The diagnosis of the specks misreads the shader.** `FLYER_LIGHT_WGSL` already dims lights with distance: `col *= pow(r / rr, 1.2)` with `rr = max(r, pxMin * px)`. Lights are not "at full brightness, only fog dims it". For a drone at 1 km, the factor is about 0.15.
+- **The proposed fade makes the 900–1500 m band worse.** Multiplying `pxMin` by `1 − smoothstep(600, 1500, dist)` shrinks `rr` toward `r` = 0.3 m. That drives `pow(r/rr, 1.2)` back toward 1, so the lights get brighter as they shrink below one pixel. At 1200 m (about 0.96 m per pixel), a nav light becomes a sub-pixel sprite about 3x brighter per pixel than today, even after the colour fade. That gives aliased, sparkling points under TAA jitter, which is the opposite of "a faint, sparse glow". The fix is to fade the colour and keep `pxMin`, or to keep the energy constant.
+- **Part 2 works against part 1.** Raising the taxi mesh draw distance from 1600 to 2200 m keeps emissive cabin bands and LED rims, which are sub-pixel at that range, out to 2.2 km, after part 1 has removed their smooth light sprites. Far traffic would stay as specks, but aliased ones.
+- **"Rings read as circles at any distance" is false.** A 3.2 m ring is about 5 px wide at 800 m (fov 1.05). A thin LED rim is sub-pixel beyond about 250 m, so it will show as broken dots or shimmer. That is the same kind of moire critic 1 already names. The rim needs to get thicker or fade with distance.
+- **The vertiport forecast is not supported by the code.** Helipads come only from `CROWNS_CBD`, which is used in the Bund, the CBD and the office lots of urban districts. Yuzhong is `DT.HILLSIDE` and uses `CROWNS_RES`, which has no helipad. So A6, and "the peninsula towers" in general, cannot get a vertiport. Urban office lots top out at about 135 m, so with the 120 m threshold nearly all 10 vertiports land in the CBD and the Bund. That puts new holographic ring stacks into B1, the light-show pose forecast as a "tie", and into B4, next to the CBD rooftop searchlights that critic 2 already calls hard-edged clutter. Count the helipads at 120 m or more, and where they are, before forecasting.
+- **The target thresholds count views the program already knows lose.**
+  - An airship "at least 40 px long" can be several km away, or about 1.1 km away end-on. That is the "shapeless magenta glitch" size at which I-009 lost B3 and G4.
+  - A ring stack 30 px tall is about 1.2 km away. There a 9 m taxi is about 9 px, so the rings read as unexplained floating primitives (critic 2) with no visible user.
+  - Use thresholds at which the thing actually reads: for example an airship hull of at least 150 px, or a ring stack of at least 80 px with a docked taxi at least 25 px.
+- **The far-traffic cut-off creates a bubble.** With colours at 0 beyond 1.6 km, every flyer light over the far city disappears in G3 and B3, where most of the sky is 1.5–3 km away. Traffic then exists only near the camera, and the far city reads as dead. The spec's fallback ("thin one in two, keep the far fade") still keeps the cut-off. Real aircraft lights are visible from many km. Thin the lights and dim them smoothly instead of cutting them off.
+- **Earlier results are misquoted.**
+  - I-020 judge A had G4 as a slight win (LOG.md, I-020 evaluated), not a slight loss. The G4 loss was I-009 round 1.
+  - The spec's summary of I-020 also drops "or dominating the frame" from the judge's reasons.
+  - The specks are not "hundreds evenly spread" in the eval stills. B3 shows about 25 visible pairs and A6 about 10. Most of the dotted strings are lamps on mountain roads, not drones.
+- **Gaps in the implementation.**
+  - Police (type 2) and helicopters (type 4) share `evtolMesh` with the taxis in one instanced draw (taxis, then police, then helicopters, then CBD taxis). Keeping their old mesh needs a second mesh and draw ranges by `firstInstance`.
+  - The new type 5 falls into every `ty > 3.5` helicopter branch (scale 2.3, albedo, light parameters) unless each branch is changed.
+  - The nav lights stay at ±2.4 m and would sit inside the new 9 m vehicle.
+  - Main does not publish `airCorridors` (I-020 added that), so step 14 needs another reference.
+- **The cargo lanes have no obstacle check.** River centrelines ±60 m at 60–120 m cross cable-stayed pylons standing in the river (`bridges.js`), suspension cables near the towers, and the cableway over the river (G4 is at 53 m). Step 7 tests the vertiport spirals only. The cargo lanes also need a clearance test.
+- **Existing lanes are not checked against buildings.** Only the CBD corridors are tested. The 9 m taxi doubles the visible size of any lane flight through a Bund tower or a tall urban tower, so add a lane clearance test or a per-taxi check.
+- **The quick test has little power.** About 25 taxis per 9 km lane means a camera 150–400 m from a random lane point at a random time often has 0 or 1 taxis within 500 m. The likely result is mostly ties, so "fewer than 5/8 wins" can stop a good change, or pass on the speck change alone. Choose the time by rule so that at least one taxi is within 250 m.
+- **It does not touch the searchlights the critics name.** The "fewer searchlights" and "hard-edged solid quad" beams are the `lightshow.js` rooftop searchlights (B4, G1, G4). Dropping airship beams that main does not have removes nothing from the current image.
+
+### What would make it stronger
+- Split it.
+  - I-022a: parts 1, 2 and 4, judged on eval poses plus the held-out lane cameras.
+  - I-022b: vertiports, with their own held-out cameras.
+  - Airships: a separate idea that keeps I-020's rule of at least 6/8 wins by both judges, on fresh cameras regenerated with `airship-cams.mjs` against the new tracks.
+- Change the sightline rule to protect the views where the ship lost. For example, add viewers on a ring of aerial points at 150–600 m around each landmark, using the S-camera geometry, and add a frame-share cap: a hull longer than about 35% of the frame width at the S distances. Then show by a unit test that the rule would have moved the I-020 tracks behind S01, S04 and S07 (their stored poses), before any capture.
+- Fix the fade so that the colour goes to zero while `pxMin` is kept. Replace the 1.6 km cut-off with a smooth dimming and thinning that leaves sparse far lights. Give the taxi a distance-based LOD: thicker or merged emissive rims, and an emissive fade that matches the light fade.
+- Count the helipad crowns at 120 m or more and where they are, then restate which poses could get a vertiport. Raise the target thresholds to sizes where the thing reads (see above).
+- Add clearance tests for the cargo lanes (bridges, pylons, cables, the cableway) and for the existing lanes against colliders.
+- If the goal is a sky the critics stop naming, include the `lightshow.js` beams: softer, with visible emitters. That is critic 2 change 9 in full.
