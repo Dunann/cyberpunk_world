@@ -16,6 +16,7 @@ import { selectTowerText, packSlots, buildGlyphArray, TEXT_WGSL, TEXT_MAX } from
 import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges, walkways } from './buildings_gen.js';
 import { prepareLots, genLandmarks, genMarket, finishComplex } from './buildings_landmarks.js';
 import { genInfill, infillHeightStats } from './buildings_infill.js';
+import { buildCompounds, compactParts } from './buildings_compound.js';
 import { WGSL_LIB, WGSL_FRAME, GBUFFER_OUT } from './common.js';
 import { WGSL_LIGHT, GBUFFER_FORMATS, DEPTH_FORMAT } from './renderer.js';
 import { shader } from './gpu.js';
@@ -94,7 +95,37 @@ export default {
     const d = ctx.device, world = ctx.world;
     const t0 = performance.now();
     const B = generate(ctx);
-    const P = B.P;
+    // tower phrase show (I-014): chosen on the city as it is before the compounds, so they cannot change it
+    const text = selectTowerText(world, B.P);
+    if (text.glyphs.length > TEXT_MAX) text.glyphs.length = TEXT_MAX;
+    for (const g of text.glyphs) B.P.set(g.part, 15, B.P.get(g.part, 15) + FLAG.TEXT);
+    // planned compounds (I-018): appended after every other part; the towers they replace are then dropped
+    const comp = buildCompounds(B, world);
+    let P = B.P;
+    if (comp) {
+      const c = compactParts(B.P, comp.mask);
+      P = c.P;
+      for (const g of text.glyphs) {
+        if (comp.mask[g.part]) throw new Error('compound replaced a tower-text part');
+        g.part = c.map[g.part];
+      }
+      // collider bookkeeping for the identity check: replaced solids and compound solids that make colliders
+      const makesCollider = (Q, i) => Math.min(Q.get(i, 4), Q.get(i, 5)) >= 1 && Q.get(i, 6) >= 2;
+      comp.stats.colliders = { replaced: B.P.solid.filter((i) => comp.mask[i] && makesCollider(B.P, i)).length,
+        added: B.P.solid.filter((i) => i >= comp.n0 && makesCollider(B.P, i)).length };
+      world.shared.compoundStats = comp.stats;
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        // the tower-text selection run on the final part list must be the one made before the compounds
+        const again = selectTowerText(world, P);
+        const key = (t) => JSON.stringify(t.glyphs.map((g) => [g.part, g.char, g.phrase, g.index, Math.round(g.x), Math.round(g.z), Math.round(g.yC)]));
+        comp.stats.textSame = key(again) === key(text);
+        comp.stats.textPhrases = again.phrases.map((ph) => ph.text);
+        this.devParts = B.P; this.devPartsFinal = P;
+        const rep = [];
+        comp.mask.forEach((v, i) => { if (v) rep.push(i); });
+        this.devReplaced = rep;
+      }
+    }
     this.count = P.count;
 
     // colliders
@@ -135,17 +166,12 @@ export default {
     world.shared.towerTops = lm.concat(cbd, bund).map((t) => ({ x: t.x, y: t.y, z: t.z }));
     world.shared.ledFacades = B.led;
     world.shared.landmarkSites = B.sites;
-    if (typeof __DEV__ !== 'undefined' && __DEV__) this.devParts = P;   // dev identity checks (tools/hyd-identity.mjs)
+    if (typeof __DEV__ !== 'undefined' && __DEV__ && !comp) this.devParts = P;   // dev identity checks (tools/hyd-identity.mjs)
     world.shared.buildingStats = { parts: P.count, props: B.props, bridges: B.bridges, walkways: B.walkways, shopProps: B.shopProps, lights: nl, lightsWanted: L.length, slots: world.signSlots.length, colliders: world.colliders.length, lots: world.lots.length };
 
-    // tower phrase show: choose the participating towers and flag the parts that carry a character
-    const text = selectTowerText(world, P);
-    if (text.glyphs.length > TEXT_MAX) text.glyphs.length = TEXT_MAX;
+    // tower phrase show: the overlay's part -> character map (part flags were set before the compaction)
     const textMap = new Uint32Array(Math.max(P.count, 1));
-    text.glyphs.forEach((g, k) => {
-      P.set(g.part, 15, P.get(g.part, 15) + FLAG.TEXT);
-      textMap[g.part] = k + 1;
-    });
+    text.glyphs.forEach((g, k) => { textMap[g.part] = k + 1; });
     world.shared.towerText = { stats: text.stats, phrases: text.phrases,
       glyphs: text.glyphs.map((g) => ({ char: g.char, phrase: g.phrase, index: g.index, x: Math.round(g.x), z: Math.round(g.z), y: Math.round(g.yC), g: +g.g.toFixed(1), district: g.district })) };
 

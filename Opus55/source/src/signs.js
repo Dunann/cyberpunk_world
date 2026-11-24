@@ -407,9 +407,13 @@ export default {
     // rank by area (screens and billboards first); far away only signs of 6 m2 and more are drawn
     // the Hongyadong complex's signs (res.ownRows) and the land-use plan's infill signs (appended after res.signs) get
     // cells of their own, so the city's sign cells stay as they were
-    const own = res.ownRows;
+    // I-018: compound roof billboards (res.compRows) get cells of their own too; dead slots' rows keep their place
+    // in the cells (so every other row stays where it was) and are zeroed in size below
+    const own = res.ownRows, comp = res.compRows;
     this.cells = new Cells(res.signs.concat(inf.signs), 160, 0, 2, 12, (r) => r[6] * r[7] * (r[3] === 3 || r[3] === 4 ? 10 : 1), 6,
-      (i) => (i >= own[0] && i < own[1] ? 1 : i >= res.signs.length ? 2 : 0));
+      (i) => (i >= own[0] && i < own[1] ? 1 : i >= comp[0] && i < comp[1] ? 3 : i >= res.signs.length ? 2 : 0));
+    for (const i of res.deadRows) { res.signs[i][6] = 0; res.signs[i][7] = 0; }
+    this.devDeadRows = res.deadRows.length;
     const arr = new Float32Array(Math.max(1, this.cells.rows.length) * SIGN_FLOATS);
     this.cells.rows.forEach((r, i) => arr.set(r, i * SIGN_FLOATS));
     this.buf = d.createBuffer({ label: 'signs', size: arr.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -434,11 +438,19 @@ export default {
     this.parkLanGroup = d.createBindGroup({ layout: this.lanLayout, entries: [{ binding: 0, resource: { buffer: this.parkLanBuf } }] });
     const budget = Math.min(SIGN_LIGHT_BUDGET, 8192 - ctx.lights.count - 64);
     // the complex's sign lights (tagged c[9]) are chosen separately, so the city's selection is unchanged
-    const lights = selectLights(res.lightC.filter((c) => !c[9]), budget).concat(selectLights(res.lightC.filter((c) => c[9]), OWN_SIGN_LIGHTS));
+    // dead slots' lights (I-018) take part in the selection as before and are dropped afterwards, so no other light
+    // is re-picked; the compound billboards' lights are chosen from their own pool, up to the number dropped
+    const city = selectLights(res.lightC.filter((c) => !c[9]), budget);
+    const lights = city.filter((c) => !c[10]).concat(selectLights(res.lightC.filter((c) => c[9] === 1), OWN_SIGN_LIGHTS));
+    const deadDropped = city.length - city.filter((c) => !c[10]).length;
     for (const L of lights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
     // infill sign lights: own pool, selected after the existing selection
     const infLights = selectLights(inf.lightC, INFILL_SIGN_LIGHTS);
     for (const L of infLights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
+    const compLights = selectLights(res.lightC.filter((c) => c[9] === 2), deadDropped);
+    for (const L of compLights) ctx.lights.add(L[0], L[1], L[2], L[3], L[4], L[5], L[6], L[7]);
+    const cs = ctx.world.shared.compoundStats;
+    if (cs) cs.signs = { deadRows: res.deadRows.length, deadLightsDropped: deadDropped, compoundRows: comp[1] - comp[0], compoundLights: compLights.length };
     this.stats = { signs: res.signs.length, lanterns: res.lanterns.length, lights: lights.length, infillSigns: inf.signs.length, infillLights: infLights.length };
     ctx.world.shared.signStats = this.stats;
     this.maxDist = [900, 1300, 1700][q];

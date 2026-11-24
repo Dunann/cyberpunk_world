@@ -58,8 +58,8 @@ export const PHRASES = {
 // Warm white, gold, red, cyan.
 export const PALETTE = [[1.0, 0.86, 0.68], [1.0, 0.66, 0.22], [1.0, 0.2, 0.14], [0.25, 0.88, 1.0]];
 
-const SHAFT_MATS = new Set([MAT.RES, MAT.OFFICE, MAT.GLASS, MAT.TRUSS, MAT.CRYSTAL]);
-const TEXT_DISTRICTS = new Set([DT.HILLSIDE, DT.URBAN, DT.BUND, DT.CBD]);
+export const SHAFT_MATS = new Set([MAT.RES, MAT.OFFICE, MAT.GLASS, MAT.TRUSS, MAT.CRYSTAL]);
+export const TEXT_DISTRICTS = new Set([DT.HILLSIDE, DT.URBAN, DT.BUND, DT.CBD]);
 
 // Small deterministic hash -> [0, 1).
 export function hash01(...v) {

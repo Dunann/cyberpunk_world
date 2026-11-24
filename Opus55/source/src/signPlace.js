@@ -37,20 +37,26 @@ export function placeSigns(world, atlas, quality, opts = {}) {
   const pick = (arr) => arr[(R() * arr.length) | 0];
   const color = (name) => NEON[name];
 
+  // dead = 1 while placing a dead slot (I-018: its roof billboard was replaced by a compound): every draw happens as
+  // before, and its rows and light candidates are tagged so they can be dropped afterwards without re-picking others
+  let dead = 0;
+  const deadRows = [];
   // Generic sign emitter. kind, center (x,y,z), face normal (zx,zz), w, h, entry, c1, c2, seed, anim, geometry (depth, zoff, gap, margin)
   const emit = (kind, x, y, z, zx, zz, w, h, entry, c1, c2, seed, mode, depth, zoff, gap, margin) => {
+    if (dead) deadRows.push(signs.length);
     const uv = entry ? entry.uv : [0, 0, 0, 0];
     const n = entry ? Math.min(entry.n, 15) : 0;
     const anim = mode + 16 * n + (entry && entry.vertical ? 256 : 0);
     signs.push([x, y, z, kind, zx, zz, w, h, uv[0], uv[1], uv[2], uv[3], c1[0], c1[1], c1[2], seed, c2[0], c2[1], c2[2], anim, depth, zoff, gap, margin]);
   };
   // own = 1 while placing slots tagged `own` (the Hongyadong complex's, appended after every other slot): their
-  // signs and light candidates are kept apart (signs.js), so the city's signs and lights stay as they were
+  // signs and light candidates are kept apart (signs.js), so the city's signs and lights stay as they were.
+  // own = 2 for slots tagged `comp` (I-018 compound roof billboards, appended after those), kept apart the same way.
   let own = 0;
   const addLight = (x, y, z, c, area, seed, prio) => {
     const r = Math.min(9 + Math.sqrt(area) * 3.2, 22);
     const k = Math.min(10 + area * 2.6, 46);
-    lightC.push([x, y, z, r, c[0] * k, c[1] * k, c[2] * k, seed, prio, own]);
+    lightC.push([x, y, z, r, c[0] * k, c[1] * k, c[2] * k, seed, prio, own, dead]);
   };
   const flickSeed = () => (R() < 0.38 ? 0.1 + R() * 9.8 : 0);
   const animMode = () => { const r = R(); return r < 0.62 ? 0 : r < 0.74 ? 1 : r < 0.84 ? 2 : r < 0.9 ? 3 : r < 0.95 ? 4 : 5; };
@@ -261,10 +267,12 @@ export function placeSigns(world, atlas, quality, opts = {}) {
   };
 
   // slots from the buildings module
-  const ownRows = [0, 0];
+  const ownRows = [0, 0], compRows = [0, 0];
   if (useSlots) {
     for (const sl of world.signSlots) {
-      if (sl.own && !own) { own = 1; ownRows[0] = signs.length; }
+      if (sl.comp && own !== 2) { if (own === 1) ownRows[1] = signs.length; own = 2; compRows[0] = signs.length; }
+      else if (sl.own && !own) { own = 1; ownRows[0] = signs.length; }
+      dead = sl.dead ? 1 : 0;
       const g = sl.y;
       const nx = sl.nx, nz = sl.nz;
       const style = typeof sl.style === 'string' ? sl.style : '';
@@ -290,8 +298,9 @@ export function placeSigns(world, atlas, quality, opts = {}) {
         fascia(sl.x, sl.z, sl.y - 0, nx, nz, steppe ? pick(MONGOL_BI) : pick(kind === KIND.BILLBOARD ? BIG_WORDS : SHOP_WORDS), steppe ? KIND.FASCIA : kind, steppe ? PALETTE_STEPPE : PALETTE_STREET, Math.min(sl.h, 0.8), sl.h, 0, sl.w);
       }
     }
-    if (own) ownRows[1] = signs.length;
-    own = 0;
+    if (own === 1) ownRows[1] = signs.length;
+    if (own === 2) compRows[1] = signs.length;
+    own = 0; dead = 0;
   }
 
   // requested signage (station names etc.)
@@ -314,7 +323,7 @@ export function placeSigns(world, atlas, quality, opts = {}) {
     if (w * h > 3) addLight(x + nx * 2, q.y - h, z + nz * 2, c, w * h, 0, 1e5);
   }
 
-  return { signs, lightC, lanterns, ownRows };
+  return { signs, lightC, lanterns, ownRows, compRows, deadRows };
 }
 
 // Choose lights: highest priority first, at most `perCell` per 20 m cell, up to `budget`.
