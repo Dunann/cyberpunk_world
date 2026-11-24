@@ -41,3 +41,4 @@
 - 2026-11-24: I-009 code review round 2: PASS. Evaluation captures started.
 - 2026-11-24: I-016 code review round 1: FAIL. Streams identical (verified with ?noplan). Moderate: approach avenue with traffic runs through infill lots (G2 edge); spec checks for fixes 1, 5 and 12 not run. Art: Lantern Park is a black field with a rigid gold grid (G2 win estimated 35-40%). Fix round 1 started.
 - 2026-11-24: I-009 evaluated (gates pass, functional 18/18). Judge A targets 2/6, judge B 0/6 -> NOT adopted. Close airships win (u62 4/4 with judge A); the trail reads as a sourceless smear, airship beams add clutter, distant or end-on hulls are unreadable. Fix round started (judge-findings.md).
+- 2026-11-24: PROCESS CHANGE (coordinator): the GPU was pinned at 100% by parallel implementer benches, so clean numbers were rare. All agents now run bench, capture and functional jobs through a shared mkdir lock (scratchpad gpu-run.sh), one job at a time. Weekly usage 14%.
