@@ -1,7 +1,8 @@
 ---
 id: I-032
 title: Placeholder sweep - find what each unexplained shape is in the code and fix it at the source (bridge cables, near-camera fade, laser pontoons, street embankments, the Jade east-bank strip)
-status: in-review
+status: rejected
+score: 4.33 (review-1 4.33, review-2 4.33; mean; below 7; split revision requested as I-040)
 direction: Attack the weakness (critics' unexplained placeholders and voids; critic 1 change 5, critic 2 change 8)
 family: defect repair at the source: coverage-correct thin members, camera-proximity fade, missing emitters, retaining structures, unclaimed land
 parent: none

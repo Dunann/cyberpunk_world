@@ -1,0 +1,48 @@
+## Reviewer 2 (2026-11-24)
+
+| | Score (1–10) | Reason |
+|---|---|---|
+| Creativity | 4 | Five standard repairs (stochastic transparency, near-camera fade, a moored barge, retaining walls, extending the I-016 plan). Tracing each critic shape back to the code is good practice, but the fixes themselves are not new. |
+| Feasibility and credibility | 4 | Cheap, and the B2 car and G3 land diagnoses hold. But C1 is built on a misread of the ribbon code and a false claim that brightness is preserved. C2 cannot remove the B1 head it targets. C4 places its wall inside the band where pedestrians walk, and its lamps can reshuffle the city's lights. Details below. |
+| Expected impact | 5 | Removing the B2 critical defect and building the G3/G2 bank are real wins. C1 is at best neutral at A6, G3 and G4, and it adds poses that will end in ties or losses under the 1% target rule. Realistic critic gain is about +0.1 to +0.2 per zone, against a gap of 3.3 to 4.1. |
+| **Overall (average)** | 4.33 | |
+
+### Strongest reason it will fail
+C1, the bridge-cable fix that is supposed to win A6, G1 and G3 without hurting G4, rests on two wrong premises.
+
+First, the ribbons are 3 px wide, not 1.5 px. In `bridges.js:172-174`, `w = max(r, pix * 1.5)` is a half-width (`o.wp = pe + side * w * sg`), and `pix` is one pixel's world size.
+
+Second, "the average emission stays exactly as now" holds only for a single ribbon on its own. Today the ribbons are opaque, so where they overlap the nearest one hides the rest. With stochastic coverage, overlapping ribbons add.
+- At G1 the 56 cables of a pylon land on the deck about 2.5 px apart (projected with the 1241 px focal length; the apex projects to (88, 721), which matches the left pyramid). So the fan base becomes a haze of roughly 8-16% coverage, but the apex, where 20 or more ribbons stack, becomes up to about 10x brighter than today.
+- At G4, seen from the side, the two cable planes overlap, so the pink fans, a strength of that frame, get up to about 1.9x brighter and noisy.
+- At A6 the "floating neon bars" are LED emission. I measured them at 4-11 px thick, which means several merged 3 px ribbons near a pylon that is out of frame. C1 keeps their average emission by design, so after TAA they look nearly the same: the critic's complaint, unsupported glowing bars, stays. The G3 sails are emission too.
+
+On top of this, the TAA (`renderer.js:276-316`) clips history to a 3x3 variance box (gamma 1.25) in tonemapped YCoCg. With 5-30% coverage, about half the frames have no cable sample in the 3x3 neighbourhood, so the history is pulled back toward the background. The resolved cables come out dimmer than the mean and they flicker, so the result cannot be predicted from the "exact average" argument.
+
+Net effect: C1 changes 1% or more of the pixels at G4, G3, G2 (the fan at 0-260 x 530-650), B3 (the hangers of the suspension bridge, kind 2) and A6. Under the declared rule all of these become targets, where C1 gives ties or losses. Its only clear gain, the see-through G1 pyramid, is about 13k px (0.35% of the frame), too small to make G1 a target by itself. That dilutes the two-thirds requirement that the real wins (B2, G3) have to carry.
+
+### Other concerns
+- **C2 cannot fix the B1 "small grey head".** The current rule scales people by `smoothstep(2.0, 4.5, dist)` (`crowd.js:98`), so a shrunken person who is still visible is, by definition, 2-4.5 m away. Under C2 that person grows to full size and stays visible, because the new fade only acts at 0.8-2.0 m. The same applies to every person at 2-4.5 m in every pose. The B1 foreground spectators (critic 2's critical "mannequins") are at about 4-4.5 m by shoulder width and screen position, so they would grow slightly, not improve. The spec never measured the head's distance.
+- **C2 extends far beyond the camera fade.** Moving the `pf.w` scaling to dither also changes the steep-slope fade (`trafficCars.js:49`: "shrink it away instead of clipping"). Cars on kerbs and stair streets (A4, A5) would then show at full size, clipping into the slope while they dissolve. It also changes the run-end fades on every street in every pose. Neither change is needed for B2.
+- **The 2-4 m car fade band is wide.** It removes the B2 car cleanly, and I accept it as a real fix for free flight, not gaming: it uses only the camera position, and cars passing through the viewer are a genuine defect. But any camera in a traffic lane will see ghost-dithered cars at 2-4 m. A 1.2 m to 2.5 m band would still remove the B2 car (1.1 m) and halve the band where cars look half-transparent. Removing the car also removes its SSR reflection and lamps, which is fine, but the wet-road reflection streak (`trafficCars.js:139-152`) must take the fade factor too, or a reflection is left with no car.
+- **C4 collides with existing systems.**
+  - Sidewalk walkers are placed at `D.road/2 + 0.7 .. 2.3 m` (`crowd.js:471`), with 7 per 100 m per side on hillside streets, the densest in the city. A wall "0.5 m behind the kerb" puts every one of them behind or inside it, walking on the sloped terrain below the wall top (`agentState` uses `terrainHeight`). Their heads would poke over the wall where the step is small, or they would pop out where the wall ends.
+  - The hillside shopfront code already places stepped pavement blocks 1.45 m from the shop face and a kerb handrail at 2.95 m (`buildings_gen.js:400-416`). These overlap the wall wherever a lot edge is about 3 m from the kerb, the usual setback (`streetFacesBox`: road/2 + 3 m).
+  - Between the wall top and the lot, the bare sloped trough stays. A "railing and lamps on top" over a dirt trough is a floating detail from any raised view, so a cap slab is needed.
+  - The spec does not say whether the "lamps" and "lit shop bays" are point lights or sign slots. If they go into `B.lights`, the Fisher-Yates pass with `rng(4242)` over the longer `lo` list re-selects city shop lights everywhere. If they go into `B.slots`, sign placement shifts. Both would break the "no stream changes" claim.
+  - The walls are built with `B.prop`, whose budget (130,000 at high quality) is shared and may already be close to full. C4 should use `B.part`, or the spec should report the remaining budget.
+- **C5's isolation is aspirational.** `buildInfillRuns` (`trafficCars.js:395-417`) rebuilds runs by scanning grid lines over all of `plan.cells`. If the second pass's cells are added there, the new cells next to existing ones lengthen or merge existing runs, and every infill car from `rng(31338)` re-rolls. This is the same failure the I-015 result review noted. C5 needs its own cell list and its own run builder.
+  - The lamp capacity `min(count*3, 36000)` also grows with the car count, and lamps are appended with atomics, so at high car counts which lamps get dropped is not deterministic.
+  - The spec's target prediction omits G2: the strip (650-950, -160..90) projects to x 1470-2150, y 680-760 in G2, the dark wooded bank right of the river. That is likely a gain, but G2 is an I-016 win pose that the spec did not trace.
+- **C3 is plausible but small and unchecked.** At 470 m the 24 m pontoon is about 63 px wide; that holds up. But the emitter today stands on land 4 m inland (`lightshow.js:316-318`), so the "gangway to the promenade" has to drop the embankment height over 6 m. That reads as a ladder or a ramp floating in mid-air unless it becomes a stair. The spec should also check that the Bund boat loops (`boats.js:429-437`) keep clear of the bank by more than 15 m.
+- **The A6 identification holds.** Rays from the bars at (5-240, 1300-1420) cross y = 30-100 within about 70 m of the Peninsula South Bridge axis, 450-550 m away. So quick test 0 is cheap confirmation, not a risk. The G1 identification also holds. B2 (the car whose flank is 1.1 m from the lens) is confirmed by the I-025 reviewers.
+- **GPU is fine.** Using discard in the car, crowd and ribbon pipelines disables early-Z for those draws; that is small, not "about 0". C5 adds about 600 parts and 20 lights. The total stays well under the 11 ms gate.
+
+### What would make it stronger
+- **Split the bundle.**
+  - Idea A, C2 for cars only (camera term only, band 1.2 to 2.5 m, run-end and steep fades left as scaling) plus C5 with a separate cell list and run builder. Targets B2, G3, G2. This is cheap and likely to win.
+  - Ideas B and C: C1, C3 and C4 evaluated separately.
+- **Replace C1 with a deterministic fix.** Lower the ribbon half-width floor from 1.5 px to about 0.5 px (1 px wide, emission still scaled by `cover`). That cuts the tiled area at G1 by about 3x with no noise and no TAA interaction. Alternatively, draw the ribbons in the forward pass with alpha = coverage. Before any judging, measure the mean luminance of the fan region at G4, A6, G1 and G3 against main (within ±15%), with overlaps counted.
+- **For people,** do not remove the 2-4.5 m shrink without a blind check at B1. Address the cut-off head with a rule based on screen position (extend the existing bottom-fifth rule to "head top in the bottom 8% and feet off screen"). Print the agent's distance in quick test 0.
+- **For C4,** first decide where pedestrians walk. Either carve the terrain into a real step, so walkers and lamps follow it, or put the wall at kerb + 2.6 m, outside the walker band, and give walkers a height override. Add a cap slab. Use parts only: no `B.light` or `B.slot` (or give C4 its own pools like the infill). Skip faces that already have the stepped pavement and kerb rail.
+- **List every pose that C1 and C5 reach** by projection before declaring targets (C1 alone touches G2, G3, G4, B3, A3, A6, G1), so the prediction matches what the 1% rule will produce.
