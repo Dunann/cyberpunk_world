@@ -1,0 +1,14 @@
+DY=21.6 DW=26: face cells 10624 (95616 m2), highest lane index 7.5
+lane length per level (m): 1191 730 435 404 137 21 7  total 2925 m; of which contour lanes (height term rules): 1044 m
+face area where the height term rules: 2.47 ha; where the distance term rules: 7.09 ha
+units at one per 20 m of lane: 234 (including the row on the promenade, 1756 m)
+per 200 m of x: highest ground (m), lanes, area (ha)
+  x -1400..-1200: 126 m, 5 lanes, 1.16 ha
+  x -1200..-1000: 106 m, 7 lanes, 2.60 ha
+  x -1000..-800: 45 m, 4 lanes, 2.19 ha
+  x -800..-600: 33 m, 2 lanes, 0.85 ha
+  x -600..-400: 39 m, 1 lanes, 0.64 ha
+  x -400..-200: 47 m, 2 lanes, 0.55 ha
+  x -200..0: 59 m, 2 lanes, 0.46 ha
+  x 0..200: 75 m, 3 lanes, 0.57 ha
+  x 200..400: 65 m, 2 lanes, 0.55 ha

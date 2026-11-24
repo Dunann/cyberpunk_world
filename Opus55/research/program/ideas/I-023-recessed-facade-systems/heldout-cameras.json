@@ -1,0 +1,110 @@
+[
+ {
+  "id": "H1",
+  "name": "nanan-balcony-tower",
+  "pos": [
+   1357.57,
+   53.03,
+   1271.66
+  ],
+  "rel": false,
+  "target": [
+   1385.61,
+   68.53,
+   1236.46
+  ],
+  "t": 100,
+  "part": 113080,
+  "h": 90,
+  "candidates": 20
+ },
+ {
+  "id": "H2",
+  "name": "westhills-office-tower",
+  "pos": [
+   -2579.33,
+   112.75,
+   -4.68
+  ],
+  "rel": false,
+  "target": [
+   -2535.21,
+   120.24,
+   -13.54
+  ],
+  "t": 100,
+  "part": 130166,
+  "h": 72.2,
+  "candidates": 11
+ },
+ {
+  "id": "H3",
+  "name": "yuzhong-street",
+  "pos": [
+   -1341.19,
+   94.41,
+   -661.13
+  ],
+  "rel": false,
+  "target": [
+   -1366.73,
+   127.71,
+   -645.38
+  ],
+  "t": 100,
+  "part": 14541,
+  "h": 100.4,
+  "candidates": 471
+ },
+ {
+  "id": "H4",
+  "name": "westhills-aerial",
+  "pos": [
+   -2900,
+   374.03,
+   250
+  ],
+  "rel": false,
+  "target": [
+   -2900,
+   29.88,
+   -241.49
+  ],
+  "t": 100
+ },
+ {
+  "id": "H5",
+  "name": "nanan-aerial",
+  "pos": [
+   1200,
+   278.51,
+   1350
+  ],
+  "rel": false,
+  "target": [
+   680.38,
+   -21.49,
+   1350
+  ],
+  "t": 100
+ },
+ {
+  "id": "H6",
+  "name": "cbd-office-midair",
+  "pos": [
+   3206.68,
+   105.42,
+   -989.79
+  ],
+  "rel": false,
+  "target": [
+   3263.25,
+   105.42,
+   -1046.36
+  ],
+  "t": 100,
+  "part": 4410,
+  "h": 164.4,
+  "candidates": 30
+ }
+]

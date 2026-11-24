@@ -1,0 +1,73 @@
+stations 439 length 1756 from 322 103 to -1317 511
+lengths by class (m): { stack: 1032, street: 476, thin: 248 } footprint area (m2): 101816
+322,103 D=23 crest=58 depth=23 top=14 slope=0.49 stack
+334,133 D=99 crest=355 depth=99 top=12 slope=0.07 street
+328,153 D=61 crest=355 depth=61 top=9 slope=0.05 street
+297,161 D=54 crest=55 depth=54 top=46 slope=0.87 stack
+266,169 D=54 crest=76 depth=54 top=59 slope=1.12 stack
+235,177 D=14 crest=67 depth=14 top=9 slope=0.42 thin
+204,186 D=72 crest=57 depth=65 top=73 slope=1.16 stack
+173,195 D=92 crest=48 depth=56 top=69 slope=1.28 stack
+143,204 D=54 crest=42 depth=50 top=67 slope=1.43 stack
+112,214 D=16 crest=38 depth=16 top=21 slope=1.72 thin
+82,224 D=16 crest=34 depth=16 top=24 slope=2.04 thin
+51,233 D=10 crest=36 depth=10 top=11 slope=1.81 thin
+21,243 D=8 crest=35 depth=8 top=8 slope=2.40 thin
+-10,253 D=21 crest=33 depth=21 top=37 slope=2.24 stack
+-40,263 D=44 crest=37 depth=44 top=59 slope=1.43 stack
+-71,273 D=41 crest=36 depth=41 top=56 slope=1.48 stack
+-101,283 D=8 crest=83 depth=8 top=7 slope=1.25 thin
+-131,293 D=26 crest=88 depth=26 top=42 slope=1.93 stack
+-162,302 D=32 crest=35 depth=32 top=47 slope=1.65 stack
+-192,312 D=20 crest=32 depth=20 top=28 slope=1.69 stack
+-223,321 D=16 crest=35 depth=16 top=19 slope=1.44 thin
+-254,331 D=28 crest=33 depth=28 top=41 slope=1.68 stack
+-284,340 D=51 crest=36 depth=44 top=45 slope=1.07 stack
+-315,348 D=56 crest=47 depth=55 top=45 slope=0.83 stack
+-346,357 D=8 crest=34 depth=8 top=7 slope=1.16 thin
+-377,364 D=26 crest=35 depth=26 top=34 slope=1.49 stack
+-408,372 D=46 crest=32 depth=40 top=38 slope=0.98 stack
+-439,379 D=72 crest=33 depth=41 top=38 slope=0.96 stack
+-471,386 D=19 crest=33 depth=19 top=19 slope=1.10 stack
+-502,392 D=19 crest=34 depth=19 top=17 slope=0.95 stack
+-533,398 D=37 crest=39 depth=37 top=36 slope=1.02 stack
+-565,404 D=54 crest=40 depth=48 top=36 slope=0.73 stack
+-596,410 D=153 crest=45 depth=53 top=33 slope=0.59 stack
+-628,415 D=183 crest=48 depth=56 top=31 slope=0.51 stack
+-660,420 D=31 crest=49 depth=31 top=16 slope=0.43 street
+-691,425 D=40 crest=55 depth=40 top=20 slope=0.42 street
+-723,430 D=56 crest=73 depth=56 top=23 slope=0.35 street
+-754,435 D=72 crest=80 depth=72 top=24 slope=0.28 street
+-786,439 D=88 crest=73 depth=81 top=26 slope=0.27 street
+-818,444 D=104 crest=72 depth=80 top=26 slope=0.28 street
+-849,448 D=119 crest=121 depth=119 top=35 slope=0.26 street
+-881,453 D=135 crest=104 depth=112 top=35 slope=0.28 street
+-913,457 D=150 crest=117 depth=125 top=39 slope=0.28 street
+-945,461 D=166 crest=125 depth=133 top=43 slope=0.30 street
+-976,465 D=181 crest=106 depth=114 top=44 slope=0.36 street
+-1008,469 D=196 crest=107 depth=115 top=49 slope=0.40 street
+-1040,473 D=211 crest=112 depth=120 top=52 slope=0.41 street
+-1072,477 D=227 crest=116 depth=124 top=58 slope=0.44 street
+-1103,481 D=242 crest=116 depth=124 top=65 slope=0.51 stack
+-1135,485 D=258 crest=127 depth=135 top=74 slope=0.53 stack
+-1167,490 D=274 crest=166 depth=174 top=105 slope=0.59 stack
+-1198,494 D=290 crest=132 depth=140 top=109 slope=0.77 stack
+-1230,498 D=306 crest=123 depth=131 top=111 slope=0.85 stack
+-1262,503 D=322 crest=130 depth=138 top=116 slope=0.84 stack
+-1294,507 D=338 crest=119 depth=127 top=119 slope=0.95 stack
+| Pose | share of the frame covered by the face envelope (22 m above ground) % | nearest m | screen box |
+|---|---|---|---|
+| A1 | 1.09 | 359 | x 5-345, y 575-875 |
+| A2 | 0.00 | - | - |
+| A3 | 2.78 | 306 | x 265-885, y 825-1145 |
+| A4 | 0.00 | - | - |
+| A5 | 0.00 | - | - |
+| A6 | 1.35 | 356 | x 5-1225, y 1285-1435 |
+| B1 | 0.00 | - | - |
+| B2 | 0.00 | - | - |
+| B3 | 0.00 | - | - |
+| B4 | 0.00 | - | - |
+| G1 | 0.85 | 2136 | x 5-875, y 715-835 |
+| G2 | 2.21 | 860 | x 5-1065, y 525-695 |
+| G3 | 2.17 | 1323 | x 5-1285, y 805-1145 |
+| G4 | 9.54 | 392 | x 5-2015, y 485-995 |
