@@ -6,6 +6,7 @@
 //     [--w 2560 --h 1440] [--t 113]
 // Phrase views, all relative to a phrase's centre C (mean face centre at the band height) and its mean normal D:
 //   water:  C + D x (nearest water distance + 250 m), 15 m above the water, looking at C
+//   near:   C + D x 200 m, at the band height (checks stroke quality up close)
 //   aerial: C + D x 600 m, 250 m up, looking at C
 //   obl+/obl-: the aerial position turned 40 degrees about C (50 degrees from the face plane)
 //   graze: the aerial position turned 72 degrees about C (about 18 degrees from the face plane)
@@ -49,6 +50,7 @@ if (args.includes('--phrases') || opt('cams', '')) {
     (tt.phrases || []).forEach((p, k) => {
       const tag = `p${k}`;
       views.push({ name: `${tag}-water`, cam: turn(p, p.D, p.wdist + 250, 0, 15) });
+      views.push({ name: `${tag}-near`, cam: turn(p, p.D, 200, 0, p.y) });
       views.push({ name: `${tag}-aerial`, cam: turn(p, p.D, 600, 0, 250) });
       views.push({ name: `${tag}-oblR`, cam: turn(p, p.D, 600, 40, 250) });
       views.push({ name: `${tag}-oblL`, cam: turn(p, p.D, 600, -40, 250) });

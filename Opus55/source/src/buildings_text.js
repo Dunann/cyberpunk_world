@@ -3,13 +3,14 @@
 // Each phrase (2-4 characters) is one composed sign spread over neighbouring front-row towers, one character per
 // tower. Participants are chosen by a fixed rule (no camera positions):
 //   - a tower (stack of shaft parts) at least 100 m tall, in a hillside, urban, Bund or CBD district;
-//   - front row: one of its flat faces has water in front of it within 700 m, and no ground-standing building at
-//     least 40 m tall stands between that face and the water;
-//   - a phrase uses neighbouring front-row towers of one bank (consecutive along the bank), with face normals
-//     within 25 degrees of each other, evenly spaced along the bank tangent and nearly in one plane;
+//   - front row: one of its flat faces has water in front of it within 700 m, and no tower (on the ground or on a
+//     podium, reaching 40 m above the ground) stands between that face and the water;
+//   - a phrase uses neighbouring front-row towers of one bank (no other front-row tower between them in the row),
+//     with face normals within 25 degrees of each other, evenly spaced along the tangent and nearly in one plane;
 //   - every character of a phrase has the same size and the same height (one band), sized to fit the smallest
 //     face with a clear margin on both sides;
-//   - the largest phrases are kept first; at most 2 phrases per district, no character repeated in a district.
+//   - the largest phrases are kept first; at most 2 phrases per district, 500 m apart along a bank, and no
+//     character repeated in a district.
 // Characters are ordered left to right for a viewer on the water facing the phrase.
 //
 // The characters are drawn by a separate overlay pass over the chosen tower parts (see TEXT_WGSL): it writes only
@@ -32,7 +33,7 @@ export const RULE = {
   maxGlyph: 60,       // largest character slot (m)
   sideMargin: 0.1,    // clear face width beside the slot on each side, as a fraction of the slot (ink is ~0.87)
   vMargin: 0.1,       // clear part height above and below the slot, as a fraction of the slot
-  minBase: 55,        // keep the slot this far above the ground (clear of trees and low buildings, m)
+  minBase: 40,        // keep the slot this far above the ground (clear of trees and low buildings, m)
   maxAngle: 25,       // largest angle between the face normals of one phrase (degrees)
   stepMin: 1.3,       // spacing of neighbouring characters along the tangent, in slot sizes: at least ...
   stepMax: 6.0,       // ... and at most
@@ -160,14 +161,16 @@ export function faceCentre(p, f, y) {
   return [p.x + p.lx * hf + f.m[0] * s, p.z + p.lz * hf + f.m[1] * s];
 }
 
+// Counts of rejected candidate phrases by reason (reported in the stats).
+export const REJECT = {};
+const rj = (k) => { REJECT[k] = (REJECT[k] || 0) + 1; return null; };
+
 // Checks one candidate phrase (options of neighbouring towers) against the composition rules. Returns
 // { list (in reading order), g, yC, Dm } or null.
 //  - face normals within RULE.maxAngle of each other;
 //  - one band (same size and height) that fits every face with margins;
-//  - ordered along the tangent of the mean normal, spaced 1.3-4 slot sizes apart, evenly, nearly in one plane.
-// Counts of rejected candidate phrases by reason (reported in the stats).
-export const REJECT = {};
-const rj = (k) => { REJECT[k] = (REJECT[k] || 0) + 1; return null; };
+//  - ordered along the tangent of the mean normal, spaced 1.3-6 slot sizes apart, evenly, nearly in one plane;
+//  - no hole: `others` (the bank's other front-row towers) may not stand between two characters in the row.
 export function fitPhrase(opts, others = []) {
   for (let a = 0; a < opts.length; a++) {
     for (let b = a + 1; b < opts.length; b++) {
