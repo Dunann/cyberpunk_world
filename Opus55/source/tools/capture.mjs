@@ -92,8 +92,9 @@ if (args.includes('--burst')) {
     for (let k = 0; k < 4; k++) {
       await page.evaluate((v) => window.__flyTo(v), u + k * 0.0004);
       await page.evaluate((n) => window.__frames(n), k === 0 ? 30 : 1);
-      const b64 = await page.evaluate(() => window.__capture('image/jpeg'));
-      const file = path.join(out, `burst-u${Math.round(u * 100)}-${k}.jpg`);
+      // bursts follow --jpg like the poses (PNG by default, so they can be diffed with pixdiff.mjs)
+      const b64 = await page.evaluate((ty) => window.__capture(ty), type);
+      const file = path.join(out, `burst-u${Math.round(u * 100)}-${k}.${ext}`);
       fs.writeFileSync(file, Buffer.from(b64, 'base64'));
     }
   }
