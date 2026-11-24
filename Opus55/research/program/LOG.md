@@ -22,3 +22,4 @@
 - 2026-11-24: I-009 to prototype track after one review (5.67, at least 5.5, user priority 5). Scope reduced by review-1 fixes: airships and launch only.
 - 2026-11-24: I-017 rejected (5.0). Crown-variety family dropped for now: three attempts with small expected impact.
 - 2026-11-24: I-016 confluence plan proposed (combined I-001 + I-003; build first, then paint; targets G2, G3, B3; G1 and G4 forecast as watched).
+- 2026-11-24: I-012 rejected (5.0): with occlusion, only about 5% of A4 can change. I-003 marked superseded by I-016.

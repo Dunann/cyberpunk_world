@@ -1,7 +1,8 @@
 ---
 id: I-012
 title: Facade relief for street views: real balconies, bay windows, piers and glass fins that sink into the wall with distance
-status: proposed
+status: rejected
+score: 5.0 (review-1 only; below 5.5)
 direction: from review of I-005 (Attack the weakness, user priority 1)
 family: geometry representation: instanced facade-element arrays with a cull-tied sink LOD
 parent: I-005

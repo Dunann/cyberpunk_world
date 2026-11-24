@@ -1,7 +1,8 @@
 ---
 id: I-003
 title: Light parks: three riverside gaps become designed, lit parks with distinct cultural characters
-status: proposed
+status: rejected
+score: superseded by I-016 (merged)
 direction: Break an assumption (what "green" means inside the city; user priority 3)
 family: designed open space: analytic park layout fields, lit planting, park structures
 parent: none
