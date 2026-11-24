@@ -9,3 +9,4 @@
 - 2026-11-24: Loop started. Generators: I-001..003 (Fable xhigh, break an assumption: city continuity/waterfront), I-004..006 (Opus, attack the weakness: buildings/Hongyadong), I-007..009 (Opus, wild card: signage/technology).
 - 2026-11-24: I-007, I-008, I-009 proposed (signage/technology generator). Reviews starting.
 - 2026-11-24: I-007 rejected (5.5): cross-tower text would fragment; most target poses outside show window. Revision requested as I-010.
+- 2026-11-24: I-004 rejected (5.83): terrace plan doesn't fit the 86 m, 66 deg cliff; solver ignores clearance above; plaza vs Raffles radius. Revision requested as I-011.

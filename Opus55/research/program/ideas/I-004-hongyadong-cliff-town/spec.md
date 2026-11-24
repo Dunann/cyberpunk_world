@@ -1,7 +1,8 @@
 ---
 id: I-004
 title: Hongyadong as a grounded cliff town (terraces built from cross-sections, with a support solver)
-status: proposed
+status: rejected
+score: 5.83 (review-1 5.33, review-2 6.33)
 direction: Attack the weakness (user priorities 1 and 2)
 family: procedural landmark rebuild: section-first terraced grammar with structural support rules
 parent: none
