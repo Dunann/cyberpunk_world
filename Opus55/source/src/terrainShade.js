@@ -115,7 +115,20 @@ const LAMP_I = 95.0;
 const LAMP_R = 24.0;
 `;
 
-export function terrainDrawWGSL({ N, K, LEAF, MORPH0, simple }) {
+// Street lamps on the plan's infill streets (needs STREET_WGSL): a lamp slot of the owner's grid is valid where the
+// plan's built coverage is full and owned by that district, away from the water, and only where the existing rule
+// (lampValid, unchanged) does not already place a lamp. Shared by the ground's analytic pools and the infill lamp
+// validation pass (terrainLamps.js), so the two always agree.
+export const INFILL_LAMP_WGSL = /* wgsl */ `
+fn infillLampValid(p: vec2f, di: i32) -> bool {
+  if (!inPlan(p)) { return false; }
+  let c = coverAt(p);
+  if (c.y < 0.0 || i32(c.y + 0.5) != di || c.x < 0.9) { return false; }
+  return worldInfo(p).x > 14.0 && !lampValid(p, di);
+}
+`;
+
+export function terrainDrawWGSL({ N, K, LEAF, MORPH0, simple, park }) {
   return /* wgsl */ `
 @group(1) @binding(0) var<storage, read> patches: array<vec4f>;
 @group(1) @binding(1) var farH: texture_2d<f32>;
@@ -127,10 +140,12 @@ export function terrainDrawWGSL({ N, K, LEAF, MORPH0, simple }) {
 @group(1) @binding(7) var tNoise: texture_2d<f32>;
 @group(1) @binding(8) var tCanopy: texture_2d<f32>;
 @group(1) @binding(9) var sRep: sampler;
-@group(1) @binding(10) var<uniform> TU: vec4f;   // x = real street-lamp light range (m)
+@group(1) @binding(10) var<uniform> TU: vec4f;   // x = real street-lamp light range (m), y = same for the plan's infill lamps
 ${THEIGHT_WGSL}
 ${STREET_WGSL}
+${INFILL_LAMP_WGSL}
 ${MIST_WGSL}
+${park}
 
 const GRID_N = ${N}.0;
 const LOD_K = ${K};
@@ -198,12 +213,12 @@ fn rainRipples(p: vec2f, t: f32) -> vec2f {
 
 // Analytic street-lamp light for lamps beyond the real-light range (terrain only).
 // Mirrors the deferred point-light model (falloff, GGX, wet-ground adjustments).
-fn lampFake(p: vec3f, n: vec3f, v: vec3f, albedo: vec3f, rough: f32, lp: vec3f, kind: f32) -> vec3f {
+fn lampFake(p: vec3f, n: vec3f, v: vec3f, albedo: vec3f, rough: f32, lp: vec3f, kind: f32, range: f32) -> vec3f {
   let lv = lp - p;
   let d2 = dot(lv, lv);
   if (d2 > LAMP_R * LAMP_R) { return vec3f(0.0); }
   let camD = distance(lp, F.camPos.xyz);
-  let fake = smoothstep(TU.x * 0.75, TU.x, camD);
+  let fake = smoothstep(range * 0.75, range, camD);
   if (fake <= 0.0) { return vec3f(0.0); }
   let ld = sqrt(d2);
   let l = lv / ld;
@@ -386,14 +401,35 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     mat = 3.0;
   }
 
+  // ---- land-use plan (plan.js): infill blocks take the owner's street grid (cityInfo); parks replace the ground
+  var ci = info;
+  var park = 0.0;
+  var cv = vec4f(0.0, -1.0, 0.0, 0.0);
+  if (wN > 0.0 && inPlan(p.xz)) {
+    cv = coverAt(p.xz);
+    if (0.8 * cv.x > ci.z && cv.y >= 0.0) { ci.y = cv.y; ci.z = 0.8 * cv.x; }
+    park = cv.z;
+  }
+  if (park > 0.0) {
+    let po = parkShade(p, cv.w, info.x, cv.y, px, N1, N2, slope);
+    albedo = mix(albedo, po.albedo, park);
+    rough = mix(rough, po.rough, park);
+    wet = mix(wet, po.wet, park);
+    emis += po.emis * park;
+    ao = mix(ao, 1.0, park);
+    n = normalize(mix(n, normalize(mix(nPre, vec3f(0.0, 1.0, 0.0), po.flat)), park));
+    if (park > 0.5) { mat = 3.0; }
+  }
+
   // ---- city ground: asphalt, markings, crosswalks, sidewalks with curbs, puddles, street-lamp pools
-  let di = i32(info.y + 0.5);
+  let di = i32(ci.y + 0.5);
   var urban = 0.0;
   var urbanAll = 0.0;
   if (wN > 0.0 && di >= 0 && di < i32(W.count.x)) {
-    if (W.d[di].b.y > 0.0) { urban = smoothstep(0.16, 0.42, info.z) * smoothstep(6.0, 14.0, info.x) * (1.0 - smoothstep(0.35, 0.5, slope)) * (1.0 - forest * 0.85 * (1.0 - smoothstep(0.5, 0.65, info.z))); }
+    if (W.d[di].b.y > 0.0) { urban = smoothstep(0.16, 0.42, ci.z) * smoothstep(6.0, 14.0, ci.x) * (1.0 - smoothstep(0.35, 0.5, slope)) * (1.0 - forest * 0.85 * (1.0 - smoothstep(0.5, 0.65, ci.z))); }
   }
-  urbanAll = urban;
+  urban *= 1.0 - park;
+  urbanAll = max(urban, park);
   if (urban > 0.0) {
     let rd = roadLayout(p.xz, di);
     let hw = rd.hw;
@@ -457,7 +493,8 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
     if (urban > 0.5) { mat = 3.0; }
 
     // street-lamp pools beyond the real-light range: the two nearest lamps along this road
-    if (dist > TU.x * 0.7) {
+    let planLamps = cv.x > 0.0;
+    if (dist > TU.x * 0.7 || (planLamps && dist > TU.y * 0.7)) {
       let blk = rd.blk;
       let sp = blk / lampCount(blk);
       let j0 = floor(rd.along / sp - 0.5);
@@ -471,7 +508,9 @@ fn groundShade(p: vec3f, dX: vec2f, dY: vec2f) -> GOut {
         let headOff = rot2(W.d[di].b.x) * select(vec2f(0.0, -L.z), vec2f(-L.z, 0.0), rd.axis > 0.5) * 1.6;
         let lxz = L.xy + headOff;
         if (lampValid(L.xy, di)) {
-          emis += lampFake(p, n, v, ea, er, vec3f(lxz.x, p.y + LAMP_H, lxz.y), kind) * urban;
+          emis += lampFake(p, n, v, ea, er, vec3f(lxz.x, p.y + LAMP_H, lxz.y), kind, TU.x) * urban;
+        } else if (planLamps && infillLampValid(L.xy, di)) {
+          emis += lampFake(p, n, v, ea, er, vec3f(lxz.x, p.y + LAMP_H, lxz.y), kind, TU.y) * urban;
         }
       }
     }

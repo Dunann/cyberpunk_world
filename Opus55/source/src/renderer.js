@@ -340,6 +340,7 @@ export class Renderer {
       { binding: 4, visibility: VFC, texture: { sampleType: 'float' } },
       { binding: 5, visibility: VFC, texture: { sampleType: 'float', viewDimension: '3d' } },
       { binding: 6, visibility: VFC, buffer: { type: 'uniform' } },
+      { binding: 7, visibility: VFC, texture: { sampleType: 'float' } },   // land-use plan coverage (plan.js)
     ] });
     const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
     this.forwardLayout = device.createBindGroupLayout({ label: 'forward', entries: [
@@ -360,6 +361,7 @@ export class Renderer {
       { binding: 4, resource: w.infoTex.createView() },
       { binding: 5, resource: this.fogTex.createView({ dimension: '3d' }) },
       { binding: 6, resource: { buffer: this.worldBuf } },
+      { binding: 7, resource: w.coverTex.createView() },
     ] });
 
     // lighting pipeline

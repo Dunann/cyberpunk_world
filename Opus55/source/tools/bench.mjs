@@ -1,5 +1,5 @@
 // Runs the scripted fly-through at 2560x1440 (High) and writes a performance report.
-//   node tools/bench.mjs [--seconds 60] [--out out]
+//   node tools/bench.mjs [--seconds 60] [--out out] [--file out/dev.html] [--profile name]
 import fs from 'node:fs';
 import path from 'node:path';
 import { launch, root } from './launch.mjs';
@@ -10,7 +10,10 @@ const seconds = +opt('seconds', 60);
 const out = path.resolve(root, opt('out', 'out'));
 fs.mkdirSync(out, { recursive: true });
 
-const { page, info, close } = await launch({ query: 'w=2560&h=1440&noadapt&nooverlay&quality=high&t=30' });
+const launchOpts = { query: 'w=2560&h=1440&noadapt&nooverlay&quality=high&t=30' };
+if (opt('file', '')) launchOpts.file = opt('file', '');
+if (opt('profile', '')) launchOpts.profileName = opt('profile', '');
+const { page, info, close } = await launch(launchOpts);
 if (!/nvidia/i.test(info.vendor + info.adapter) && !args.includes('--any-gpu')) {
   console.error('ERROR: not running on the NVIDIA GPU:', info.adapter);
   await close(); process.exit(2);

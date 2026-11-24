@@ -15,11 +15,13 @@ import { PART_WGSL, CULL_WGSL, DRAW_WGSL, PART_FLOATS, FLAG } from './buildings_
 import { selectTowerText, packSlots, buildGlyphArray, TEXT_WGSL, TEXT_MAX } from './buildings_text.js';
 import { Builder, genHillside, genUrban, genBund, genSteppe, genCBD, skybridges, walkways } from './buildings_gen.js';
 import { prepareLots, genLandmarks, genMarket, finishComplex } from './buildings_landmarks.js';
+import { genInfill, infillHeightStats } from './buildings_infill.js';
 import { WGSL_LIB, WGSL_FRAME, GBUFFER_OUT } from './common.js';
 import { WGSL_LIGHT, GBUFFER_FORMATS, DEPTH_FORMAT } from './renderer.js';
 import { shader } from './gpu.js';
 
 const LIGHT_BUDGET = 1450;
+const INFILL_LIGHT_BUDGET = 80;
 const LISTS = 6;
 // mesh used by each draw list: [K columns, R rows]
 const LIST_MESH = [0, 2, 4, 1, 3, 0];
@@ -73,6 +75,9 @@ function generate(ctx) {
   B.bridges = skybridges(B, rng(5150));
   B.walkways = walkways(B, rng(5151));
   finishComplex(B, world);   // the Hongyadong complex's remaining parts and its sign slots go after everything else
+  // land-use plan infill (I-016): generated after the complex, so the complex's unseeded parts keep the seeds they
+  // have without the plan; with its own sign slots and lights
+  B.infill = genInfill(B, world);
   return B;
 }
 
@@ -109,6 +114,12 @@ export default {
       nl++;
     }
     this.lightCount = nl;
+    // infill shop lights: own shuffle and pool, added after the selection above
+    const il = B.infill.lights.slice();
+    const ri = rng(4343);
+    for (let i = il.length - 1; i > 0; i--) { const j = Math.floor(ri() * (i + 1)); const t = il[i]; il[i] = il[j]; il[j] = t; }
+    for (const l of il.slice(0, INFILL_LIGHT_BUDGET)) ctx.lights.add(l[0], l[1], l[2], l[3], l[4], l[5], l[6], l[7]);
+    world.shared.infillStats = { ...B.infill, lights: Math.min(il.length, INFILL_LIGHT_BUDGET), lightsWanted: il.length, heights: infillHeightStats(B.infill.tops), tops: undefined };
 
     // shared data
     // landmark tops (new supertall and telecom tower) are always included, then the tallest CBD and Bund towers
