@@ -60,7 +60,7 @@ The text shrinks to fit its row, so it cannot overflow.
   - An ignition-flash term is added.
   - Radius 300 m + 0.5 × the height below the deck.
 - **Spaceport site (fix 9).**
-  - The rule picked (4974, −2339): 5.1 km out, 24° from the CBD bearing, height range 37 m over the 300 m patch.
+  - The rule picked (4974, −2339): 5.1 km out at a bearing of 23.6° south of east, which is 6° from the bearing to the CBD district centre (17.6° south of east), inside fix 9's ±20°; height range 37 m over the 300 m patch.
   - The deck is 160 m square, top at 244 m, on a 5 × 5 pile grid that includes every corner and edge midpoint. Each pile footing is the lowest ground under its 3 m section, sunk 4 m; piles are 6.5–22.7 m tall, and those taller than 14 m are cross-braced.
   - The tower stands north of the rocket. Three flood masts are lit analytically in the module's shader; the city's light list gets no static lights. The red obstruction lights and the flood glare are sprites.
 - **Lights.** The module uses 4 dynamic lights: 3 beam hits plus the plume light, which is on only during ignition and the low part of the climb.
@@ -69,3 +69,73 @@ The text shrinks to fit its row, so it cannot overflow.
 All timing, phase and placement constants are in `skyopsLayout.js` and were fixed before the first capture. Only look parameters were tuned afterwards, and only on held-out cameras: brightness, puff spacing and opacity, sail palette and hull livery.
 
 No eval-pose image was captured before the look was final. The fix-2 target metrics are computed from geometry and depth only.
+
+## Round 2: code-review fix round 1
+Commit `bab3950` on `idea/I-009` (code); this section is in the following commit. No timing, phase or placement constant changed.
+
+### Rendering path changes
+- **Beams and light sprites are now drawn in the shared forward pass, after the water.** `skyops.js` exports a second module object, `skyopsLate`, which `main.js` lists right after `water`. Its `forward` hook draws the searchlight beams and the sprites (nav lights, strobes, tower and flood lights). The water's opaque plane no longer paints over them, so the beams reach the river again.
+  - `skyops` itself stays before `water`, so the water's SSR still reflects the ships, the plume and the trail.
+  - Consequences: the beam and sprite cost now counts under the shared `forward` timer, not `skyops-fwd`. SSR no longer reflects the beams, which `air.js` also accepts.
+- **The trail and the plume stay in `afterLighting`** (timer `skyops-fwd`). See "Glows behind the smoke" below.
+
+### Cloud deck (fix 7)
+- Trail puffs fade on the height of each pixel: `c.y + (q.x·camRight.y + q.y·camUp.y)·r`, using `1 − smoothstep(1650, 1800, y)`. Pixels at 1800 m or higher are discarded, and puffs lying wholly above the deck are culled in the vertex shader. The plume halo also fades on the height of each pixel, not the nozzle height.
+- The puff-centre fade was removed. Smoke below 1650 m is no longer dimmed just because its puff centre is high. In other words, the fade now follows the rule as written.
+- **Rocket:** the opaque shader discards pixels above 1800 m, so the rocket enters the clouds nose first. `_rocket` now hides it only once its base reaches the deck. The flame stays on until then and fades per pixel at the deck.
+
+### Trail cost near the camera
+The fade the review suggested (`smoothstep(0.6·r, 2·r, dist)`) is in, but on its own it barely changed the cost: 1.3–1.8 ms at the boundary point versus 1.0–1.9 ms before. Puffs 0.6–2.4 radii away still cover the whole screen, and the cost is the blend of many large overlapping layers. A second measure was therefore added:
+- **Thinning of puffs that look large.** Each doubling of a puff's on-screen size beyond 0.25 × the screen height (half-size) removes every other puff, up to 2 extra levels. It uses the existing LOD scheme: level = `lod.y` + extra levels, and the odd puffs of the current level fade out continuously, so nothing pops.
+- The surviving puffs take over the removed puffs' opacity as stacked layers, `1 − (1 − a)^m`, which keeps the transmittance. A linear opacity boost made close views visibly more opaque.
+- **Only puffs closer than 2 km are thinned** (full thinning inside 1.5 km). Farther puffs are drawn exactly as before.
+  - Every eval pose camera is at least 2.49 km from every puff centre at its pose time (B2 2.49 km, B4 2.58 km, B1 3.31 km; CPU model of the trail including wind drift and the largest wobble).
+  - The near fade also does nothing at that distance, since it acts only within 2 × the puff radius (≤ 760 m).
+  - So the trail in the eval poses and in normal city views is unchanged by this.
+- **GPU, `skyops-fwd`, 2560×1440.** Camera at the world-boundary point nearest the pad: (4701, −2211), 302 m from the pad, looking at the pad. Three heights (deck, +150 m, +450 m) × four launch ages (20, 60, 130, 230 s); 150 animated frames each.
+
+| Camera | Before round 2 | Fade only | Final |
+|---|---|---|---|
+| Boundary, worst of 12 | 1.86 ms | 1.80 ms | 0.92 ms |
+| Boundary, range | 0.82–1.86 ms | 0.93–1.80 ms | 0.47–0.92 ms |
+| Inside the ground cloud at the pad (not reachable) | 3.40 ms | 2.83 ms | 0.98 ms |
+| Inside the lower trail (not reachable) | 4.44 ms | 4.61 ms | 1.46 ms |
+
+  The close views were checked against the old build: the column reads the same, slightly more opaque in the lower right of the +150 m view.
+
+### Minor items
+- **Launch index:** `liveLaunches(t, ages, idx)` now also returns each launch's index, and the trail seed is `trailSeed(j)`. A new unit check runs 3000 s at 60 fps and finds no flips.
+- **Plume HDR cap:** the flame is clamped to `50 − haloPeak`, where `haloPeak = (1, 0.62, 0.3) × 3 × halo intensity` is the halo's maximum. Flame and halo together stay at or below 50.
+- **Spaceport bearing wording:** corrected under Launch, Spaceport site. The site is 6° off the CBD bearing.
+- **Trees under the deck:** confirmed. Near captures from above the pad showed forest canopy through the deck. `world.shared.spaceport` now carries `half` (80 m). `vegetation.js` stamps the deck square plus 12 m into its existing exclusion mask, with no RNG calls, so the random streams are unchanged. The deck area is now clear and the forest meets its edge.
+
+### Glows behind the smoke (minor, not fixed)
+The trail is still drawn before the other modules' forward passes, so additive glows behind it are not dimmed: light-show beams, the drone show and air-traffic lights. Moving the trail after `lightshow` would dim the glows behind it, but it would also dim every glow in front of it, since nothing orders the additive glows against the trail per pixel.
+
+From every place the trail is normally seen, the city's glows are in front of it. The trail stands 3–7 km away behind the CBD and the mountains, and the drone show (B1) and air traffic are between the camera and the trail. Moving the trail would wrongly dim the drone show and the beams in B1, B3 and G1. A correct fix needs per-pixel ordering of the additive glows against the smoke, which is not cheap. The current order is kept.
+
+### Checks
+- `node tools/skyops-test.mjs`: 12 checks pass (one new).
+- `node tools/functional.mjs`: 18/18, no WebGPU errors.
+- Custom captures with profile `opus55-I009`, old build against new, no eval poses:
+  - beams over the river from above each ship;
+  - the trail top from below the deck;
+  - the rocket entering the deck;
+  - the pad from three sides.
+- **Full bench** (`tools/bench.mjs`, 2560×1440 High).
+  - Run alternately against a main-branch build, only after the GPU had been idle (under 15%, no other agent's Chrome) for 30 s.
+  - Two runs (one of each build) were contaminated by another agent's GPU work, at 16–18 ms average, and were discarded and rerun.
+
+| Run | Build | GPU avg | p99 | max | skyops-gbuffer avg / p99 | skyops-fwd avg / p99 | forward avg / p99 |
+|---|---|---|---|---|---|---|---|
+| 1 | main | 9.47 | 11.41 | 14.25 | – | – | 0.371 / 1.309 |
+| 4 | I-009 | 9.67 | 11.66 | 14.09 | 0.009 / 0.033 | 0.024 / 0.161 | 0.382 / 1.359 |
+| 5 | I-009 | 9.56 | 11.54 | 14.26 | 0.009 / 0.033 | 0.024 / 0.162 | 0.375 / 1.314 |
+| 6 | main | 9.56 | 11.56 | 13.68 | – | – | 0.375 / 1.361 |
+| 7 | I-009 | 9.64 | 11.60 | 13.39 | 0.009 / 0.033 | 0.024 / 0.160 | 0.380 / 1.358 |
+| 8 | main | 9.63 | 12.04 | 54.86 | – | – | 0.373 / 1.366 |
+
+  - Mean GPU average: I-009 9.62 ms against main 9.55 ms, so +0.07 ms. The p99 is within noise: 11.60 against 11.67.
+  - The module's own timers average 0.033 ms, plus about 0.006 ms of beams and sprites now inside `forward`. That is well inside the 0.35 ms average / 0.6 ms p99 cap.
+  - The 54.86 ms maximum in main run 8 is a one-off hitch in the main build.
+  - All gates pass and there are no WebGPU errors.
