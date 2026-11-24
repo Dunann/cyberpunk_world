@@ -1,7 +1,8 @@
 ---
 id: I-023
 title: Recessed facade systems - each window bay is a small recess solved per pixel (no added triangles), with an exact distant average and glass that reflects the city's real light
-status: in-review
+status: accepted
+score: 6.00 (review-1 5.67, review-2 6.33; mean; below 7 -> prototype track as user priority 1 and critics' #1 change, built with both reviews' fixes and a go/no-go quick test)
 direction: Wild card / break an assumption (the facade shading model)
 family: shading representation: per-pixel analytic facade relief (the room parallax extended to the wall), with closed-form filtering
 parent: none (uses the review lessons of I-005, I-006 and I-012, and the I-018 window test)
