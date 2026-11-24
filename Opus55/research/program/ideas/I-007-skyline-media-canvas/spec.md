@@ -1,7 +1,8 @@
 ---
 id: I-007
 title: Skyline media canvas and tower-scale signage
-status: proposed
+status: rejected
+score: 5.5 (review-1 6.0, review-2 5.0)
 direction: Wild card / borrow from another field (stage pixel-mapping and media facades)
 family: signage: tower-scale (facade text shows, mega neon, rooftop letters)
 parent: none
