@@ -1,0 +1,15 @@
+import { HeightCache } from './hcpu.mjs';
+const W = await import('../../../../../source/src/world.js');
+const world = new W.World();
+const hc = new HeightCache();
+world.heightAt = (x, z) => hc.heightAt(x, z);
+world.heights = hc.H;
+world._resolveRoutes();
+world._buildLots();
+console.log('lots', world.lots.length, 'texels computed', hc.count);
+const by = {};
+for (const L of world.lots) by[L.district] = (by[L.district] || 0) + 1;
+console.log(by);
+import fs from 'node:fs';
+fs.writeFileSync('lots.json', JSON.stringify(world.lots.map((L) => ({ x: +L.x.toFixed(1), z: +L.z.toFixed(1), w: +L.w.toFixed(1), d: +L.d.toFixed(1), a: L.angle, di: L.district, gMin: +L.gMin.toFixed(1), gMax: +L.gMax.toFixed(1), wd: +L.waterDist.toFixed(1) }))));
+fs.writeFileSync('routes.json', JSON.stringify(W.ROUTES.map((r) => ({ name: r.name, dense: r.dense.map((p) => [+p.x.toFixed(1), +p.y.toFixed(1), +p.z.toFixed(1)]) }))));

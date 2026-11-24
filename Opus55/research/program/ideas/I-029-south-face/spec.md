@@ -1,7 +1,7 @@
 ---
 id: I-029
 title: South Face - the hill city steps down to the Great River on the relief that is already there (lane-field terraces, stair streets, landings)
-status: proposed
+status: in-review
 direction: The hard layout problem - hill city and riverbanks
 family: section-driven hillside infill - terraces and buildings on the unchanged heightmap, laid out by one scalar field
 parent: I-015 (method), I-016 (plumbing), I-002 (problem)
@@ -41,7 +41,7 @@ All numbers below come from a CPU port of the height function (`measure/hcpu.mjs
 - From x = -500 to the tip the ellipse reaches the water, but the hillside carve (`soft = 28 m` in `carveWater`) makes a 40-60 m cliff, and the lot edge is ragged (8 to 138 m from the water). The "inverted teeth" in G3 are podium sides on that cliff.
 - In G3 this strip is the dark band, 80-150 px tall, under the whole peninsula. In G4 it is the "bump-texture hillside". In G2 it is the row of dark panels left of the Hongyadong stack.
 
-**2. The face by rule** (simulated on the CPU port, `measure/face.mjs`, `measure/lanes.mjs`): 439 stations, 1,756 m of bank, from (322, 103) to (-1317, 511); area 10.2 ha. By section class: 1,032 m steep (mean slope over the face at least 0.45), 476 m gentle, 248 m with less than 12 m free in front of existing lots. The lane field gives 8 levels and 4.3 km of lanes (2.3 km of them contour lanes), about 300 building units.
+**2. The face by rule** (simulated on the CPU port, `measure/face.mjs`, `measure/lanes.mjs`): 439 stations, 1,756 m of bank, from (322, 103) to (-1317, 511); area 10.2 ha. By section class: 1,032 m steep (mean slope over the face at least 0.45), 476 m gentle, 248 m with less than 12 m free in front of existing lots. The lane field gives 8 levels and 4.2 km of lanes (2.2 km of them contour lanes), about 300 building units.
 
 **3. Frame shares.** Share of each eval frame covered by the face's envelope (ground footprint raised 22 m; terrain and existing lots as occluders; one ray per 10 px):
 
@@ -130,12 +130,13 @@ New files: `face.js` (layout, CPU only), `buildings_face.js` (parts). Edits: `wo
    - Outer side: parapet (0.95 m), then a wall face down to 3 m below the lowest terrain under the outer edge. Inner side: a kerb wall where `Y` is above the ground.
    - Wall material: extend `BANK_WGSL` with two faces: coursed sandstone with buttress pilasters every 9 m, and lit vault bays (dark reveal, warm back wall, sign band) where the wall is taller than 5 m and no unit stands in front.
    - Lamps every 14 m on the parapet: instanced globes, a reserved pool of the nearest 96 real lights, analytic pools beyond the real-light range (the existing `Embankments` scheme with the deck height per lamp).
+   - A lane that ends at the edge of R closes with a short return wall and meets a stair line, so no deck ends in the air.
    - Colliders for decks and parapets, as the promenade has.
 4. **Ground under the face.**
    - Bake: bind `face.mask` as a texture in `bakeNear` (one new entry in `bakeLayout`); inside the mask the base is weathered rock and rubble masonry and the forest value is 0. No other shader changes.
    - **Contingency for LOD:** if the quick test shows terrain through decks at distance, bind the mask in the terrain vertex shader and lower the drawn height by 6 m inside it. `world.heightAt` is unchanged, so colliders and all generators are unaffected.
 5. **Units** (`buildings_face.js`, called at the end of `generate()` after `genInfill`).
-   - One row per strip between lane k and lane k+1. A unit's front is on lane k's inner edge, its length 14-26 m along the chord, its depth `clamp(strip width - upper lane width - 1.5, 7, 12)`. Where less than 7 m is free: no unit, the vault wall of step 3 shows.
+   - One row per strip between lane k and lane k+1 (row 0 fronts the existing promenade). A unit's front is on lane k's inner edge, its length 14-26 m along the chord, its depth `clamp(strip width - upper lane width - 1.5, 7, 12)`. Where less than 7 m is free: no unit, the vault wall of step 3 shows.
    - Base at the lowest terrain under the footprint minus 4 m (buried). Ground floor at lane k. Top = lane k+1 plus 1 to 5 floors of 3.6 m, capped at lane k+2 plus one floor, and at three floors above the top lane on the last row (the towers behind stay visible).
    - A footbridge (1.5-6 m) from lane k+1 to the unit at that level, where the top allows.
    - Every unit is checked against existing solid parts with I-015's box test (`overlapDepth`) and narrowed, shortened or dropped. Alleys of 2-4 m between groups of 2-4 units; a unit keeps 1 m from stair lines.
@@ -160,14 +161,14 @@ New files: `face.js` (layout, CPU only), `buildings_face.js` (parts). Edits: `wo
 ## Cost
 - **Effort:** one implementer, 4-5 days: layout and identity plumbing 1, decks and ground 1, units and stairs 1.5-2, landings and tuning 0.5-1.
 - **GPU (gate: average 11 ms, p99 16.7, worst 25; current about 9.8 ms average, 11.7 p99).** Estimate: **+0.10 to +0.20 ms average**, +0.2 to +0.4 ms at p99. Hard cap for this idea: +0.25 ms average, measured as three alternating bench pairs on a quiet GPU.
-  - **Source of the estimate:** I-015 measured +0.06 / +0.12 ms for a 480 m, 12-level stack with a 6,500-prop cap and its own lights. I-016 measured +0.19 to +0.21 ms for 151 infill lots plus two parks. The face has about 300 units (about 600 solid parts, at most 6,000 props), 4.3 km of deck (one mesh, about 45,000 triangles), 300 instanced lamps and 96 pooled lights. That is about 1.5 to 2 times I-015.
+  - **Source of the estimate:** I-015 measured +0.06 / +0.12 ms for a 480 m, 12-level stack with a 6,500-prop cap and its own lights. I-016 measured +0.19 to +0.21 ms for 151 infill lots plus two parks. The face has about 300 units (about 600 solid parts, at most 6,000 props), 4.2 km of deck (one mesh, about 45,000 triangles), 300 instanced lamps and 96 pooled lights. That is about 1.5 to 2 times I-015.
   - **Where the time goes:** G-buffer (more parts in view at G4-like views and on the fly-through legs from (420, 80, 650) to (260, 70, 120), which pass the tip); lighting (96 pooled lights, nearest only). The pixels replace terrain pixels, which use the most expensive ground shader, so the fill cost is roughly neutral.
   - Culling: +900 parts and props lists on about 150,000, under +0.01 ms.
 - **Load time:** 439 sections of 360 samples and one 3 m raster of 10 ha; under 0.1 s.
 
 ## Risks
 - **Targets with small shares.** G2 and G3 show the face at 2% of the frame. If judges tie there, 3 of 4 is not reached even with a clear G4 win. The coordinator may prefer to judge the first build on G4 plus the held-out cameras.
-- **It can look like more of the same boxes.** The units use the current facade materials, which both critics rank as the first problem. Mitigation: the composition (stepping, lanes, stairs, bridges) carries the image at G4 distance; the kit avoids the tower window texture; any adopted facade idea improves it for free.
+- **It can look like more of the same boxes.** The units use the current facade materials, which both critics rank as the first problem. Mitigation: the composition (stepping, lanes, stairs, bridges) carries the image at G4 distance; the kit is low-rise balcony, tile and brick fronts with shop bases, not tower shafts; any adopted facade idea improves it for free.
 - **Thin cliff stretches stay half-solved.** On 248 m of the cliff the existing lots leave under 12 m, so only the arcade row and the lanes' walls fit. The dark podium sides above them remain.
 - **Terrain at coarse LOD.** Fill-only decks, buried bases and walls 3 m below ground cover the usual cases, as in I-015. The vertex sink is the stated fallback.
 - **The A3 wedge is not in this idea.** It lies inside the Raffles reserved disk (I-031). If I-031 is not adopted, extend the face into landmark disks up to 12 m from landmark parts in a follow-up.
