@@ -174,3 +174,109 @@ Round-1 findings, one by one:
 
 ### Evaluation untouched
 `git diff main...7dc6eb0 --name-only` lists only `Opus55/source/src/*`, `Opus55/source/tools/skyops-*.mjs` and files in the I-009 idea folder. Nothing in `Opus55/eval/` or the metric folder changed.
+
+## Code review round 3 (2026-11-24)
+
+**Branch:** idea/I-009 at 3aa73ea (round 3 commits a283e8a, af57493, 3aa73ea)
+**Verdict:** fail
+
+**Why it fails.** The smoke life was changed from 240 s to 150 s after the eval stills had been judged. Review-1 fix 3 locks this constant ("Launch period, smoke lifetime and fade curve are as given in fix 5. The code reviewer must reject any later change to these values"). The change also alters 4 of the 6 target stills.
+
+**What it takes to pass.**
+- Restore `SMOKE_LIFE = 240`. `LAUNCH_ALIVE` follows from it, and the new 100 m width cap already removes the "wide" argument.
+- Or: the coordinator records an explicit waiver of fix 3 in the spec or LOG, and, since the change was prompted by judgments of eval images, confirms the result on fresh cameras, as was done for I-014.
+
+Everything else in this round is correct or minor, apart from two moderate motion problems in the beam rule.
+
+### Matches the spec
+- **Code matches DEVIATIONS round 3.** Specifically:
+  - The trail is a chain of elongated Gaussian puffs whose optical depth falls about as 1/r^0.7, and it is neutral grey.
+  - The halo cap is consistent: `haloPeak = 5.45 × intensity` equals the new halo maximum `exp(0)·5 + 0.45`.
+  - Pad work lights and a haze glow are added.
+  - At most one beam at a time, in 40 s slots.
+  - Outline sprites (87) and the fin-edge material 6 are added.
+  - The fins are framed and shaded, with the LED screen at 35%.
+  - The ticker is larger, with 2 items per row, and the band is 34% of the hull height.
+- **Sprite count.** 3 × (7 nav + 29 outline) + 5 red + 3 flood + 10 tower + 1 dome = 127, within `NSPR` = 144, and `init` throws if the count is exceeded. Unused slots have zero colour and are culled in the vertex shader.
+- **The deck clip is kept.** Pixels with world height ≥ 1800 m are discarded, using `q.z` without the shift toward the camera, and puffs wholly above the deck are culled.
+- **The near-camera thinning and fade are kept** on the same level-of-detail scheme. No divide-by-zero: `Sa ≥ sbE·|ca|`, and `sbE ≥ 0.8 px`.
+- **WebGPU.** The trail varyings are still 10 locations (32 components). All buffer sizes are unchanged.
+
+### Answers to the coordinator's questions
+1. **The remaining 1.9 KB per frame.**
+   - **No source-level allocations remain.** The per-frame code (`update`, `_updateShip`, `_updateLaunch`, `drawLate`, `afterLighting`) creates no arrays, objects, closures or template strings, which is the BRIEF rule ("no new arrays, objects, closures or template strings per frame").
+   - **The remainder is V8 boxing.** It comes from doubles passed to, or returned from, calls that V8 does not inline:
+     - `L.shipState(sh, t, st)` and `L.shipState(sh, t − dt, pt)`: 2 per ship.
+     - `L.trackIndex(sh, t)`.
+     - `w.heightAt(tx, tz)`: arguments and return value.
+     - `cam.visible(x, y, z, r)`: 3 ships + rocket + port.
+     - `ctx.lights.set(...)`: 4 calls, up to 8 doubles each.
+     - `sstep(...)`: 2 per frame for the slot weight, 3 for the slot owner.
+     - `this._buildingsNear(w, tx, tz)` and `this._lampW(sp, bw)`.
+     - `this._rocket(a)` twice.
+     - `L.rocketS`, `L.emitAge`, `L.smokeRadius`, `L.trailSeed` and `L.liveLaunches(t, …)`.
+   - **Most of it can be removed simply:**
+     - inline `sstep` as local arithmetic;
+     - pass the time inside the scratch objects (`st.t = t`; `shipState(sh, st)`);
+     - write the 4 lights directly into `ctx.lights.data` through a small index-based setter;
+     - compute the view test inline.
+   - **Some boxing will remain** in `heightAt` and the layout helpers. Other modules (`air.js`, `boats.js`, `lightshow.js`) call `lights.set` with doubles every frame in the same way.
+   - **Classification: minor, not a BRIEF violation.** It is engine boxing, not allocations in the source, and `functional.mjs` passes its 2 MB/10 s heap gate (18/18 twice).
+2. **The beam rule.**
+   - **Building filter: correct as written.** `c.hy > 3` (taller than 6 m) and `c.hx < 40 && c.hz < 40` (under 80 m across in both half-extents) exclude bridge decks and the spaceport deck.
+   - **Reproducible: yes.** The owner and slot weight depend only on `ctx.time`. The ship state, `trackIndex`, the outer-bank tables (built once from `heightAt`) and `_buildingsNear` (static colliders) are functions of time and world. The show dimming is a function of time. Nothing depends on the camera or on earlier frames.
+   - **Pose times** (slot = ⌊t/40⌋, owner = slot mod 3):
+
+     | t | Poses | Owner | Slot weight | Note |
+     |---|---|---|---|---|
+     | 15 | A5 | confluence | 1 | |
+     | 40 | G1 | — | 0 | slot boundary, so no beam |
+     | 45 / 50 / 70 | B1 / B4 / G4 | Bund–CBD | 1 | lit only if its rule passes |
+     | 100 | B3, G3 (A poses, B2) | west ship | 1 | forest banks, lit 0.2% of the time |
+
+     So G1 and G3, the two poses where judge A liked a beam on the lit city, now get no beam. That is evidence against the beam constants having been tuned to the eval set.
+   - **Moderate: the beam brightness jumps (`skyops.js` `_buildingsNear`, `bw`).** The building count is an integer taken over a cross of 5 global 64 m grid cells, and `sstep(2, 5, n)` maps it to 0, 0.26, 0.74 or 1.
+     - As the sweeping hit point crosses a cell line, about every 10 s (ship 6 m/s plus a ±120 m sweep), the set of cells changes. The beam, its lamp and its 170-unit point light then jump in brightness, or switch on or off, between frames.
+     - The count is also of cell registrations, not of buildings: one building whose bounding circle spans 2–3 cells in the cross is counted 2–3 times.
+     - Embankment parapet colliders (`terrainBank.js`: hy about 5.4 m, hx about 8 m) and transit pillars pass the filter. So an embanked promenade with no buildings counts as "lit city" (it is lamp-lit, but the docs say buildings).
+     - Still frames are not affected. Live viewing and motion bursts are.
+     - Fix: interpolate the count bilinearly between cells, or weight colliders by distance with a smooth falloff.
+   - **Moderate: the beam target jerks on the turns (`skyops.js` `_updateShip`, `ti = L.trackIndex`).** The outer-bank direction `outerX/Z` and distance `bank` are looked up from the nearest sample, without interpolation.
+     - On the 90 m-radius turns the outer direction rotates about 2.5° per 4 m sample, so the hit point jumps about 25–30 m every 0.67 s at a reach of about 600 m.
+     - `bank` is quantised to 20 m steps, so the hit point jumps where the distance changes.
+     - Fix: interpolate both between `ti` and `ti + 1` with the same fraction as `trackAt`. Better still, take the outer direction from the interpolated heading (`side·(hz, −hx)`), since `side` is constant on a convex racetrack.
+3. **The trail constants: not keyed to cameras, but chosen after seeing eval images.**
+   - **Radius (8 m + 0.55 m/s, cap 100 m; ground cloud 35 m).** The physical reason in DEVIATIONS (a real launch trail is about 16 m wide behind the nozzle and spreads to at most a few hundred metres) is camera-independent. It is a deviation from review-1 fix 6 (15 m + 2 m/s, cap 250 m), and DEVIATIONS records it as such. Fix 6 was written because reviewer 1 found the spec's original 6–94 m radius too thin to read at 3–7 km. The new values are close to that original, so whether they read is now a matter for the judges. Not blocking.
+   - **Smoke life (240 s to 150 s): blocking.**
+     - This value is explicitly locked by fix 3, and the reviewer is told to reject any later change.
+     - **Effect on the stills.** At t = 40–70 (B1, B4, G1, G4), a 240 s life leaves the previous launch's trail (age 190–220 s) at opacity (1 − age/240)^0.7 ≈ 0.18–0.33. At t = 15 (A5) it would be ≈ 0.5. With 150 s, all of these are gone.
+     - So the change removes content from 4 of the 6 target stills, in response to judgments of those stills.
+     - **The stated reason no longer holds.** DEVIATIONS says "two old, wide trails". In fact, at most one old trail plus one young trail exist at once, and the 100 m width cap already answers "wide".
+     - **Fix 5 still holds technically**: a trail younger than 150 s is always present. But for about the first 10 s after each ignition, only a short young column is in the sky.
+   - **New constants.** `BEAM_SLOT` = 40, the bank-search constants and the trail-shape constants (`SIG`, `SB`, `TAU0`, `R_REF`, `CITY_KEY`) are new rules, not changes to locked values. The pose-time table above shows no sign that they favour the eval set. But this whole round responds to judgments of eval images, so a fresh-camera check before adoption is the right safeguard.
+4. **Unused variables and the layout changes.**
+   - **`dt` and `cam` in `_updateLaunch` are used, not unused.** `dt` sets the previous-frame rocket age (`this._rocket(((a − dt) % P + P) % P)`), which drives the rocket's motion vectors. `cam` drives `this.vis[I_ROCKET]` and `this.vis[I_PORT]`.
+   - **The only dead value is `shownPrev`**, which is assigned and then discarded with `void`. Cosmetic.
+   - **`trackIndex` is correct.** It uses the same arc-length expression as `trackAt`: `((s % len + len) % len) / ds`, floor, mod n. So the lookup index always matches the sample `shipState` interpolates from.
+   - **`Math.sqrt` instead of `Math.hypot` is safe.** The values are unit-scale headings, so there is no overflow or underflow risk, and results differ at most in the last bit, which disappears in the float32 upload. Altitudes, tracks and phases are unaffected: those code paths did not change.
+5. **Merge with current main.**
+   - `git merge-tree --write-tree main 3aa73ea` reports no conflicts. Main differs from the merge base `7faf017` only in `buildings.js`, `buildings_text.js`, `buildings_wgsl.js` and the I-014 tools, and I-009 touches none of these.
+   - **No semantic overlap.** I-014 adds no colliders, lights, Frame fields or module-order changes. It sets part flags and adds GPU buffers. So the airship altitudes, the light indices and the beam rule's building counts are unchanged by the merge.
+   - **The merged tree builds and passes its tests.** I exported it to the scratchpad and ran: `node build.mjs --dev` (`out/dev.html`, 1027 KB), `node tools/skyops-test.mjs` (12 passed), `node tools/test-text.mjs` (all checks passed).
+
+### Problems
+- **serious: `SMOKE_LIFE` changed from 240 s to 150 s** (`skyopsLayout.js:35`). The value is locked by review-1 fix 3. The change removes the previous trail from B1, B4, G1 and G4 at their pose times, after those stills were judged. Revert it, or get a recorded coordinator waiver plus a fresh-camera check.
+- **moderate: beam brightness jumps between frames.** The building count is an integer over grid cells (`skyops.js` `_buildingsNear` and the `bw` line in `_updateShip`). It double-counts buildings that span cells and counts embankment parapets. It does not affect stills.
+- **moderate: the beam target jumps during turns and at 20 m bank steps,** because the outer-bank tables are looked up without interpolation (`skyops.js` `_updateShip`). It does not affect stills.
+- **minor:** about 1.9 KB per frame of V8 boxing remains (sources listed in question 1). It is not a BRIEF violation, and most of it can be removed with simple edits.
+- **minor:** the header comment of `skyops.js` (line 3) still says the smoke "spreads in a sheared wind for 240 s". `shownPrev` is dead code.
+
+### Checks run
+- `git diff 7dc6eb0 3aa73ea` — read every changed line of `skyops.js`, `skyopsLayout.js`, `skyopsWgsl.js`, `skyopsMesh.js`, `skyopsAtlas.js` and `tools/skyops-test.mjs`.
+- `node build.mjs --dev` in the worktree — builds (999 KB). `node tools/skyops-test.mjs` — 12 passed.
+- `git merge-tree --write-tree --name-only main 3aa73ea` — clean. The merged tree builds, and both the skyops and I-014 text unit tests pass, as described in question 5.
+- Node one-liner — beam slot owner and weight at every pose time (the table in question 2).
+- Not run: bench, GPU captures (no GPU lock taken), `skyops-check.mjs`.
+
+### Evaluation untouched
+`git diff 7dc6eb0 3aa73ea --name-only` lists only `Opus55/source/src/skyops*.js`, `Opus55/source/tools/skyops-*.mjs` and files in the I-009 idea folder. Nothing in `Opus55/eval/` or the metric folder changed.
