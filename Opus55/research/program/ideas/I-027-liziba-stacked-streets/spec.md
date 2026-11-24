@@ -1,7 +1,7 @@
 ---
 id: I-027
 title: Liziba stacked streets - a vertical station quarter with galleries, stair bridges, lifts and station exits
-status: proposed
+status: in-review
 direction: User priority 7 (elevated walkways, crazy 3D feeling), Zone A
 family: urban circulation: multi-level pedestrian network (new family)
 parent: none
