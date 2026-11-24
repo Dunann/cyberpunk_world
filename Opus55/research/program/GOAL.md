@@ -32,7 +32,7 @@ Every zone reaches a mean of 8 or more on the strict rubric (`eval/critic-rubric
 
 ## Budget
 - Stop when the 7-day usage reaches 25%, enforced by the usage-budget hook. The weekly window resets on 2026-11-24 at 13:00 UTC; after the reset, the 25% stop is re-applied to the new week.
-- At most 5 agents run at once (raised to 6 on 2026-11-24 for more progress). Evaluations run one at a time on a quiet GPU.
+- At most 5 agents run at once (raised to 8 on 2026-11-24 for more progress; GPU work still one at a time). Evaluations run one at a time on a quiet GPU.
 
 ## Models
 | Role | Model |
