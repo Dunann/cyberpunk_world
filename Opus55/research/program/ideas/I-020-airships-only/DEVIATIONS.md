@@ -2,7 +2,7 @@
 
 Branch `idea/I-020`, started from `idea/I-009` at b3d59af (round 4 merged with main at d92175a).
 - `e2f4660`: the launch is removed and the LED band is fixed.
-- The next commit merges current main (54f2c3e, which now includes the adopted I-016), so the candidate is compared against the current best.
+- `52185b1` merges current main (54f2c3e, which now includes the adopted I-016), so the candidate is compared against the current best.
 
 ## 1. Launch removed
 These are gone:
