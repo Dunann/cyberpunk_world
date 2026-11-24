@@ -14,3 +14,4 @@
 - 2026-11-24: I-005 rejected after one review (5.0; second review skipped since it could not reach the 7 bar). Bundled 7 targets again; stack bands uncosted (+0.3-0.8 ms). Split requested: I-012 facade relief (A4, B2 + street held-outs), I-013 crowns and massing (G1, A6).
 - 2026-11-24: I-010 rejected (5.33/5.33). PROCESS CHANGE (coordinator): user-requested features whose idea fails review after a revision go to a prototype track. Build the reviewers' consolidated fixes and let the blind pairwise judge decide from real images. First use: I-014 tower phrase show.
 - 2026-11-24: I-001 (skeleton urban field), I-002 (stepped banks + prow), I-003 (light parks) proposed by the Fable layout generator.
+- 2026-11-24: I-011 rejected (6.0/6.0). Prototype track (user-named priority 2): I-015 Hongyadong stack with both reviews' fixes.

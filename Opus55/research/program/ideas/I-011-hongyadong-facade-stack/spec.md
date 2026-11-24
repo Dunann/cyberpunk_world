@@ -1,7 +1,8 @@
 ---
 id: I-011
 title: Hongyadong as a façade stack on the real cliff (each roof is the next gallery; a 3D clearance and support solver)
-status: proposed
+status: rejected
+score: 6.0 (review-1 6.0, review-2 6.0)
 direction: from reviews of I-004 (Attack the weakness, user priority 2)
 family: procedural landmark rebuild: section-first façade stack with a 3D support and clearance solver
 parent: I-004
