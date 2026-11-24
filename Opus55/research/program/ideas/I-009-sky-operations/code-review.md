@@ -280,3 +280,89 @@ Everything else in this round is correct or minor, apart from two moderate motio
 
 ### Evaluation untouched
 `git diff 7dc6eb0 3aa73ea --name-only` lists only `Opus55/source/src/skyops*.js`, `Opus55/source/tools/skyops-*.mjs` and files in the I-009 idea folder. Nothing in `Opus55/eval/` or the metric folder changed.
+
+## Code review round 4 (2026-11-24)
+
+**Branch:** idea/I-009 at 7506f1e
+**Verdict:** pass
+
+The four round-3 items are fixed:
+- **Smoke life:** restored to the locked value.
+- **Beam brightness:** now continuous.
+- **Beam aim:** now continuous.
+- **Boxing:** reduced further.
+
+No eval still changes its beam state as a result. The branch merges cleanly with current main, which includes I-014 and I-015.
+
+### Matches the spec
+- **Smoke life is exactly as review-1 locked it.**
+  - `SMOKE_LIFE = 240`, so `LAUNCH_ALIVE = SMOKE_LIFE + 25 = 265`.
+  - The trail shader takes `SMOKE_LIFE` from the layout file, so it is 240.0 there too.
+  - The opacity curve is `(1 − age/240)^0.7` and the launch period is 150 s, both unchanged.
+  - `skyops-test` now asserts the value.
+- **Beam weight (`_cityWeight`).** It sums building footprints whose centres lie within 200 m of the hit point. The weight is full inside 60 m and falls off smoothly to zero at 200 m. A 20 × 20 m footprint counts 1, capped at 4. It maps to beam weight 0–1 by a smoothstep from 1 to 3.
+  - **Each collider is counted once.** A collider is counted only in the 64 m cell that holds its centre, and that cell is always among the cells it is registered in. The cell hash cannot collide within the world (cells span ±96 per axis; the multiplier is 100003).
+  - **The building filter matches the stated rule.** `hy > 4` (over 8 m tall), `3 ≤ hx, hz < 40` (6–80 m across both ways). This leaves out:
+    - parapets (half-width 0.24 m);
+    - promenades (half-height 0.9 m);
+    - bridge decks;
+    - the spaceport;
+    - thin transit pillars.
+  - **The weight is continuous in the hit point**, and the hit point is continuous in time. The implementer's 600 s, 60 fps measurement gives a largest weight step of 0.055 per frame.
+- **Aim.** These parts of the aim are continuous:
+  - `side` is one constant per ship, by majority vote over the track samples.
+  - The outer direction is `side · (hz, −hx) · dir`, taken from the interpolated heading. Converting back to the track direction with `dir` is correct.
+  - The reach is smoothed over ±40 m (21 samples) at load, then interpolated with `st.u`. `st.u` is the same sample index and fraction that `trackAt` uses for the position.
+
+  The largest hit-point step is 1.0 m per frame (implementer's measurement). Removing `L.trackIndex` left no callers (grep).
+- **Land-height gate removed.** The aim point is 60 m inland of the first dry ground by construction. If the sweep reaches water, `gy = max(height, 0)` lands the beam on the water surface, and the beam then shows only if real buildings stand within 200 m. That is acceptable.
+- **Boxing cleanup.**
+  - `sstep` is now inline arithmetic.
+  - `_putLight` writes `Lights.data` and the dirty range exactly as `lights.set` does.
+  - `_inView` repeats `makeCamTest().visible` using the same camera fields.
+  - The dead `shownPrev` is gone.
+
+### Answers to the coordinator's questions
+1. **The radius and building rule have camera-free reasons and change no eval still's beam.**
+   - **Reasons.** The filter is structural: it leaves out the embankment parapets, decks and pillars that made round 3 treat lamp-lit embankments as "lit city". The 200 m radius is justified by where buildings stand relative to the banks once those structures stop counting. Neither reason refers to a camera.
+   - **Measured state at each pose time.** I ran the real app on three builds under `gpu-run.sh I-009cr`:
+     - round 3 (3aa73ea);
+     - round 4 (7506f1e);
+     - round 4 merged with main (`git merge-tree` result).
+
+     For each eval pose time I set `ctx.time = t` (frozen), let 3 frames run, and read the beam weights. Times with the same result are grouped. The result is **identical on all three builds**:
+
+     | t | Poses | Slot owner | Slot weight | Show | Beam weights (conf / Bund–CBD / west) | City weight at owner's hit point (r3 count → r4 → merged) |
+     |---|---|---|---|---|---|---|
+     | 15 | A5 | confluence | 1 | 0 | **1** / 0 / 0 | 49 → 22.1 → 8.25 (≥ 3, so full) |
+     | 40 | G1 | Bund–CBD | 0 (slot edge) | 1 | 0 / 0 / 0 | 34 → 47.7 → 47.7 |
+     | 45 / 50 | B1 / B4 | Bund–CBD | 1 | 1 | 0 / 0 / 0: the ship is within 1.5 km of the show centre, so the beam is off during the show | 24 → 37.8 / 27.6 |
+     | 70 | G4 | Bund–CBD | 1 | 1 | 0 / 0 / 0 (show; also no city: 0) | 8 → 0 → 0 |
+     | 100 | A1–A4, A6, B2, B3, G2, G3 | west | 1 | 0 | 0 / 0 / 0 (forest banks: 0) | 0 → 0 → 0 |
+
+   - **Conclusion.** The only lit beam at any pose time is the confluence ship's at t = 15, in A5, which is not a target, and it is lit in all three builds. No target still has a beam in round 3, round 4 or after the merge. So the new rule cannot have been tuned to the eval set through these stills.
+   - **What the merge changes.** I-015's rebuild lowers the city weight near the A5 hit point from 22.1 to 8.25, but it stays above the full-weight threshold of 3.
+2. **Smoke life: yes, exactly 240 s.** The fade curve and launch period are unchanged (see above).
+3. **No new per-frame allocations.**
+   - The new per-frame code creates no arrays, objects, closures or template strings. It writes only into preallocated arrays (`_lv`, `_vp`, `_cq`) and the existing `st`/`pt` fields; `u` is now declared up front.
+   - `_cityWeight` passes only integers to `collidersNear`. It runs for the slot owner only, over at most 8 × 8 cells.
+   - The new typed arrays (`raw`, `sh.reach`) are created once in `_planShips`.
+   - Remaining boxing (`shipState`, `heightAt`, the layout helpers) is reduced from round 3. As noted there, it is not a BRIEF violation.
+4. **It still merges cleanly.**
+   - `git merge-tree --write-tree main 7506f1e` (main at 9eca4af, now with I-014 and I-015) reports no conflicts. Main's source changes are in `buildings*.js`, `signs.js` and `signPlace.js`, which I-009 does not touch.
+   - The merged tree builds (`out/dev.html`, 1105 KB). `skyops-test` passes, and I-014's `test-text` passes.
+   - In the merged app the airship altitudes are unchanged (530 / 390 / 290 m), and the beam states are identical, as shown in the table.
+
+### Problems
+- **minor:** DEVIATIONS round 3, section 2 ("Only on lit city"), still says "on land (height > 1–4 m)". The code-review-round-3-fixes subsection correctly says the land gate was removed. Wording only.
+- **minor (carried over):** some V8 boxing of doubles in non-inlined calls remains. It is not a BRIEF violation, and `functional.mjs` passes.
+
+### Checks run
+- `git diff 3aa73ea 7506f1e` — read every changed line in `skyops.js`, `skyopsLayout.js`, `tools/skyops-test.mjs` and `tools/skyops-check.mjs`.
+- `node build.mjs --dev` in the worktree — builds. `node tools/skyops-test.mjs` — all checks pass.
+- `git merge-tree --write-tree --name-only main 7506f1e` — clean. I exported the merged tree to the scratchpad; it builds, and `skyops-test` and `test-text` pass.
+- **Beam state at the eval pose times** on three builds (round 3, round 4, merged), one short headless-window run each, under `gpu-run.sh I-009cr`. The script is `scratchpad/cr4/beamstate.mjs`; it reads `window.__skyops` after frozen frames. Results are in the table above.
+- Not run: bench, captures, `functional.mjs`.
+
+### Evaluation untouched
+`git diff 3aa73ea 7506f1e --name-only` lists only `skyops.js`, `skyopsLayout.js`, `tools/skyops-check.mjs`, `tools/skyops-test.mjs` and the I-009 DEVIATIONS file. Nothing in `Opus55/eval/` or the metric folder changed.

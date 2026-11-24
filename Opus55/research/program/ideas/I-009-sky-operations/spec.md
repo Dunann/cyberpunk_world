@@ -1,7 +1,7 @@
 ---
 id: I-009
 title: Sky operations: airships, spaceport and vertiports
-status: code-review
+status: evaluating
 score: 5.67 (review-1 only; prototype track, user priority 5 "more technology"; build with review-1 fixes 1-15)
 direction: Wild card / borrow from another field (air traffic control and airport lighting, launch photography, junk-sail design)
 family: technology: large air and space traffic with readable operations
