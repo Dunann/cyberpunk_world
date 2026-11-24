@@ -1,7 +1,8 @@
 ---
 id: I-024
 title: City light field - the light of the real windows, signs and crowns, baked once into a 3D field, lights the wet air and the dark surfaces around them
-status: in-review
+status: rejected
+score: 5.33 (review-1 5.67, review-2 5.00; mean; below 7)
 direction: Wild card / break an assumption (the lighting model: emissive surfaces light nothing)
 family: lighting representation: load-time baked 3D light field from the generator's own emitter data, used by the fog and by deferred lighting
 parent: none
