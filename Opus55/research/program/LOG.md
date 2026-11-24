@@ -26,3 +26,4 @@
 - 2026-11-24: I-014 implemented (branch idea/I-014, commit 020b679): 40 towers, 11 phrases, overlay cost within bench noise. Code review started.
 - 2026-11-24: I-016 to prototype track (5.67). Implementer started with review-1 fixes 1-12.
 - 2026-11-24: I-008 rejected (5.0): displays almost never appear in target poses; peak GPU underestimated. I-014 passed code review; eval captures pass gates (bench deferred until GPU quiet); pairwise judge running.
+- 2026-11-24: I-014 pairwise vs baseline: targets won 8/8 (B1 clear, rest slight), 0 clear losses elsewhere -> meets the adoption rule. Bench under GPU contention: I-014 avg 9.54 / p99 11.69 / max 48.9 (TAA spike 39 ms); the baseline in the same conditions failed too (p99 20.56). Contention confirmed; the formal bench gate will rerun on a quiet GPU. Result reviewer started.
