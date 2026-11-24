@@ -1,0 +1,100 @@
+[
+ {
+  "id": "H1",
+  "name": "yuzhong-north-aerial",
+  "pos": [
+   -1100,
+   300,
+   -1350
+  ],
+  "rel": false,
+  "target": [
+   -800,
+   60,
+   -300
+  ],
+  "t": 100
+ },
+ {
+  "id": "H2",
+  "name": "nanan-east-aerial",
+  "pos": [
+   1600,
+   240,
+   2150
+  ],
+  "rel": false,
+  "target": [
+   900,
+   40,
+   1300
+  ],
+  "t": 100
+ },
+ {
+  "id": "H3",
+  "name": "cbd-east-aerial",
+  "pos": [
+   4350,
+   260,
+   -1150
+  ],
+  "rel": false,
+  "target": [
+   3300,
+   140,
+   -1350
+  ],
+  "t": 100
+ },
+ {
+  "id": "H4",
+  "name": "cbd-avenue",
+  "pos": [
+   3550,
+   1.7,
+   -450
+  ],
+  "rel": true,
+  "target": [
+   3550,
+   60,
+   -1100
+  ],
+  "t": 100
+ },
+ {
+  "id": "H5",
+  "name": "yuzhong-compounds-near",
+  "pos": [
+   -472,
+   180,
+   -199
+  ],
+  "rel": true,
+  "target": [
+   -922,
+   159,
+   -199
+  ],
+  "t": 100,
+  "rule": "450 m from the compound-lot centroid, 8-way bearing farthest from every eval camera (692 m), 180 m above ground, aimed at the centroid 40 m up"
+ },
+ {
+  "id": "H6",
+  "name": "nanan-compounds-near",
+  "pos": [
+   1011,
+   180,
+   1744
+  ],
+  "rel": true,
+  "target": [
+   693,
+   63,
+   1426
+  ],
+  "t": 100,
+  "rule": "450 m from the compound-lot centroid, 8-way bearing farthest from every eval camera (1040 m), 180 m above ground, aimed at the centroid 40 m up"
+ }
+]
