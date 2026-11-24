@@ -224,7 +224,7 @@ export function trackAt(tr, s, out) {
   out.x = tr.x[i] + (tr.x[j] - tr.x[i]) * f;
   out.z = tr.z[i] + (tr.z[j] - tr.z[i]) * f;
   let hx = tr.hx[i] + (tr.hx[j] - tr.hx[i]) * f, hz = tr.hz[i] + (tr.hz[j] - tr.hz[i]) * f;
-  const L = Math.hypot(hx, hz) || 1;
+  const L = Math.sqrt(hx * hx + hz * hz) || 1; // not Math.hypot: its result is boxed when not inlined
   out.hx = hx / L; out.hz = hz / L;
   out.bank = tr.bank[i] + (tr.bank[j] - tr.bank[i]) * f;
   return out;
@@ -301,6 +301,13 @@ export function planAirships(world, traffic) {
   });
 }
 
+// Index of the track sample a ship is at, at time t (same arc length as shipState).
+export function trackIndex(ship, t) {
+  const tr = ship.track;
+  const s = ship.phase + ship.dir * SHIP_SPEED * t;
+  return Math.floor((s % tr.length + tr.length) % tr.length / tr.ds) % tr.n;
+}
+
 // Ship state at time t: position, heading frame and bank. Writes into out {x,y,z, fx,fy,fz, lx,ly,lz, ux,uy,uz}.
 const _tp = { x: 0, z: 0, hx: 0, hz: 0, bank: 0 };
 export function shipState(ship, t, out) {
@@ -316,7 +323,7 @@ export function shipState(ship, t, out) {
   const fx = hx * cp, fy = sp, fz = hz * cp;
   // left (horizontal) = up x forward
   let lx = fz, lz = -fx;
-  const ll = Math.hypot(lx, lz) || 1; lx /= ll; lz /= ll;
+  const ll = Math.sqrt(lx * lx + lz * lz) || 1; lx /= ll; lz /= ll;
   // up0 = forward x left
   const u0x = fy * lz - fz * 0, u0y = fz * lx - fx * lz, u0z = fx * 0 - fy * lx;
   const cb = Math.cos(bank), sb = Math.sin(bank);
