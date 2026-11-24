@@ -1,7 +1,8 @@
 ---
 id: I-017
 title: Lit crown swap: replace only the repeated pyramid crowns with five lit, distinctive crowns
-status: proposed
+status: rejected
+score: 5.0 (review-1 only; below the 5.5 prototype bar, and a second review could not lift a 5.0 average to 7)
 direction: from review of I-013 (Attack the weakness, user priority 1)
 family: silhouette grammar: crown replacement with exact stream isolation
 parent: I-013

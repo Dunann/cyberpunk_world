@@ -1,0 +1,140 @@
+--- a/src/buildings.js
++++ b/src/buildings.js
+@@ -17,6 +17,7 @@
+ import { WGSL_LIB, WGSL_FRAME, GBUFFER_OUT } from './common.js';
+ import { WGSL_LIGHT, GBUFFER_FORMATS, DEPTH_FORMAT } from './renderer.js';
+ import { shader } from './gpu.js';
++import { selectTowerText } from './buildings_text.js';
+ 
+ const LIGHT_BUDGET = 1450;
+ const LISTS = 6;
+@@ -58,7 +59,11 @@
+   for (const L of world.lots) if (L.type === DT.BUND && L.waterDist < 125) { const d = Math.abs(L.z + 1080); if (d < best) { best = d; clockLot = L; } }
+   genLandmarks(B, R, world);
+   genMarket(B, R, world, market);
++  const dbgS = (new URLSearchParams(location.search)).get('dbg') || '';
++  const dbgF = dbgS ? new Function('L', 'P', 'i', 'tower', 'B', 'D', 'return (' + dbgS + ');') : null;
++  B.dbgLots = [];
+   for (const L of world.lots) {
++    const p0 = B.P.count; B.mark = -1;
+     const r = rng(L.seed);
+     switch (L.type) {
+       case DT.HILLSIDE: genHillside(B, r, L); break;
+@@ -68,9 +73,24 @@
+       case DT.CBD: genCBD(B, r, L); break;
+       default: break;
+     }
++    B.dbgLots.push([p0, B.P.count, L, B.mark < 0 ? B.P.count : B.mark]);
+   }
++  const sb0 = B.P.count;
+   B.bridges = skybridges(B, rng(5150));
++  if (dbgS.includes('SKY')) for (let i = sb0; i < B.P.count; i++) B.P.set(i, 15, B.P.get(i, 15) + 1048576);
+   B.walkways = walkways(B, rng(5151));
++  if (dbgF) {
++    window.__dbgInfo = {};
++    const sel = selectTowerText(world, B.P);
++    const tp = new Set(sel.glyphs.map((g) => g.part));
++    for (const [p0, p1, L, m] of B.dbgLots) {
++      let fr = false; for (let i = p0; i < p1; i++) if (tp.has(i)) fr = true;
++      L.front = fr;
++      let hit = false;
++      for (let i = p0; i < p1; i++) if (dbgF(L, B.P, i, i >= m, B, (x, z) => Math.hypot(L.x - x, L.z - z))) { B.P.set(i, 15, B.P.get(i, 15) + 1048576); hit = true; window.__dbgInfo.parts = (window.__dbgInfo.parts || 0) + 1; if (B.P.get(i, 15) & 256) window.__dbgInfo.props = (window.__dbgInfo.props || 0) + 1; }
++      if (hit) { window.__dbgInfo.lots = (window.__dbgInfo.lots || 0) + 1; window.__dbgInfo.byD = window.__dbgInfo.byD || {}; window.__dbgInfo.byD[L.district] = (window.__dbgInfo.byD[L.district] || 0) + 1; }
++    }
++  }
+   return B;
+ }
+ 
+--- a/src/buildings_gen.js
++++ b/src/buildings_gen.js
+@@ -663,6 +663,7 @@
+   const podTop = tp.minTop;   // towers start on the lowest terrace (they pass through the higher ones)
+   lotSigns(B, R, L, tp.topAt, DT.HILLSIDE);
+   if (R() < 0.55) shopLight(B, R, L, podTop);
++  B.mark = B.P.count;
+   const t = R();
+   const maxTop = L.maxTop || 1e9;
+   const col = pick(R, PAL.res);
+@@ -686,6 +687,7 @@
+     return;
+   }
+   // residential towers
++  L.towerPath = true;
+   const long = Math.max(L.w, L.d) > 40;
+   const two = long && R() < 0.55;
+   let floors = 18 + Math.floor(Math.pow(R(), 1.15) * 38);
+@@ -766,6 +768,7 @@
+   const podTop = tp.minTop;
+   lotSigns(B, R, L, tp.topAt, DT.URBAN);
+   if (R() < 0.5) shopLight(B, R, L, podTop);
++  B.mark = B.P.count;
+   const ins = 1.5 + R() * 3;
+   const hw = L.w / 2 - ins, hd = L.d / 2 - ins;
+   const k = R();
+@@ -774,6 +777,7 @@
+   if (k < 0.5) floors = 7 + Math.floor(R() * 13);
+   else if (k < 0.75) { mat = R() < 0.5 ? MAT.OFFICE : MAT.GLASS; col = mat === MAT.GLASS ? pick(R, PAL.glass) : pick(R, PAL.office); floors = 12 + Math.floor(R() * 22); floorH = 3.8; winW = mat === MAT.GLASS ? 1.5 : 3; lit = 0.3 + R() * 0.25; flags = R() < 0.25 ? FLAG.EDGE : 0; crowns = CROWNS_CBD; if (R() < 0.4) { kind = R() < 0.5 ? 1 : 0; prm = 0.2 + R() * 0.3; } }
+   else floors = 22 + Math.floor(R() * 24) - Math.floor(dfc * 10);
++  L.urbanRes = mat === MAT.RES;
+   let h = floors * floorH;
+   if (podTop + h > maxTop) h = Math.max(maxTop - podTop, 8);
+   const tw = tower(B, R, { x: L.x, z: L.z, a: L.angle, y0: podTop, baseY: podTop, hw, hd, h, segs: R() < 0.3 ? 2 : 1, kind, prm, mat, col, floorH, winW, lit, flags, seed: R() * 999 });
+@@ -789,6 +793,7 @@
+     const podTop = podium(B, R, L, { h: 9 + R() * 6, mat: MAT.SHOP, col: pick(R, PAL.stone), floorH: 4.5, winW: 3.4, lit: 0.55 });
+     lotSigns(B, R, L, podTop, DT.BUND);
+     if (R() < 0.6) shopLight(B, R, L, podTop);
++    B.mark = B.P.count;
+     const ins = 4 + R() * 4;
+     const hw = Math.min(L.w / 2 - ins, 22), hd = Math.min(L.d / 2 - ins, 22);
+     const h = 70 + Math.pow(R(), 1.3) * 180;
+@@ -973,7 +978,9 @@
+   const podTop = L.gMax + podH;
+   B.part({ x: L.x, y0: L.gMin - 4, z: L.z, a: L.angle, hw: L.w / 2 - ins, hd: L.d / 2 - ins, h: podTop - L.gMin + 4, kind: R() < 0.4 ? 0 : 1, prm: 0.15, mat: MAT.GLASS, col: glassC, floorH: 5, winW: 2, baseY: L.gMin, param: 0.6, flags: FLAG.EDGE, seed: R() * 999, solid: true });
+   B.light(L.x + L.w / 2 - ins + 3, L.gMin + 4, L.z, 24, [0.7, 0.85, 1], 40, 1);
++  B.mark = B.P.count;
+   const towers = big && R() < 0.6 ? 2 : 1;
++  L.nTowers = towers;
+   for (let ti = 0; ti < towers; ti++) {
+     let hw, hd, x = L.x, z = L.z;
+     if (towers === 2) {
+--- a/src/buildings_wgsl.js
++++ b/src/buildings_wgsl.js
+@@ -1024,6 +1024,7 @@
+   let eL = dot(S.emis, vec3f(0.3, 0.5, 0.2));
+   S.emis = mix(S.emis, mix(S.emis, vec3f(eL), 0.25) / (1.0 + eL * 0.6), farK * 0.7);
+   S.alb = mix(S.alb, vec3f(0.06, 0.06, 0.085), farK * 0.4);
++  if ((flags & 1048576u) != 0u) { S.alb = vec3f(0.0); S.metal = 0.0; S.rough = 1.0; S.emis = vec3f(0.0, 0.5, 0.0); S.mid = 0.0; S.wet = 0.0; }
+   return gbuf(S.alb, S.rough, S.n, S.metal, S.emis, S.ao, motionVector(wp, wp), S.mid, S.wet);
+ }
+ `;
+--- a/src/post.js
++++ b/src/post.js
+@@ -190,7 +190,7 @@
+     const d = ctx.device;
+     this.device = d;
+     // Tunable look (adjustable live from the console: __ctx.renderer.post.look)
+-    this.look = { bloom: 0.085, sharpen: 0.45, vignette: 0.32, aberration: 0.0012, grain: 0.035, saturation: 1.08 };
++    this.look = { bloom: 0.0, sharpen: 0.0, vignette: 0.0, aberration: 0.0, grain: 0.0, saturation: 1.0 };
+     this.rainActive = false;
+     this.samp = d.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+     this.layout = d.createBindGroupLayout({ entries: [
+--- a/src/terrainShade.js
++++ b/src/terrainShade.js
+@@ -169,6 +169,7 @@
+ }
+ 
+ // Ground material. Uses the terrain bind group textures.
++const TDBG = (typeof location !== 'undefined' && new URLSearchParams(location.search).get('tdbg')) || '';
+ const GROUND_WGSL = /* wgsl */ `
+ fn decodeN(t: vec4f) -> vec3f {
+   let x = t.r * 2.0 - 1.0; let z = t.g * 2.0 - 1.0;
+@@ -513,6 +514,7 @@
+     emis += sky * hz * 0.9;
+     albedo *= 1.0 - hz;
+   }
++  ${TDBG ? 'if (' + TDBG + ') { return gbuf(vec3f(0.0), 1.0, n, 0.0, vec3f(0.0, 0.5, 0.0), 1.0, motionVector(p, p), 0.0, 0.0); }' : ''}
+   return gbuf(albedo, rough, n, 0.0, emis, ao, motionVector(p, p), mat, wet);
+ }
+ `;
+
+# new file src/buildings_text.js: copied unchanged from branch idea/I-014 (used only to find I-014's front-row towers)
