@@ -1,5 +1,16 @@
 # Leaderboard (eval v1)
 
+## Status: PAUSED by the user (2026-11-24)
+Current best unchanged: baseline + I-014 + I-015 + I-016 (live site up to date). Critic zones A 5.67, B 5.62, G 5.62; goal 9+.
+In flight (all checkpointed, see STATUS.md in each idea folder):
+- I-038 light pre-cull: measurement GO (lighting pass 3.95 -> 1.87 ms on six poses), light-set identity holds; needs pixel check, functional, bench.
+- I-042 near-camera car fade: built; B2 only changes (13.8%), A4/A5 identical; needs a quiet-GPU bench and code review (ghosting in the fade band).
+- I-036 CBD hero trio: built; held-out pairs ready to judge; one bridge 3 m short; bench/functional not run.
+- I-023 recessed facades: held-out 3 wins in both judge orders, shared H6 loss; fix round half done (WIP unbuilt); frame-time spikes unresolved.
+- I-035 walkways: layout done and CPU-checked; renderer module not written.
+Parked: I-041 (review queued), I-037 (blocked). Usage ~14% of the week (stop at 25%).
+
+
 **Current best:** baseline + I-014 + I-015 + I-016 (merges on main, 2026-11-24). Critic zone scores (2 critics, 2026-11-24): **A 5.67, B 5.62, G 5.62** (baseline A 5.33, B 5.34, G 5.12). Goal: 9+ everywhere. GPU 9.51-9.57 ms average.
 
 | Idea | Targets | Pairwise (target wins / clear losses elsewhere) | Gates (GPU average ms) | Decision | Zone A / B / G after |
