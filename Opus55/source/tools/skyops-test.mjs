@@ -78,10 +78,12 @@ ok('trajectory: >= 35 deg from vertical at the cloud deck, ends at the deck', ()
 });
 ok('smoke timing: opacity curve, radius cap, always a young trail', () => {
   assert.equal(L.smokeOpacity(0), 1);
-  assert.ok(Math.abs(L.smokeOpacity(120) - Math.pow(0.5, 0.7)) < 1e-9);
-  assert.equal(L.smokeOpacity(240), 0);
-  assert.equal(L.smokeRadius(0), 15);
-  assert.equal(L.smokeRadius(1000), 250);
+  assert.ok(Math.abs(L.smokeOpacity(L.SMOKE_LIFE / 2) - Math.pow(0.5, 0.7)) < 1e-9);
+  assert.equal(L.smokeOpacity(L.SMOKE_LIFE), 0);
+  assert.equal(L.smokeRadius(0), L.SMOKE_R0);
+  assert.equal(L.smokeRadius(1000), L.SMOKE_RMAX);
+  // a trail never dwarfs the city: at most 200 m wide
+  assert.ok(2 * L.SMOKE_RMAX <= 200);
   const ages = new Float64Array(2);
   for (let t = 0; t < 1000; t += 0.7) {
     const k = L.liveLaunches(t, ages);

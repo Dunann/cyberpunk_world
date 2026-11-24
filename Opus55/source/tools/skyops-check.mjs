@@ -4,6 +4,8 @@
 //        review-1 fix 2: projected hull length / trail height (px) at each pose, occlusion tested with the depth buffer
 //   node tools/skyops-check.mjs burst --cam x,y,z,yaw,pitch,t --name foo [--out dir]
 //        4 consecutive frames with the scene animating (temporal check)
+//   node tools/skyops-check.mjs beams                   searchlight rule over 600 s: share of time each ship's beam
+//        is lit, and the most beams lit at once (judge fix 2: at most one)
 //   options: --profile name (Chrome profile), --w 2560 --h 1440
 import fs from 'node:fs';
 import path from 'node:path';
@@ -62,6 +64,19 @@ if (mode === 'info') {
     const own = (s['skyops-gbuffer'] || 0) + (s['skyops-fwd'] || 0);
     console.log(`${cs}\n  total ${s.total.toFixed(2)} ms   skyops-gbuffer ${s['skyops-gbuffer'] ?? '-'}  skyops-fwd ${s['skyops-fwd'] ?? '-'}  (own ${own.toFixed(3)} ms)`);
   }
+} else if (mode === 'beams') {
+  const r = await page.evaluate(async () => {
+    const s = window.__skyops, ctx = window.__ctx;
+    const on = [0, 0, 0]; let maxOn = 0, n = 0;
+    for (let t = 0; t < 600; t += 0.5) {
+      ctx.time = t; s.update(ctx);
+      let k = 0;
+      for (let i = 0; i < 3; i++) if (s.beam[i * 8 + 3] > 0.05) { on[i]++; k++; }
+      maxOn = Math.max(maxOn, k); n++;
+    }
+    return { share: on.map((v) => +(v / n).toFixed(3)), maxOn };
+  });
+  console.log(JSON.stringify(r));
 } else if (mode === 'burst') {
   const [x, y, z, yaw, pitch, t] = opt('cam', '0,300,0,0,0,0').split(',').map(Number);
   const out = path.resolve(root, opt('out', 'out/skyops'));

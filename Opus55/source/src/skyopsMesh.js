@@ -1,8 +1,8 @@
 // Sky operations meshes: the advertising airship (about 6k triangles), the launch rocket and the spaceport.
 // Local frames: airship x = left (port), y = up, z = forward (nose at +z); rocket y = up along the body.
 // Material ids (vertex me.x), read by skyopsWgsl.js:
-//   0 hull  1 sail panel (LED)  2 batten / spar  3 gondola window band  4 dark metal (gondola, pods, masts)
-//   5 rotor disc  10 deck concrete  11 pile / mount concrete  12 tower steel  13 scorched pad  14 flood lamp face
+//   0 hull  1 sail panel (framed, LED screen inset)  2 batten / spar  3 gondola window band
+//   4 dark metal (gondola, pods, masts)  5 rotor disc  6 fin edge light (leech)  10 deck concrete  11 pile / mount concrete  12 tower steel  13 scorched pad  14 flood lamp face
 //   15 hangar / tank panels  16 deck edge lights  17 hangar door light  20 rocket white  21 rocket black band
 //   22 nozzle / engine
 
@@ -56,29 +56,42 @@ function pushTwoSided(mb, a, b, c, d, n, uvs, mat, extra) {
   mb.quad(a, b, c, d, [-n[0], -n[1], -n[2]], uvs, mat, extra);
 }
 
+// Fin f (X layout) radial direction in the hull's x-y plane, and batten i (0..4) root and tip points.
+function finDir(f) { const phi = Math.PI / 4 + f * Math.PI / 2; return [Math.sin(phi), Math.cos(phi)]; }
+function finBatten(f, i) {
+  const e = finDir(f);
+  const k = i / 4;
+  const zr = -38 - 42 * k;
+  const rr = hullRadius(zr) - 0.4;
+  const zt = -30 - 70 * Math.pow(k, 1.15);      // the leech fans aft past the tail like a junk sail
+  const span = 24 + 5 * Math.sin(k * Math.PI) - 3 * k;
+  return { root: [e[0] * rr, e[1] * rr, zr], tip: [e[0] * (rr + span), e[1] * (rr + span), zt] };
+}
+
+// Ship-local points of the outline lights (judge fix 3): a row along the spine, a row along the keel and three on
+// each fin's lit edge. Flat [x, y, z, kind] with kind 0 spine, 1 keel, 2 fin edge.
+export function shipOutlineLights() {
+  const out = [];
+  for (let z = -72; z <= 72.1; z += 18) out.push(0, hullRadius(z) + 0.5, z, 0);
+  for (const z of [-66, -48, -30, -12, 4, 44, 60, 76]) out.push(0, -hullRadius(z) - 0.5, z, 1);
+  for (let f = 0; f < 4; f++) for (const i of [0, 2, 4]) { const t = finBatten(f, i).tip; out.push(t[0], t[1], t[2], 2); }
+  return out;
+}
+
 export function airshipMesh() {
   const mb = new MeshBuilder();
   lathe(mb);
   const X = [1, 0, 0], Y = [0, 1, 0], Z = [0, 0, 1];
 
-  // junk-sail fins in X layout: 5 fanned battens with 4 LED panels between them
+  // junk-sail fins in X layout: 5 fanned battens with 4 framed panels between them
   for (let f = 0; f < 4; f++) {
-    const phi = Math.PI / 4 + f * Math.PI / 2;
-    const e = [Math.sin(phi), Math.cos(phi)]; // radial direction in x-y
+    const e = finDir(f);
     const side = norm([e[1], -e[0], 0]);       // fin plane normal
-    const P = (z, rad) => [e[0] * rad, e[1] * rad, z];
     const roots = [], tips = [];
-    for (let i = 0; i < 5; i++) {
-      const k = i / 4;
-      const zr = -38 - 42 * k;
-      const rr = hullRadius(zr) - 0.4;
-      const zt = -30 - 70 * Math.pow(k, 1.15);      // the leech fans aft past the tail like a junk sail
-      const span = 24 + 5 * Math.sin(k * Math.PI) - 3 * k;
-      roots.push(P(zr, rr)); tips.push(P(zt, rr + span));
-    }
+    for (let i = 0; i < 5; i++) { const b = finBatten(f, i); roots.push(b.root); tips.push(b.tip); }
     for (let i = 0; i < 5; i++) mb.beam(roots[i], tips[i], 0.4, 0.4, 2);
-    // outer edge (leech) and root spar
-    for (let i = 0; i < 4; i++) { mb.beam(tips[i], tips[i + 1], 0.25, 0.25, 2); }
+    // outer edge (leech): an edge-lit spar, so the fin's outline reads at a distance
+    for (let i = 0; i < 4; i++) { mb.beam(tips[i], tips[i + 1], 0.35, 0.35, 6); }
     for (let i = 0; i < 4; i++) {
       // each panel split along its length into two bagged halves (the cloth bellies out a little)
       const a0 = roots[i], b0 = roots[i + 1], a1 = tips[i], b1 = tips[i + 1];
@@ -222,5 +235,8 @@ export function spaceportMesh(site, plan) {
   for (const [ox, oz] of [[52, -50], [52, -30]]) { mb.prism(sx + ox, sz + oz, dy, dy + 16, 6, 14, 15, 0, true); }
   const redLights = [[tx, dy + H + 22.5, tz]];
   for (const y of [40, 80, 120, 160]) redLights.push([tx + w + 0.8, dy + y, tz - w - 0.8]);
-  return { mb, rocketBase: rb, floods, towerTop: [tx, dy + H, tz], redLights };
+  // white work lights on the other corners, every 30 m
+  const towerLights = [];
+  for (const y of [20, 50, 80, 110, 140]) { towerLights.push([tx - w - 0.8, dy + y, tz + w + 0.8], [tx + w + 0.8, dy + y + 15, tz + w + 0.8]); }
+  return { mb, rocketBase: rb, floods, towerTop: [tx, dy + H, tz], redLights, towerLights };
 }

@@ -10,7 +10,7 @@
 //   2. transparent pass: smoke trails (premultiplied alpha) and the plume (additive).
 //   In the shared forward pass, after the water (the `skyopsLate` entry in main.js): searchlight beams and light
 //   sprites (additive). Drawn earlier, the water's opaque plane would paint over them wherever it lies behind them.
-// Lights: 3 searchlight hit points + 1 plume light (dynamic).
+// Lights: 3 searchlight hit points (at most one lit at a time) + 1 plume light (dynamic).
 // Placement and timing rules live in skyopsLayout.js.
 
 import { VERTEX_LAYOUT, makeCamTest } from './trafficGeom.js';
@@ -19,18 +19,27 @@ import { HDR_FORMAT, DEPTH_FORMAT } from './renderer.js';
 import { shader } from './gpu.js';
 import { LANES, CIRCLES } from './air.js';
 import * as L from './skyopsLayout.js';
-import { airshipMesh, rocketMesh, spaceportMesh } from './skyopsMesh.js';
+import { airshipMesh, rocketMesh, spaceportMesh, shipOutlineLights } from './skyopsMesh.js';
 import { buildSkyAtlas } from './skyopsAtlas.js';
 import { SKY_OPAQUE_WGSL, SKY_SPRITE_WGSL, SKY_BEAM_WGSL, SKY_PLUME_WGSL, SKY_TRAIL_WGSL } from './skyopsWgsl.js';
 
 const NSHIP = 3;
 const INST_F = 32;              // floats per instance (8 vec4)
 const I_ROCKET = 3, I_PORT = 4; // instance slots
-const NSPR = 32;
+const NSPR = 144;
 const NTRAJ = 160;
 const NPUFF = 192, PUFF_DS = 9.25; // must match SKY_TRAIL_WGSL
 const SHOW_DIM_R = 1500;        // ships this close to the drone-show centre dim during the show
-const HUE = [0.52, 0.86, 0.1];  // LED palette offset per ship
+const HUE = [0.52, 0.11, 0.36]; // LED palette offset per ship: cyan, amber, green (no magenta, judge fix 3)
+// Searchlights (judge fix 2): at most one beam in the sky. Ships take turns in BEAM_SLOT s slots (fading over
+// BEAM_FADE s at each end), and the slot owner's beam shows only while it lands on lit city (on land, among
+// buildings) within BEAM_RANGE m of slant range. Each beam is aimed at the outer bank of its racetrack and sweeps it.
+const BEAM_SLOT = 40, BEAM_FADE = 2, BEAM_RANGE0 = 640, BEAM_RANGE1 = 720;
+const BANK_STEP = 20, BANK_MAX = 600;
+// outline lights (judge fix 3): colour * intensity per kind (spine, keel, fin edge)
+const OUTLINE_COL = [[7, 6.4, 5.6], [7, 4.3, 1.8], [5.6, 6.2, 7.4]];
+const OUTLINE = shipOutlineLights();
+const NOUT = OUTLINE.length / 4;
 const ROCKET_TOP = 82;
 
 // ship-local light positions (x left, y up, z forward)
@@ -38,6 +47,8 @@ const R = L.HULL_R;
 const NAV = [
   [R + 0.7, -1.0, 10], [-(R + 0.7), -1.0, 10], [0, 0, -91.8], [0, R + 1.4, 12], [0, -R - 6.2, 18], [0, -R - 5.3, 30.6], [0, R + 7.4, 50],
 ];
+
+function sstep(a, b, x) { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); }
 
 const skyops = {
   name: 'skyops',
@@ -150,6 +161,7 @@ const skyops = {
     this._navCol = new Float32Array([10, 0.5, 0.3, 0.5, 9, 2.2, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       window.__skyops = this;
+      window.__skyopsLayout = L;
       window.__skyopsMetrics = () => this._metrics(ctx);
     }
   },
@@ -244,6 +256,12 @@ const skyops = {
   _planShips(ctx) {
     const traffic = { lanes: LANES, circles: CIRCLES, corridors: ctx.world.shared.airCorridors || [] };
     this.ships = L.planAirships(ctx.world, traffic);
+    // centre of each racetrack: the beam sweeps the side away from it (the outer bank)
+    for (const sh of this.ships) {
+      let cx = 0, cz = 0;
+      for (let k = 0; k < sh.track.n; k++) { cx += sh.track.x[k]; cz += sh.track.z[k]; }
+      sh.cx = cx / sh.track.n; sh.cz = cz / sh.track.n;
+    }
     ctx.world.shared.airships = this.ships.map((s) => ({ name: s.name, alt: s.alt, lap: s.track.length }));
   },
 
@@ -284,6 +302,21 @@ const skyops = {
     return r.y < L.CLOUD_BASE;
   },
 
+  // Lit city at a point: the number of buildings (colliders taller than 6 m) in its 64 m cell and the four cells
+  // around it. Forest, water and open ground have none.
+  _buildingsNear(w, x, z) {
+    let n = 0;
+    for (let k = 0; k < 5; k++) {
+      const cs = w.collidersNear(x + (k === 1 ? 64 : k === 2 ? -64 : 0), z + (k === 3 ? 64 : k === 4 ? -64 : 0));
+      if (!cs) continue;
+      for (let m = 0; m < cs.length; m++) if (cs[m].hy > 3) n++;
+    }
+    return n;
+  },
+
+  // scale a sprite's colour (the searchlight lamp follows its beam)
+  _lampW(k, wgt) { const o = k * 8 + 4, S = this.spr; S[o] *= wgt; S[o + 1] *= wgt; S[o + 2] *= wgt; },
+
   _sprite(k, x, y, z, r, cr, cg, cb, pxMin) {
     const o = k * 8, S = this.spr;
     S[o] = x; S[o + 1] = y; S[o + 2] = z; S[o + 3] = r;
@@ -300,6 +333,9 @@ const skyops = {
 
     // ---- airships
     const st = this._st, pt = this._pt;
+    const slot = Math.floor(t / BEAM_SLOT), tau = t - slot * BEAM_SLOT;
+    const owner = ((slot % NSHIP) + NSHIP) % NSHIP;
+    const slotW = sstep(0, BEAM_FADE, tau) * (1 - sstep(BEAM_SLOT - BEAM_FADE, BEAM_SLOT, tau));
     for (let i = 0; i < NSHIP; i++) {
       const sh = this.ships[i];
       L.shipState(sh, t, st);
@@ -319,33 +355,50 @@ const skyops = {
       const beacon = 0.5 + 0.5 * Math.sin(t * 4.2 + sh.seed * 11);
       const c = this._navCol;
       c[9] = c[10] = c[11] = strobeA; c[12] = c[13] = c[14] = strobeB;
-      c[15] = 18 * beamOn; c[16] = 17 * beamOn; c[17] = 15 * beamOn;
+      c[15] = 18 * beamOn; c[16] = 17 * beamOn; c[17] = 15 * beamOn; // scaled by the beam weight below
       c[18] = 10 * beacon; c[19] = 0.4 * beacon; c[20] = 0.2 * beacon;
       const ap = this._p3;
+      let spLamp = 0;
       for (let k = 0; k < NAV.length; k++) {
         const q = NAV[k];
         const x = st.x + st.lx * q[0] + st.ux * q[1] + st.fx * q[2];
         const y = st.y + st.ly * q[0] + st.uy * q[1] + st.fy * q[2];
         const z = st.z + st.lz * q[0] + st.uz * q[1] + st.fz * q[2];
-        if (k === 5) { ap[0] = x; ap[1] = y; ap[2] = z; }
+        if (k === 5) { ap[0] = x; ap[1] = y; ap[2] = z; spLamp = sp; }
         this._sprite(sp++, x, y, z, k === 5 ? 1.2 : 0.7, c[k * 3], c[k * 3 + 1], c[k * 3 + 2], k >= 3 && k <= 4 ? 1.8 : 1.4);
       }
 
-      // searchlight: one per ship, sweeping 15-35 deg from vertical, side to side around the heading
-      const tilt = (25 + 10 * Math.sin(t * 0.11 + sh.seed * 6)) * Math.PI / 180;
-      const rel = 1.1 * Math.sin(t * 0.07 + sh.seed * 5);
+      // outline lights along the spine, the keel and the fin edges (fade to >= 1.3 px dots at a distance)
+      for (let k = 0; k < NOUT; k++) {
+        const qx = OUTLINE[k * 4], qy = OUTLINE[k * 4 + 1], qz = OUTLINE[k * 4 + 2], oc = OUTLINE_COL[OUTLINE[k * 4 + 3]];
+        this._sprite(sp++, st.x + st.lx * qx + st.ux * qy + st.fx * qz, st.y + st.ly * qx + st.uy * qy + st.fy * qz,
+          st.z + st.lz * qx + st.uz * qy + st.fz * qz, 0.8, oc[0], oc[1], oc[2], 1.3);
+      }
+
+      // searchlight: aimed at the outer bank (the side away from the track centre). March outward from the ship
+      // to the first dry ground (at most BANK_MAX m), aim 60 m inland of it, sweeping along and across the bank.
       let hx = st.fx, hz = st.fz; const hl = Math.hypot(hx, hz) || 1; hx /= hl; hz /= hl;
-      const dx = hx * Math.cos(rel) + hz * Math.sin(rel), dz = hz * Math.cos(rel) - hx * Math.sin(rel);
-      let gy = 0, Lb = 0, tx = ap[0], tz = ap[2];
-      for (let it = 0; it < 3; it++) {
-        Lb = (ap[1] - gy) / Math.cos(tilt);
-        tx = ap[0] + dx * Math.sin(tilt) * Lb; tz = ap[2] + dz * Math.sin(tilt) * Lb;
-        gy = Math.max(w.heightAt(tx, tz), 0);
+      const outer = hz * (st.x - sh.cx) - hx * (st.z - sh.cz) >= 0 ? 1 : -1; // + : the left side (hz, -hx)
+      const nx = outer * hz, nz = -outer * hx;
+      let bank = 0;
+      for (let k = 1; k * BANK_STEP <= BANK_MAX; k++) {
+        if (w.heightAt(ap[0] + nx * k * BANK_STEP, ap[2] + nz * k * BANK_STEP) > 2) { bank = k * BANK_STEP; break; }
+      }
+      const reach = (bank > 0 ? bank + 60 : 250) + 40 * Math.sin(t * 0.11 + sh.seed * 6);
+      const along = 120 * Math.sin(t * 0.07 + sh.seed * 5);
+      const tx = ap[0] + nx * reach + hx * along, tz = ap[2] + nz * reach + hz * along;
+      const gh = w.heightAt(tx, tz), gy = Math.max(gh, 0);
+      const Lb = Math.hypot(tx - ap[0], gy - ap[1], tz - ap[2]);
+      // only the slot owner's beam, and only while it lands on lit city within range
+      let bw = 0;
+      if (i === owner && slotW > 0 && beamOn > 0) {
+        bw = slotW * beamOn * sstep(1, 4, this._buildingsNear(w, tx, tz)) * sstep(1, 4, gh) * (1 - sstep(BEAM_RANGE0, BEAM_RANGE1, Lb));
       }
       const B = this.beam, bo = i * 8;
-      B[bo] = ap[0]; B[bo + 1] = ap[1] - 0.5; B[bo + 2] = ap[2]; B[bo + 3] = beamOn;
+      B[bo] = ap[0]; B[bo + 1] = ap[1] - 0.5; B[bo + 2] = ap[2]; B[bo + 3] = bw;
       B[bo + 4] = tx; B[bo + 5] = gy; B[bo + 6] = tz; B[bo + 7] = 2 + Lb * Math.tan(3.2 * Math.PI / 180);
-      if (beamOn > 0) Li.set(this.lightBase + i, tx, gy + 8, tz, 34, 170 * beamOn, 180 * beamOn, 205 * beamOn, 0);
+      this._lampW(spLamp, bw);
+      if (bw > 0.01) Li.set(this.lightBase + i, tx, gy + 8, tz, 34, 170 * bw, 180 * bw, 205 * bw, 0);
       else Li.set(this.lightBase + i, 0, -1e5, 0, 0, 0, 0, 0, 0);
     }
 
@@ -384,7 +437,7 @@ const skyops = {
       const sEnd = live ? Math.min(L.rocketS(A), this.sDeck) : 0;
       LU[k * 4] = A; LU[k * 4 + 1] = sEnd; LU[k * 4 + 2] = L.trailSeed(this.launchIdx[k]); LU[k * 4 + 3] = live ? 1 : 0;
       const rMid = L.smokeRadius(A - L.emitAge(sEnd * 0.5));
-      const lev = Math.log2(Math.max(0.8 * rMid / PUFF_DS, 1)); // target spacing 0.8 x the smoke radius
+      const lev = Math.log2(Math.max(1.2 * rMid / PUFF_DS, 1)); // target spacing 1.2 x the smoke radius (elongated puffs)
       const kf = Math.floor(lev);
       LU[8 + k * 4] = PUFF_DS * Math.pow(2, kf); LU[8 + k * 4 + 1] = lev - kf;
     }
@@ -426,6 +479,12 @@ const skyops = {
     }
     const fl = this.port.floods;
     for (let k = 0; k < fl.length; k++) this._sprite(sp++, fl[k][0], fl[k][1], fl[k][2], 3.0, 24, 23, 21, 1.6);
+    // white work lights up the tower, so the lit structure shows from far away (judge fix 1: a visible source)
+    const tl = this.port.towerLights;
+    for (let k = 0; k < tl.length; k++) this._sprite(sp++, tl[k][0], tl[k][1], tl[k][2], 1.4, 16, 15.5, 14.5, 1.5);
+    // glow of the floodlit pad in the haze above it, brighter while the engines burn; shows over the ridges
+    const dome = 0.012 + 0.2 * flame + 0.15 * flash;
+    this._sprite(sp++, this.site.x, this.plan.deckY + 60, this.site.z, 170, dome, dome * 0.86, dome * 0.66, 1);
     while (sp < NSPR) this._sprite(sp++, 0, 0, 0, 1, 0, 0, 0, 1);
 
     const q = ctx.device.queue;
