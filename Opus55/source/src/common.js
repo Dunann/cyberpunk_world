@@ -108,6 +108,7 @@ struct Frame {
   camUp: vec4f,             // xyz up, w aspect
   misc: vec4f,              // x near plane, y exposure, z wind x, w wind z
   show: vec4f,              // light show: x intensity 0..1, y seconds since show start, z beat phase 0..1, w beat index
+  launch: vec4f,            // rocket launch glow on the cloud deck (skyops): x, z (m), radius (m), intensity
 };
 
 `;

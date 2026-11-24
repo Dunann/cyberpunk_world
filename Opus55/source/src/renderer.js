@@ -321,7 +321,7 @@ export class Renderer {
     this.ctx = ctx;
     const device = ctx.device;
     this.device = device;
-    this.frameData = new Float32Array(144);
+    this.frameData = new Float32Array(148);
     this.frameBuf = device.createBuffer({ size: this.frameData.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.taaData = new Float32Array(4);
     this.taaBuf = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -559,6 +559,8 @@ export class Renderer {
     f[o++] = cam.near; f[o++] = ctx.env.exposure; f[o++] = ctx.env.windX; f[o++] = ctx.env.windZ;
     const s = ctx.show;
     f[o++] = s.intensity; f[o++] = s.time; f[o++] = s.beatPhase; f[o++] = s.beat;
+    const lg = ctx.env.launch; // skyops launch glow (x, z, radius, intensity)
+    f[o++] = lg ? lg[0] : 0; f[o++] = lg ? lg[1] : 0; f[o++] = lg ? lg[2] : 1; f[o++] = lg ? lg[3] : 0;
     this.device.queue.writeBuffer(this.frameBuf, 0, f);
   }
 

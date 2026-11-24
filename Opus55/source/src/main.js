@@ -17,6 +17,7 @@ import bridges from './bridges.js';
 import vegetation from './vegetation.js';
 import signs from './signs.js';
 import traffic from './traffic.js';
+import skyops from './skyops.js';
 import lightshow from './lightshow.js';
 import rain from './rain.js';
 import audio from './audio.js';
@@ -65,7 +66,7 @@ async function main() {
   ctx.renderer = renderer;
 
   const disabled = (params.get('disable') || '').split(',');
-  const modules = [sky, fog, terrain, garden, buildings, water, bridges, vegetation, signs, traffic, lightshow, rain, audio].filter((m) => !disabled.includes(m.name));
+  const modules = [sky, fog, terrain, garden, buildings, skyops, water, bridges, vegetation, signs, traffic, lightshow, rain, audio].filter((m) => !disabled.includes(m.name));
   ctx.modules = modules;
   for (const m of modules) {
     if (!m.init) continue;

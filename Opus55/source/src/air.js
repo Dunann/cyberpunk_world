@@ -9,13 +9,13 @@ import { rng } from './math.js';
 import { DISTRICTS, DT, LANDMARKS } from './world.js';
 
 // sky lanes [ax, az, bx, bz, altitude]
-const LANES = [
+export const LANES = [
   [-4500, -600, 4500, -1500, 180], [-4000, 1500, 4200, -2600, 240], [-1500, -4500, 2000, 4500, 320],
   [2500, -4500, 2800, 3500, 150], [-4500, 300, 4500, 400, 410], [500, -4500, -800, 4500, 270],
   [-3000, -3000, 4000, 2000, 450], [3800, -3800, -3500, 2500, 205], [-4500, -1800, 4500, -200, 130],
 ];
 // holding circles [cx, cz, r, altitude, user]
-const CIRCLES = [
+export const CIRCLES = [
   [3300, -1250, 520, 300, 'taxi'], [-700, -150, 650, 230, 'taxi'], [650, 1300, 500, 260, 'taxi'], [1700, -1000, 380, 340, 'taxi'],
   [-700, -300, 260, 140, 'police'], [1000, -1200, 200, 130, 'police'], [3200, -1100, 300, 160, 'police'], [700, 1400, 240, 135, 'police'],
   [-2900, -250, 280, 150, 'police'], [900, -2750, 220, 140, 'police'],
@@ -489,7 +489,9 @@ export class Air {
     for (let i = 0; i < AIRLINERS.length; i++) other.push([airBase + i, 1, rnd() * paths[airBase + i][6], 230, 3, 0, 0, rnd()]);
     // CBD corridors: air taxis and beacon drones threading between the supertalls at 150-350 m
     const cbdBase = paths.length;
-    for (const L of cbdCorridors(ctx.world, rnd)) paths.push([L[0], L[1], L[2], L[3], L[4], 0, Math.hypot(L[2] - L[0], L[3] - L[1]), 0]);
+    const corridors = cbdCorridors(ctx.world, rnd);
+    ctx.world.shared.airCorridors = corridors; // read by skyops (airship altitude clearance)
+    for (const L of corridors) paths.push([L[0], L[1], L[2], L[3], L[4], 0, Math.hypot(L[2] - L[0], L[3] - L[1]), 0]);
     const nCbd = paths.length - cbdBase;
     if (nCbd > 0) {
       for (let i = 0; i < [24, 44, 64][q]; i++) {
