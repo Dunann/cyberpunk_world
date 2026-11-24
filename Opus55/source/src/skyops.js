@@ -302,14 +302,14 @@ const skyops = {
     return r.y < L.CLOUD_BASE;
   },
 
-  // Lit city at a point: the number of buildings (colliders taller than 6 m) in its 64 m cell and the four cells
-  // around it. Forest, water and open ground have none.
+  // Lit city at a point: the number of buildings (colliders taller than 6 m and under 80 m across, so not bridge
+  // decks or the spaceport) in its 64 m cell and the four cells around it. Forest, water and open ground have none.
   _buildingsNear(w, x, z) {
     let n = 0;
     for (let k = 0; k < 5; k++) {
       const cs = w.collidersNear(x + (k === 1 ? 64 : k === 2 ? -64 : 0), z + (k === 3 ? 64 : k === 4 ? -64 : 0));
       if (!cs) continue;
-      for (let m = 0; m < cs.length; m++) if (cs[m].hy > 3) n++;
+      for (let m = 0; m < cs.length; m++) { const c = cs[m]; if (c.hy > 3 && c.hx < 40 && c.hz < 40) n++; }
     }
     return n;
   },
@@ -392,7 +392,7 @@ const skyops = {
       // only the slot owner's beam, and only while it lands on lit city within range
       let bw = 0;
       if (i === owner && slotW > 0 && beamOn > 0) {
-        bw = slotW * beamOn * sstep(1, 4, this._buildingsNear(w, tx, tz)) * sstep(1, 4, gh) * (1 - sstep(BEAM_RANGE0, BEAM_RANGE1, Lb));
+        bw = slotW * beamOn * sstep(2, 5, this._buildingsNear(w, tx, tz)) * sstep(1, 4, gh) * (1 - sstep(BEAM_RANGE0, BEAM_RANGE1, Lb));
       }
       const B = this.beam, bo = i * 8;
       B[bo] = ap[0]; B[bo + 1] = ap[1] - 0.5; B[bo + 2] = ap[2]; B[bo + 3] = bw;
